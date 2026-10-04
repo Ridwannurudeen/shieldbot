@@ -296,7 +296,6 @@ ROBINHOOD_LOOKUPS = {
     "v2-factory": (eth_call_to(calldata_of("getPair(address,address)")), {}),
     "doppler-hook": (eth_call_to(calldata_of("getState(address)")), {}),
     "pool-manager": (eth_call_to(calldata_of("extsload(bytes32)")), {}),
-    "source-header": (lambda method, params: method == "eth_getBlockByNumber", {}),
     "pair-reserves": (
         eth_call_to(calldata_of("getReserves()")),
         {"pair": "0x" + "3c" * 20, "reserves": (10**20, 10**27)},

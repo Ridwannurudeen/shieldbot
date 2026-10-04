@@ -27,7 +27,6 @@ from tests.test_robinhood_simulation import (
     load,
     pool_state_slot,
     rpc_for,
-    simulation_requests,
     selector,
 )
 
@@ -136,13 +135,12 @@ async def test_direct_usdg_lookup_returns_deepest_active_pool_first():
     simulator = RobinhoodSimulator("https://rpc.invalid")
     simulator._request = rpc
 
-    amount, pools, notes, source_block = await simulator._discover(None, token)
+    amount, pools, notes = await simulator._discover(None, token)
 
     assert amount == 10**21
     assert pools[0] == Pool("v4-usdg", USDG, key=keys[1])
     assert [pool.key for pool in pools] == [keys[1], keys[2], keys[0]]
     assert "2 more pools not simulated (cap of 3 pools)" in notes
-    assert source_block == 65_540_000
     assert not any("unsupported route" in note for note in notes)
 
 
@@ -224,29 +222,3 @@ async def test_direct_lookup_routes_nvda_through_the_live_hookless_usdg_pool():
     assert methods.count("eth_simulateV1") == 1
     assert "eth_getLogs" not in methods
     assert not rpc.simulations
-
-
-@pytest.mark.asyncio
-async def test_nvda_header_rides_in_discovery_and_simulation_is_pinned():
-    fixture = load("v4_hookless_usdg_nvda")
-    head = fixture["block"]
-    rpc = rpc_for(
-        fixture,
-        pool_slots=storage_values(tuple(fixture["key"]), 1),
-        head=head,
-    )
-    simulator = RobinhoodSimulator("https://rpc.invalid")
-    simulator._request = rpc
-
-    with fresh_addresses(fixture):
-        await simulator.simulate(fixture["token"])
-
-    assert rpc.requests[0][-1] == ("eth_getBlockByNumber", ["latest", False])
-    assert sum(
-        method == "eth_getBlockByNumber"
-        for calls in rpc.requests
-        for method, _ in calls
-    ) == 1
-    sims = simulation_requests(rpc)
-    assert all(params[1] == hex(head) for calls in sims for _, params in calls)
-    assert len(rpc.requests) == 2

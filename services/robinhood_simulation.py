@@ -836,92 +836,59 @@ class RobinhoodSimulator:
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=RPC_TIMEOUT_SECONDS)
         ) as session:
-            amount, pools, notes, source_block = await self._discover(session, token)
-            outcomes = await self._simulate_pools(
-                session, [(pool, None) for pool in pools], token, amount, source_block
-            )
-            sized_jobs = [
-                (i, pool, outcome["retry_sell_amount"])
-                for i, (pool, outcome) in enumerate(zip(pools, outcomes))
-                if outcome["retry_sell_amount"]
-            ]
-            sized_outcomes = await self._simulate_pools(
-                session,
-                [(pool, sell_amount) for _, pool, sell_amount in sized_jobs],
-                token,
-                amount,
-                source_block,
-            )
-            for (index, _, _), sized in zip(sized_jobs, sized_outcomes):
-                # A follow-up that could not run leaves the first attempt's buy verdict standing.
-                if sized["can_buy"] is not None:
-                    outcomes[index] = sized
-                elif sized["simulation_failed"]:
-                    outcomes[index]["simulation_failed"] = True
-                    outcomes[index]["reason"] += f"; sized follow-up: {sized['reason']}"
+            amount, pools, notes = await self._discover(session, token)
+            outcomes = []
+            for pool in pools:
+                outcome = await self._simulate_pool(session, pool, token, amount)
+                if outcome["retry_sell_amount"]:
+                    sized = await self._simulate_pool(
+                        session, pool, token, amount, outcome["retry_sell_amount"]
+                    )
+                    # A follow-up that could not run leaves the first attempt's buy verdict standing.
+                    if sized["can_buy"] is not None:
+                        outcome = sized
+                    elif sized["simulation_failed"]:
+                        outcome["simulation_failed"] = True
+                        outcome["reason"] += f"; sized follow-up: {sized['reason']}"
+                outcomes.append(outcome)
         return aggregate_outcomes(outcomes, notes)
 
-    async def _simulate_pools(
-        self, session, jobs: list, token: str, amount: int, source_block: int
-    ) -> list:
-        outcomes = [None] * len(jobs)
-        batched_jobs = []
-        for index, (pool, sell_amount) in enumerate(jobs):
-            buyer, receiver = _fresh_address(), _fresh_address()
-            try:
-                request = build_simulation_request(
-                    pool, token, amount, buyer, receiver, sell_amount
-                )
-            except EncodingError as e:
-                outcomes[index] = _outcome(
-                    pool,
-                    f"Simulation request could not be encoded ({type(e).__name__})",
-                    simulation_failed=True,
-                )
-                continue
-            batched_jobs.append((index, pool, sell_amount, buyer, request))
-
-        if not batched_jobs:
-            return outcomes
-
+    async def _simulate_pool(
+        self, session, pool: Pool, token: str, amount: int, sell_amount: Optional[int] = None
+    ) -> dict:
+        buyer, receiver = _fresh_address(), _fresh_address()
         try:
-            rows = await self._request(
-                session,
-                [
-                    ("eth_simulateV1", [request, hex(source_block)])
-                    for _, _, _, _, request in batched_jobs
-                ],
+            request = build_simulation_request(pool, token, amount, buyer, receiver, sell_amount)
+        except EncodingError as e:
+            return _outcome(
+                pool, f"Simulation request could not be encoded ({type(e).__name__})", simulation_failed=True
             )
-        except SimulationUnavailable as e:
-            for index, pool, _, _, _ in batched_jobs:
-                outcomes[index] = _outcome(pool, e.reason, simulation_failed=True)
-            return outcomes
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            logger.warning("Robinhood simulation request failed: %s", type(e).__name__)
-            for index, pool, _, _, _ in batched_jobs:
-                outcomes[index] = _outcome(
-                    pool,
-                    f"Simulation RPC request failed ({type(e).__name__})",
-                    simulation_failed=True,
-                )
-            return outcomes
-
-        for row, (index, pool, sell_amount, buyer, _) in zip(rows, batched_jobs):
-            error = row.get("error")
+        try:
+            headers = await self._request(session, [("eth_getBlockByNumber", ["latest", False])])
+            header = headers[0].get("result")
+            source_block = _quantity(header.get("number")) if isinstance(header, dict) else None
+            if source_block is None:
+                raise SimulationUnavailable("Simulation source block header unavailable")
+            rows = await self._request(session, [("eth_simulateV1", [request, hex(source_block)])])
+            error = rows[0].get("error")
             if error is not None:
                 code = error.get("code") if isinstance(error, dict) else None
                 if code == -32601 or "does not exist" in str(error).lower():
-                    reason = "eth_simulateV1 unsupported by the RPC"
-                else:
-                    reason = f"eth_simulateV1 failed (JSON-RPC error {code})"
-                outcomes[index] = _outcome(pool, reason, simulation_failed=True)
-                continue
+                    raise SimulationUnavailable("eth_simulateV1 unsupported by the RPC")
+                raise SimulationUnavailable(f"eth_simulateV1 failed (JSON-RPC error {code})")
             outcome = evaluate_simulation(
-                pool, token, amount, buyer, row.get("result"), sell_amount
+                pool, token, amount, buyer, rows[0].get("result"), sell_amount
             )
+            # eth_simulateV1 returns synthetic blocks after the real source header.
             outcome["block"] = source_block
-            outcomes[index] = outcome
-        return outcomes
+            return outcome
+        except SimulationUnavailable as e:
+            return _outcome(pool, e.reason, simulation_failed=True)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.warning("Robinhood simulation request failed: %s", type(e).__name__)
+            return _outcome(
+                pool, f"Simulation RPC request failed ({type(e).__name__})", simulation_failed=True
+            )
 
     async def _request(self, session, calls: list) -> list:
         """POST one JSON-RPC request or batch. A row the node answered with an error of its own (a timeout
@@ -1054,7 +1021,6 @@ class RobinhoodSimulator:
                     ],
                 ),
                 *usdg_calls,
-                ("eth_getBlockByNumber", ["latest", False]),
             ],
         )
         lookup_rows = rows
@@ -1065,16 +1031,10 @@ class RobinhoodSimulator:
             for row, lookup in zip(rows[1:], ("V2 pair", "Doppler pool", "LiquidityLauncher pool"))
         )
         if supply is None or len(supply) != 32:
-            return 0, [], ["totalSupply() unavailable; cannot size a buy"], None
+            return 0, [], ["totalSupply() unavailable; cannot size a buy"]
         amount = int.from_bytes(supply, "big") // SUPPLY_FRACTION
         if amount == 0:
-            return 0, [], ["Token supply too small to size a buy"], None
-        header = lookup_rows[-1].get("result")
-        source_block = _quantity(header.get("number")) if isinstance(header, dict) else None
-        if source_block is None:
-            raise SimulationUnavailable(
-                f"Simulation source block header unavailable ({_node_error(lookup_rows[-1])})"
-            )
+            return 0, [], ["Token supply too small to size a buy"]
         pools, notes = [], []
         pool_depths = {}
 
@@ -1151,7 +1111,7 @@ class RobinhoodSimulator:
                 f"{skipped} more {'pool' if skipped == 1 else 'pools'} not simulated "
                 f"(cap of {MAX_POOLS} pools)"
             )
-        return amount, pools[:MAX_POOLS], notes, source_block
+        return amount, pools[:MAX_POOLS], notes
 
     async def _scan_initialize_logs(self, session, token: str, notes: list) -> list:
         rows = await self._request(session, [("eth_blockNumber", [])])

@@ -76,9 +76,9 @@ class RobinhoodAdapter(EvmAdapter):
 
         rpc = rpc_url or os.getenv('ROBINHOOD_RPC_URL') or 'https://rpc.mainnet.chain.robinhood.com'
         # The node that answers the adapter's reads (code, calls, blocks, transactions). The
-        # simulator's discovery, eth_simulateV1 and eth_getLogs stay on the full node: a public read
-        # node can refuse log queries, while the official endpoint's per-request latency makes the
-        # simulator's batched discovery and pool simulations important.
+        # simulator's eth_simulateV1 and eth_getLogs stay on the full node: a public read node can
+        # refuse log queries, while the official endpoint answers each read in 0.2 s or 1.2-1.9 s and
+        # a scan makes eleven to fifteen of them in a row.
         read = read_rpc_url or os.getenv('ROBINHOOD_READ_RPC_URL') or rpc
 
         super().__init__(

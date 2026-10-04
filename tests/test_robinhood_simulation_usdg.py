@@ -135,10 +135,9 @@ async def test_doppler_usdg_numeraire_is_a_supported_pool():
     rpc = FakeRpc(TOKEN, 10**27, state=doppler_state(KEY, USDG, status=2))
     simulator = RobinhoodSimulator("https://rpc.invalid")
     simulator._request = rpc
-    amount, pools, notes, source_block = await simulator._discover(None, TOKEN)
+    amount, pools, notes = await simulator._discover(None, TOKEN)
     assert amount == AMOUNT
     assert pools == [POOL]
-    assert source_block == 65_540_000
     assert not any("unsupported route" in note for note in notes)
 
 
