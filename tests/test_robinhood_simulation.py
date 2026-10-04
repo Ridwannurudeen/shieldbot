@@ -1398,6 +1398,11 @@ async def test_every_found_pool_is_simulated_and_a_trap_pool_wins():
         result = await simulator.simulate(token)
     methods = [method for calls in rpc.requests for method, _ in calls]
     assert methods.count("eth_simulateV1") == 2
+    sim_batches = [calls for calls in rpc.requests if calls[0][0] == "eth_simulateV1"]
+    assert len(sim_batches) == 1
+    assert [method for method, _ in sim_batches[0]] == ["eth_simulateV1"] * 2
+    # Discovery, V2 reserves lookup, and the combined two-pool simulation make three POSTs.
+    assert len(rpc.requests) == 3
     assert "eth_getLogs" not in methods
     assert result["is_honeypot"] is True
     assert result["can_sell"] is False
@@ -1449,6 +1454,11 @@ async def test_simulated_pools_are_capped():
     assert MAX_POOLS == 3
     methods = [method for calls in rpc.requests for method, _ in calls]
     assert methods.count("eth_simulateV1") == MAX_POOLS
+    sim_batches = [calls for calls in rpc.requests if calls[0][0] == "eth_simulateV1"]
+    assert len(sim_batches) == 1
+    assert [method for method, _ in sim_batches[0]] == ["eth_simulateV1"] * MAX_POOLS
+    # Discovery, block-number lookup, and log scan are separate; all three pool simulations share one POST.
+    assert len(rpc.requests) == 4
     assert rpc.simulations == []
     assert "1 more pool not simulated (cap of 3 pools)" in result["reason"]
     assert result["reason"].count("not simulated") == 1
@@ -1519,6 +1529,188 @@ def sized_sell(fixture, delivered):
 
 def simulation_requests(rpc):
     return [calls for calls in rpc.requests if calls[0][0] == "eth_simulateV1"]
+
+
+def capped_native_setup(fixture, simulations=()):
+    token = fixture["token"]
+    head = 65_540_000
+    tiers = ((100, 1), (500, 10), (2500, 25), (3000, 60))
+    pools = [
+        Pool("v4-native", ZERO, key=(ZERO, token, fee, spacing, ZERO))
+        for fee, spacing in tiers[:MAX_POOLS]
+    ]
+    logs = [
+        initialize_log(ZERO, token, fee, spacing, ZERO, head - index)
+        for index, (fee, spacing) in enumerate(tiers)
+    ]
+    rpc = FakeRpc(
+        token,
+        fixture["amount"] * 1_000_000,
+        head=head,
+        simulations=simulations,
+        logs={(head - LOG_WINDOW_BLOCKS + 1, head): logs},
+    )
+    return rpc, pools, head
+
+
+def native_response_for_pool(fixture, pool):
+    """Retarget the recorded native-pool swap logs to another capped pool key."""
+    response = copy.deepcopy(fixture["response"])
+    old_pool_id = "0x" + keccak(
+        encode(
+            ["address", "address", "uint24", "int24", "address"],
+            fixture["key"],
+        )
+    ).hex()
+    new_pool_id = "0x" + keccak(
+        encode(
+            ["address", "address", "uint24", "int24", "address"],
+            list(pool.key),
+        )
+    ).hex()
+    for block in response["result"]:
+        for call in block.get("calls", []):
+            for log in call.get("logs", []):
+                log["topics"] = [
+                    new_pool_id if str(topic).lower() == old_pool_id.lower() else topic
+                    for topic in log.get("topics", [])
+                ]
+    return response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code,expected_reason",
+    [
+        (-32000, "eth_simulateV1 failed (JSON-RPC error -32000)"),
+        (-32601, "eth_simulateV1 unsupported by the RPC"),
+    ],
+)
+async def test_one_failing_simulation_row_leaves_other_pools_measured(code, expected_reason):
+    fixture = load("v4_native_liquidity_launcher")
+    _, pools, _ = capped_native_setup(fixture)
+    requests = [
+        [
+            build_simulation_request(
+                pool,
+                fixture["token"],
+                fixture["amount"],
+                fixture["buyer"],
+                fixture["receiver"],
+            ),
+            "latest",
+        ]
+        for pool in pools
+    ]
+    error = {"error": {"code": code, "message": "unsupported block number"}}
+    simulations = [
+        (
+            request,
+            error
+            if index == 1
+            else fixture["response"]
+            if index == 2
+            else native_response_for_pool(fixture, pools[index]),
+        )
+        for _ in range(2)
+        for index, request in enumerate(requests)
+    ]
+    rpc, _, head = capped_native_setup(fixture, simulations)
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._post = rpc
+
+    with patch(
+        "services.robinhood_simulation._fresh_address",
+        side_effect=[fixture["buyer"], fixture["receiver"]] * MAX_POOLS,
+    ), patch("services.robinhood_simulation.asyncio.sleep", new=AsyncMock()):
+        result = await simulator.simulate(fixture["token"])
+
+    batches = simulation_requests(rpc)
+    segments = result["reason"].split("; ")
+    failing = [segment for segment in segments if expected_reason in segment]
+    successful = [segment for segment in segments if "buy and sell succeeded" in segment]
+    assert result["can_sell"] is True
+    assert result["is_honeypot"] is False
+    assert result["simulation_failed"] is True
+    assert len(failing) == 1
+    assert len(successful) == 2
+    assert " at block " not in failing[0]
+    assert all(f" at block {head}" in segment for segment in successful)
+    assert len(batches) == 2
+    assert sum(len(batch) for batch in batches) == 6
+    assert rpc.simulations == []
+
+
+@pytest.mark.asyncio
+async def test_transport_failure_of_simulation_batch_marks_every_pool_unknown():
+    fixture = load("v4_native_liquidity_launcher")
+    rpc, pools, _ = capped_native_setup(fixture)
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+
+    async def post(session, calls):
+        if calls[0][0] == "eth_simulateV1":
+            rpc.requests.append(calls)
+            raise asyncio.TimeoutError
+        return await rpc(session, calls)
+
+    simulator._post = post
+    with patch(
+        "services.robinhood_simulation._fresh_address",
+        side_effect=[fixture["buyer"], fixture["receiver"]] * len(pools),
+    ):
+        result = await simulator.simulate(fixture["token"])
+
+    batches = simulation_requests(rpc)
+    assert len(batches) == 1
+    assert [method for method, _ in batches[0]] == ["eth_simulateV1"] * len(pools)
+    assert result["reason"].count("Simulation RPC request failed (TimeoutError)") == len(pools)
+    assert result["simulation_failed"] is True
+    assert "rpc_failed" not in result
+
+
+@pytest.mark.asyncio
+async def test_sized_follow_ups_for_multiple_pools_share_one_batch_in_job_order():
+    native = load("v4_native_liquidity_launcher")
+    v2 = load("v2_router02")
+    token = native["token"]
+    v2 = json.loads(json.dumps(v2).replace(v2["token"][2:], token[2:]))
+    v2["amount"] = native["amount"]
+    calls = calls_by_label(v2)
+    set_uint(calls["delivered"], native["amount"])
+    v2_swap = "0x" + keccak(text="Swap(address,uint256,uint256,uint256,uint256,address)").hex()
+    (pair_swap,) = [log for log in calls["buy"]["logs"] if log["topics"][0] == v2_swap]
+    words = [pair_swap["data"][2 + 64 * index : 2 + 64 * (index + 1)] for index in range(4)]
+    words[3] = encode(["uint256"], [native["amount"]]).hex()
+    pair_swap["data"] = "0x" + "".join(words)
+
+    delivered = native["amount"] * 88 // 100
+    first_native, first_v2 = short_delivery(native, delivered), short_delivery(v2, delivered)
+    simulations = [
+        replay(first_native),
+        replay(first_v2),
+        (replay(first_native, sell_amount=delivered)[0], native["response"]),
+        (replay(first_v2, sell_amount=delivered)[0], v2["response"]),
+    ]
+    rpc = rpc_for(
+        native,
+        pair=v2["pair"],
+        reserves=(10**20, 10**27),
+        simulations=simulations,
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+
+    with fresh_addresses(first_native, first_v2, first_native, first_v2):
+        result = await simulator.simulate(token)
+
+    batches = simulation_requests(rpc)
+    assert len(batches) == 2
+    assert [[method for method, _ in batch] for batch in batches] == [
+        ["eth_simulateV1", "eth_simulateV1"],
+        ["eth_simulateV1", "eth_simulateV1"],
+    ]
+    assert "sell not sizeable in one request" in result["reason"]
+    assert rpc.simulations == []
 
 
 @pytest.mark.parametrize("name", ["v2_router02", "v4_doppler_weth", "v4_native_liquidity_launcher"])
@@ -2105,13 +2297,13 @@ async def test_simulation_uses_pinned_source_header_instead_of_synthetic_result(
     fixture = load(name)
     source_block = int(fixture["response"]["result"][0]["number"], 16) - 1
     simulator = RobinhoodSimulator("https://rpc.invalid")
-    simulator._discover = AsyncMock(return_value=(fixture["amount"], [pool_of(fixture)], []))
+    simulator._discover = AsyncMock(
+        return_value=(fixture["amount"], [pool_of(fixture)], [], source_block)
+    )
     requests = []
 
     async def request(session, calls):
-        requests.extend(calls)
-        if calls[0][0] == "eth_getBlockByNumber":
-            return [{"result": {"number": hex(source_block)}}]
+        requests.append(calls)
         return [fixture["response"]]
 
     simulator._request = request
@@ -2121,9 +2313,9 @@ async def test_simulation_uses_pinned_source_header_instead_of_synthetic_result(
     assert {field: result[field] for field in FIELDS} == {
         field: expected[field] for field in FIELDS
     }
-    assert requests[0] == ("eth_getBlockByNumber", ["latest", False])
-    assert requests[1][0] == "eth_simulateV1"
-    assert requests[1][1][1] == hex(source_block)
+    assert len(requests) == 1
+    assert requests[0][0][0] == "eth_simulateV1"
+    assert requests[0][0][1][1] == hex(source_block)
     assert result["simulation_block"] == source_block
 
 
@@ -2145,14 +2337,24 @@ async def test_cached_simulation_preserves_measurement_start_time():
 async def test_missing_source_header_never_simulates_against_latest(header):
     fixture = load("v2_router02")
     simulator = RobinhoodSimulator("https://rpc.invalid")
-    simulator._discover = AsyncMock(return_value=(fixture["amount"], [pool_of(fixture)], []))
-    simulator._request = AsyncMock(return_value=[{"result": header}])
+    rpc = rpc_for(fixture)
+    answer = rpc.answer
+
+    def answer_with_bad_header(method, params):
+        if method == "eth_getBlockByNumber":
+            return {"result": header}
+        return answer(method, params)
+
+    rpc.answer = answer_with_bad_header
+    simulator._request = rpc
     with fresh_addresses(fixture):
         result = await simulator.simulate(fixture["token"])
     assert all(result[field] is None for field in FIELDS)
     assert result["simulation_block"] is None
     assert "source block header unavailable" in result["reason"]
-    assert simulator._request.await_count == 1
+    assert result["rpc_failed"] is True
+    assert not any(method == "eth_simulateV1" for calls in rpc.requests for method, _ in calls)
+    assert len(rpc.requests) == 1
 
 
 @pytest.mark.asyncio
