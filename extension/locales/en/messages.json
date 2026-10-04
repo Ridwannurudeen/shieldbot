@@ -18,6 +18,7 @@
   "msgSavedDash": "Settings saved!",
   "labelLanguage": "Language",
   "historyEmpty": "No scans yet. Transactions will appear here after analysis.",
+  "labelChain": "Chain",
   "labelYourWallet": "Your Wallet Address",
   "btnScanApprovals": "Scan Approvals",
   "healthScanSubtext": "ERC-20 approvals on {chain}",

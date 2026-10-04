@@ -64,12 +64,32 @@ function fmtUsd(val) {
 
 const CHAIN_NAMES = { 56: "BSC", 1: "ETH", 137: "Polygon", 42161: "Arbitrum", 8453: "Base", 10: "Optimism", 204: "opBNB", 4663: "Robinhood Chain" };
 
-// Wallet Health scans the chain chosen in the side panel's chain selector:
-// name it on the hint line.
+const HEALTH_CHAIN_ORDER = [56, 1, 8453, 42161, 137, 204, 10, 4663];
+
+// Wallet Health scans one chain at a time. The selector beside the button chooses it, the hint
+// line names what the next scan covers, and the choice is the stored value the side panel reads,
+// so the two surfaces never disagree about which chain was scanned.
 function showHealthChain(hintEl) {
   chrome.storage.local.get({ selectedChainId: 56 }, ({ selectedChainId }) => {
     const chainId = parseInt(selectedChainId) || 56;
     hintEl.textContent = t("healthScanSubtext", { chain: CHAIN_NAMES[chainId] || `Chain ${chainId}` });
+  });
+}
+
+// Fill the selector from the one chain table, show the stored chain, and persist a change.
+function initHealthChain(selectEl, hintEl) {
+  if (!selectEl) return;
+  // Integer-like keys enumerate in ascending numeric order, so the order is named here rather
+  // than taken from CHAIN_NAMES, and it matches the side panel's selector.
+  selectEl.innerHTML = HEALTH_CHAIN_ORDER
+    .map((id) => `<option value="${id}">${CHAIN_NAMES[id]}</option>`)
+    .join("");
+  chrome.storage.local.get({ selectedChainId: 56 }, ({ selectedChainId }) => {
+    selectEl.value = String(parseInt(selectedChainId) || 56);
+  });
+  selectEl.addEventListener("change", () => {
+    const chainId = parseInt(selectEl.value) || 56;
+    chrome.storage.local.set({ selectedChainId: chainId }, () => showHealthChain(hintEl));
   });
 }
 
@@ -205,6 +225,7 @@ function initCompact() {
 
   // Health tab
   showHealthChain(healthChainHint);
+  initHealthChain(document.getElementById("healthChain"), healthChainHint);
   const healthScanBtn = document.getElementById("healthScanBtn");
   const healthAddress = document.getElementById("healthAddress");
 
@@ -313,7 +334,7 @@ function renderCompactHistory(history, listEl) {
 // ============================================================
 
 async function runHealthScan(addr, ctx) {
-  // The chain chosen in the side panel's chain selector, which its Guardian tab also scans.
+  // The chain chosen beside this button, which the side panel's selector and Guardian tab share.
   const { apiUrl, selectedChainId } = await new Promise((r) =>
     chrome.storage.local.get({ apiUrl: DEFAULT_API_URL, selectedChainId: 56 }, r));
   const chainId = parseInt(selectedChainId) || 56;
@@ -476,6 +497,7 @@ function initDashboard() {
 
   // Wallet health
   showHealthChain(dashHealthChainHint);
+  initHealthChain(document.getElementById("dash-healthChain"), dashHealthChainHint);
   const whAddr    = document.getElementById("dash-healthAddr");
   const whScanBtn = document.getElementById("dash-healthScanBtn");
   const whResult  = document.getElementById("dash-healthResult");

@@ -35,7 +35,8 @@
     .field input { width: 100%; padding: 8px 10px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-size: 13px; outline: none; }
     .field input:focus { border-color: #34d399; }
 
-    #langSelect option, #dash-langSelect option { background: #1e293b; color: #f8fafc; }
+    #langSelect option, #dash-langSelect option,
+    #healthChain option, #dash-healthChain option { background: #1e293b; color: #f8fafc; }
     #langSelect option:checked, #dash-langSelect option:checked { background: #34d399; color: #0f172a; }
     #langSelect option:hover, #dash-langSelect option:hover { background: #10b981; color: #0f172a; }
 
@@ -496,6 +497,10 @@
 
   <div class="tab-content" id="tab-health" role="tabpanel" aria-labelledby="tab-health-button">
     <div class="field"><label data-i18n="labelYourWallet">Your Wallet Address</label><input type="text" id="healthAddress" placeholder="0x..."></div>
+    <div class="field">
+      <label for="healthChain" data-i18n="labelChain">Chain</label>
+      <select id="healthChain" style="width:100%;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:13px;outline:none;"></select>
+    </div>
     <button class="btn btn-save" id="healthScanBtn" data-i18n="btnScanApprovals">Scan Approvals</button>
     <div id="healthChainHint" style="font-size:11px;color:#94a3b8;text-align:center;margin-top:4px;"></div>
     <div id="healthError" style="display:none;color:#ef4444;font-size:12px;margin-top:6px;"></div>
@@ -558,6 +563,7 @@
         <div class="dk">
           <div class="dk-title" data-i18n="dashWalletHealth">Wallet Health</div>
           <input type="text" class="wh-input" id="dash-healthAddr" placeholder="0x... paste wallet address">
+          <select class="wh-input" id="dash-healthChain" aria-label="Chain"></select>
           <button class="wh-btn" id="dash-healthScanBtn">&#128269; Scan Approvals</button>
           <div class="wh-hint" id="dash-healthChainHint"></div>
           <div class="wh-error" id="dash-healthError"></div>

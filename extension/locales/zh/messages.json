@@ -18,6 +18,7 @@
   "msgSavedDash": "设置已保存！",
   "labelLanguage": "语言",
   "historyEmpty": "暂无扫描记录，交易分析后将显示在此处。",
+  "labelChain": "链",
   "labelYourWallet": "您的钱包地址",
   "btnScanApprovals": "扫描授权",
   "healthScanSubtext": "{chain} 上的 ERC-20 授权",

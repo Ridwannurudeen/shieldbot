@@ -18,6 +18,7 @@
   "msgSavedDash": "Đã lưu cài đặt!",
   "labelLanguage": "Ngôn ngữ",
   "historyEmpty": "Chưa có lần quét nào. Giao dịch sẽ xuất hiện ở đây sau khi phân tích.",
+  "labelChain": "Chuỗi",
   "labelYourWallet": "Địa chỉ ví của bạn",
   "btnScanApprovals": "Quét phê duyệt",
   "healthScanSubtext": "Phê duyệt ERC-20 trên {chain}",
