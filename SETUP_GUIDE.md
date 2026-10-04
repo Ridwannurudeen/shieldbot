@@ -1,160 +1,27 @@
-# ShieldAI Extension Setup Guide
+# ShieldAI extension setup
 
-## 📥 Installation & First-Time Setup
+The browser extension is in [`extension/`](extension/), version 3.1.0. It needs no build step, no API key and no account.
 
-### Step 1: Install the Extension
+## Load it unpacked
 
-1. Download from Chrome Web Store (or load unpacked for development)
-2. Click "Add to Chrome"
-3. Extension icon appears in your toolbar (shield icon 🛡️)
+1. Open `chrome://extensions` and turn on Developer mode.
+2. Choose Load unpacked and select the `extension/` directory of this checkout.
+3. The card reads **ShieldAI Transaction Firewall 3.1.0**. Chrome warns that it cannot verify where an unpacked extension comes from; that applies to any unpacked extension.
 
-### Step 2: Configure Your API Server
+The Chrome Web Store listing serves 3.0.1, which predates the chain-identification fix in 3.1.0. Evaluate the unpacked build.
 
-1. **Click the extension icon** in your Chrome toolbar
-2. You'll see the popup with a blue setup guide
-3. **Enter your API server URL** in the "API Endpoint" field
-   - Example: `https://api.shieldbotsecurity.online`
-   - Must be HTTPS (or localhost for development)
-4. Make sure "Enable Firewall" toggle is ON (default)
+## What you see
 
-### Step 3: Grant Permission
+- **Welcome tab.** A fresh install opens it. Its Activate Protection button asks Chrome for access to https sites, which the extension already holds from its manifest, and to `localhost` and `127.0.0.1`, which are optional and only matter for a local API server.
+- **Popup.** It says ShieldAI is ready with no setup needed: the API endpoint is pre-configured to `https://api.shieldbotsecurity.online` and stored on install and on every update unless you saved your own. The status line reads "Checking connection..." and then "Connected" once that server's `/api/health` answers. The popup also holds the firewall switch, the Balanced and Strict policy modes, the language, the scan history, an approval scan with its own chain selector, and a threat feed.
+- **Signing overlay.** On an https page that talks to an injected wallet (`window.ethereum` or EIP-6963), a transaction or signature request shows ShieldAI's verdict **before** the wallet prompt. Declining it rejects the request, so the wallet is never asked. A signature request is the cheapest thing to try, because it moves no value. The [demo page](https://shieldbotsecurity.online/try/) sends one Robinhood Chain transaction per firewall outcome; it needs a wallet extension installed alongside, connected and switched to Robinhood Chain (4663), preferably with a fresh test account. 3.1.0 has not been tested against MetaMask or Rabby.
+- **Side panel.** "Ask ShieldBot AI" in the popup opens it, with Chat, Guardian and Scanner tabs. The assistant behind Chat can answer that it is unavailable; scanning, the firewall and the guard do not use it.
 
-1. **Click "Save Settings"** button
-2. **Chrome will immediately show a permission dialog** like this:
+WalletConnect sessions and anything started inside the wallet are not checked. Switching the firewall off forwards requests to the wallet untouched, with the exceptions listed in the [extension README](extension/README.md#switching-it-off).
 
-   ```
-   ┌──────────────────────────────────────┐
-   │ "ShieldAI Transaction Firewall"      │
-   │  wants to:                           │
-   │                                      │
-   │  • Access your data on               │
-   │    api.shieldbotsecurity.online      │
-   │                                      │
-   │  [Deny]              [Allow]  ←──────┤ Click this!
-   └──────────────────────────────────────┘
-   ```
+## If it does not connect
 
-3. **Click "Allow"** - This grants permission for the extension to communicate with your API server
-4. Wait 2-3 seconds for connection test
+- Check the server answers: `curl https://api.shieldbotsecurity.online/api/health` returns `{"status":"ok","service":"shieldai-firewall","supported_chains":[...]}`.
+- A custom endpoint goes in the popup's API Endpoint field. It must be https, or http on `localhost` or `127.0.0.1`. Saving it asks Chrome for access to that host when the extension does not already have it.
 
-### Step 4: Verify Connection
-
-You should see:
-- ✅ Status indicator turns **green**
-- ✅ Text shows: "Connected (AI active)"
-- ✅ "Saved!" confirmation message appears
-
-**You're all set!** 🎉
-
----
-
-## 🚨 Troubleshooting
-
-### "Permission denied" Error
-
-**Cause:** You clicked "Deny" on the permission dialog
-
-**Fix:**
-1. Click "Save Settings" button again
-2. When Chrome shows the permission dialog, click **"Allow"** this time
-
-### "No API endpoint configured" Error
-
-**Cause:** You tried to use the extension before configuring it
-
-**Fix:**
-1. Click the extension icon in your toolbar
-2. Enter your API server URL
-3. Click "Save Settings"
-4. Click "Allow" when Chrome prompts
-
-### "Cannot reach API" Error
-
-**Possible causes:**
-- API server is offline
-- Wrong URL entered
-- Network connectivity issue
-- Firewall blocking connection
-
-**Fix:**
-1. Verify your API server is running
-2. Check the URL is correct (no typos)
-3. Test the URL in a browser: `https://your-api-url/api/health`
-4. Should return JSON: `{"status": "ok", "ai_available": true}`
-
-### Connection Timeout
-
-**Cause:** API server is slow or unreachable
-
-**Fix:**
-1. Check your internet connection
-2. Verify API server is responding: `curl https://your-api-url/api/health`
-3. Check server logs for errors
-4. Try a different network
-
----
-
-## 🔄 Changing API Server
-
-To switch to a different API server:
-
-1. Open extension popup
-2. Enter new API server URL
-3. Click "Save Settings"
-4. Click "Allow" when Chrome prompts for the new domain
-5. Wait for green "Connected" status
-
-**Note:** Each new domain requires permission approval.
-
----
-
-## 🔒 Privacy & Security
-
-### What Permissions Does This Extension Need?
-
-**Storage:**
-- Saves your API server URL and firewall on/off setting
-- Stores last 50 transaction scans locally in your browser
-- Never leaves your computer
-
-**Access to Your API Server:**
-- Required to send transaction data for security analysis
-- You choose which server to use
-- Extension only connects to the URL you configure
-
-### What Data Is Sent to the API?
-
-When analyzing a transaction, the extension sends:
-- Transaction recipient address
-- Transaction sender address (your wallet)
-- Transaction value (amount)
-- Transaction data (encoded function call)
-- Chain ID (which blockchain)
-
-**NOT sent:**
-- Private keys or seed phrases
-- Browsing history
-- Personal information
-- Passwords or credentials
-
-See full privacy policy: [PRIVACY_POLICY.md](PRIVACY_POLICY.md)
-
----
-
-## 💡 Tips for Best Experience
-
-1. **Use HTTPS API servers** - More secure and required for production
-2. **Keep firewall enabled** - Maximum protection against scams
-3. **Check scan history** - Review past transactions in History tab
-4. **Green status = protected** - If you see red status, transactions won't be analyzed
-
----
-
-## 🆘 Still Need Help?
-
-- **GitHub Issues:** https://github.com/Ridwannurudeen/shieldbot/issues
-- **Email:** support@shieldbotsecurity.online
-
----
-
-**Last Updated:** February 16, 2026
+What the extension does and does not do, in detail, is in [extension/README.md](extension/README.md). Data handling is in [PRIVACY_POLICY.md](PRIVACY_POLICY.md).

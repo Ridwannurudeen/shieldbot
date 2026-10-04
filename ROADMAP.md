@@ -171,7 +171,7 @@ ShieldBot is open source. If you want to contribute:
 
 1. Check this roadmap for unchecked items.
 2. Open an issue to discuss the approach before submitting a PR.
-3. See [SETUP_GUIDE.md](SETUP_GUIDE.md) for local development setup.
+3. See [SETUP_GUIDE.md](SETUP_GUIDE.md) to load the extension, and the [judge guide](docs/JUDGE_GUIDE.md#preparation) to set up the Python environment.
 
 ---
 

@@ -279,7 +279,7 @@ were written without a native speaker and need review by one before release:
 `healthNoApprovals`, `healthNoApprovalsDash`, `healthScanSubtext`, `healthScanning`,
 `dashDeployerBlockSub`, `step1Desc`, `scanInjectionFound`, `scanNoInjectionPatterns`, `coverageNote`,
 `dashFirewallActive`, `dashFirewallOff`, `dashCheckTxFirewall`, `dashTxFirewallSub`, `statUnknown`,
-`welcomeActiveMsg`.
+`welcomeActiveMsg`, `labelChain`.
 
 ## Tests
 
@@ -287,6 +287,7 @@ were written without a native speaker and need review by one before release:
 DOM and Chrome doubles; `tests/test_extension_signatures.py` covers signatures, sign-in messages,
 delegations, look-alike recipients, the hold, the unknown-chain rule and the phishing cache there and
 in `background.js`; `tests/test_extension_chain_resolution.py`, `tests/test_extension_manifest.py`
-and `tests/test_extension_i18n.py` cover chain binding, the manifest and the translations. They need
+and `tests/test_extension_i18n.py` cover chain binding, the manifest and the translations;
+`tests/test_extension_popup.py` covers the popup, the side panel's chain selector and the welcome page. They need
 Node.js on the PATH. None of them runs a real wallet: the release gate in `docs/store-listing.md`
 does.
