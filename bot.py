@@ -546,8 +546,8 @@ async def _scan_approvals(update: Update, address: str, chain_id: int):
             for alert in alerts[:5]:
                 response += f"⚠️ **{escape_untrusted(alert.get('title', 'Alert'))}**\n"
                 response += f"  {escape_untrusted(alert.get('description', ''))}\n"
-                if alert.get('what_you_can_do'):
-                    response += f"  💡 {escape_untrusted(alert['what_you_can_do'])}\n"
+                for hint in alert.get('what_you_can_do', []):
+                    response += f"  💡 {escape_untrusted(hint)}\n"
 
         # Revoke instructions
         revoke_txs = result.get('revoke_txs', [])
