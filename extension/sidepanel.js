@@ -28,6 +28,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   chainSelect.addEventListener("change", () => {
     chrome.storage.local.set({ selectedChainId: parseInt(chainSelect.value) || 56 });
   });
+  // The popup's wallet health writes the same key; follow it so this selector and the chain the
+  // Guardian tab reads cannot disagree while both surfaces are open.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !("selectedChainId" in changes)) return;
+    chainSelect.value = String(parseInt(changes.selectedChainId.newValue) || 56);
+  });
 
   // Load cached messages on open with validation
   const { chatMessages = [] } = await chrome.storage.local.get("chatMessages");

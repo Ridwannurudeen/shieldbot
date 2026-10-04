@@ -91,6 +91,13 @@ function initHealthChain(selectEl, hintEl) {
     const chainId = parseInt(selectEl.value) || 56;
     chrome.storage.local.set({ selectedChainId: chainId }, () => showHealthChain(hintEl));
   });
+  // The side panel writes the same key, so follow a change made there rather than show a chain
+  // this surface is no longer going to scan.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !("selectedChainId" in changes)) return;
+    selectEl.value = String(parseInt(changes.selectedChainId.newValue) || 56);
+    showHealthChain(hintEl);
+  });
 }
 
 function showMsg(el, text, isError) {

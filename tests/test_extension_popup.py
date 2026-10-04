@@ -61,7 +61,8 @@ const context = vm.createContext({
   chrome: {
     runtime: {getManifest: () => JSON.parse(fs.readFileSync('extension/manifest.json', 'utf8')),
       sendMessage() {}, getURL: path => path},
-    storage: {local: {get(defaults, cb) { cb(defaults); }, set() {}}},
+    storage: {local: {get(defaults, cb) { cb(defaults); }, set() {}},
+      onChanged: {addListener() {}}},
     permissions: {contains: async () => true},
     tabs: {create() {}},
   },
