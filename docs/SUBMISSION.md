@@ -148,14 +148,14 @@ After `27aca4d`, `main` gained **102 further first-parent commits**, authored fr
 - **September 25:** repository and documentation cleanup; the site and docs present ShieldBot as a multichain product.
 - **September 26:** mempool monitor fixes (API stalls from oversized txpool reads, evidence-only approval alerts, directional sandwich detection); a deadline on Wallet Health scans that reports the unread block range as partial coverage; the BNB Chain verifier and Base attestor writers retired; BNB Chain contract ages dated from Sourcify when Etherscan refuses.
 
-After `5ac17f1`, `main` gained **113 further first-parent commits** through `2315085`, the revision in production on 2026-10-04, authored from September 26 to October 4 and all inside the window; nine of them are merge commits. Each deployment among them is described under [live usage evidence](#live-usage-evidence--measured-september-22-2026) above:
+After `5ac17f1`, `main` gained **115 further first-parent commits** through `6d5df88`, the revision in production on 2026-10-04, authored from September 26 to October 4 and all inside the window; nine of them are merge commits. Each deployment among them is described under [live usage evidence](#live-usage-evidence--measured-september-22-2026) above:
 
 - **September 26 to 27:** launch-discovery lag reported in `/api/stats`, with operator alerts when discovery falls behind; launch and recheck verdicts stored without on-chain recording unless blocked or guard-watched; the three Robinhood Chain contracts deployed from `c9ae9c9`.
 - **September 28 to 29:** Uniswap's current routers and position managers recognised on every supported chain; ShieldBot's own sell simulation on Arbitrum One; Arbitrum One approval history read over about 35 days; the shared database connection fixed so one failed write cannot stop the rest.
 - **September 30 to October 1:** a token ShieldBot's own sell simulation did not settle stays UNKNOWN; `/api/scan` never answers SAFE for a token; the landing site redesigned, with a section on the Robinhood Chain contracts.
 - **October 2:** the Telegram bot asks which chain an unprefixed address is on, bounds its scan reads and keeps reports inside Telegram's size limit; registering an existing agent requires the key that registered it.
 - **October 3:** a dark theme for the site; the dashboard leads with the Robinhood Chain evidence; pull request #14's coverage and token-identification fixes; a simulation that could not be performed no longer scores against a token; source patterns reported only when the deployed contract can reach them.
-- **October 4:** the extension close-out and its approval-scan chain selector; the `/try/` demonstration page; one note instead of one per pool for unsimulated pools; Robinhood Chain reads moved to a faster node; official Robinhood Chain tokens judged by the checks that apply to them.
+- **October 4:** the extension close-out and its approval-scan chain selector; the `/try/` demonstration page; one note instead of one per pool for unsimulated pools; Robinhood Chain reads moved to a faster node; official Robinhood Chain tokens judged by the checks that apply to them, and the wording of the note that says so corrected.
 
 Reproduce the history boundary from the repository root:
 
@@ -167,11 +167,11 @@ git show --stat a60fc45 00b3c81 9ca9c31 04203be 3a5bc0e 98c2d4e 0a0276c 5673c7c 
 git diff --name-only 04203be 27aca4d
 git log 27aca4d..5ac17f1 --first-parent --format='%h %ad %s' --date=short
 git log 27aca4d..5ac17f1 --first-parent --merges --oneline
-git log 5ac17f1..2315085 --first-parent --format='%h %ad %s' --date=short
-git log 5ac17f1..2315085 --first-parent --merges --oneline
+git log 5ac17f1..6d5df88 --first-parent --format='%h %ad %s' --date=short
+git log 5ac17f1..6d5df88 --first-parent --merges --oneline
 ```
 
-In particular, waves 2 to 3 (`9ca9c31`) and the guard, guarded transfer and freshness chain (`04203be`) both landed inside the window. The former `chore/oh-final` work is included in `main` through the later commits above. This history and the deployment section were last brought up to date on 2026-10-04 against `main` at `2315085`. It does not establish a released extension.
+In particular, waves 2 to 3 (`9ca9c31`) and the guard, guarded transfer and freshness chain (`04203be`) both landed inside the window. The former `chore/oh-final` work is included in `main` through the later commits above. This history and the deployment section were last brought up to date on 2026-10-04 against `main` at `6d5df88`. It does not establish a released extension.
 
 ## Pre-submission review
 
