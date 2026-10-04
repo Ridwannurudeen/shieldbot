@@ -65,7 +65,7 @@ For all seven recordings, USDG funding layout, and failure-attribution regressio
 python -m pytest tests/test_robinhood_simulation.py tests/test_robinhood_simulation_usdg.py -q -p no:cacheprovider
 ```
 
-Measured on **2026-10-04** at `0f1c326`: **201 passed**. In particular, an unattributed sell revert stays unknown; only the route-specific transfer refusal, no-credit error, or that pool's own hook failure qualifies in the reverted-sell branch. The separate zero-output branch also requires payout evidence and a minimum buy cost.
+Measured on **2026-10-04** at `15af2e6`: **201 passed**. In particular, an unattributed sell revert stays unknown; only the route-specific transfer refusal, no-credit error, or that pool's own hook failure qualifies in the reverted-sell branch. The separate zero-output branch also requires payout evidence and a minimum buy cost.
 
 ## 2. See all three decisions
 

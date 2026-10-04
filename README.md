@@ -152,7 +152,7 @@ python -m pytest tests/test_robinhood_simulation.py tests/test_robinhood_simulat
 python -m pytest sdk/python/tests/ -q -p no:cacheprovider
 ```
 
-Verified on **2026-10-04** at `main` revision **`0f1c326`**: the main Python suite returned **6,550 passed**, and the two fresh-process import test files, run separately, returned **114 passed**. Commands, exclusions and dependency qualifications are in [TESTING.md](docs/TESTING.md), and earlier measurements in [SUBMISSION.md](docs/SUBMISSION.md#reproducible-verification). These counts are test results, not scan volume or detection-accuracy measurements.
+Verified on **2026-10-04** at `main` revision **`15af2e6`**: the main Python suite returned **6,550 passed**, and the two fresh-process import test files, run separately, returned **114 passed**. Commands, exclusions and dependency qualifications are in [TESTING.md](docs/TESTING.md), and earlier measurements in [SUBMISSION.md](docs/SUBMISSION.md#reproducible-verification). These counts are test results, not scan volume or detection-accuracy measurements.
 
 For dependency setup and the short copy/paste examples, follow [JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md). No wallet, private key, deployment or broadcast is needed for the offline path.
 
