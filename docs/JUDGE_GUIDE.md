@@ -1,6 +1,6 @@
 # Judge guide: inspect the evidence in ten minutes
 
-**Limits first.** This checkout does not establish released Robinhood browser protection: the shipped extension's chain-identification limitation remains, and the source fix on `main` will not ship before the deadline. Simulation covers selected routes and amounts, not every launch. USDG support is Doppler-hooked v4 only; hookless USDG is unsupported and V2 USDG pairs are not covered. There is no stock-issuer authenticity check. Unknown data can produce a user-overridable warning in human interfaces; it is not a blanket transaction block.
+**Limits first.** This checkout does not establish released Robinhood browser protection: the extension on the Chrome Web Store is 3.0.1 and keeps its chain-identification limitation. The fix is in 3.1.0 in this repository, which section 4 below loads unpacked; that build has not been through Web Store review and has not been tested against MetaMask or Rabby. Simulation covers selected routes and amounts, not every launch. USDG support is Doppler-hooked v4 only; hookless USDG is unsupported and V2 USDG pairs are not covered. There is no stock-issuer authenticity check. Unknown data can produce a user-overridable warning in human interfaces; it is not a blanket transaction block.
 
 The RPC proxy only sees requests routed through it; contract creation bypasses analysis, and raw transactions are already signed. On-chain enforcement is explicit: `ShieldBotVerdictGuard` reads the registry, and `ShieldBotGuardedTransfer` requires an allowed verdict before moving funds.
 
@@ -227,3 +227,17 @@ Hash the **served string**, not a freshly serialized `evidence` object: JSON num
 A match establishes that the designated recorder committed those bytes. It does not establish scanner accuracy, issuer authenticity or future sellability. RPC receipt inclusion is also not independent verification of parent-chain finality. `off`, `deduplicated`, `dropped`, `pending`, `sending`, `submitted`, `unconfirmed`, `failed` and `reverted` do not satisfy this check; a 404 means no stored verdict for that address.
 
 The verification block was checked locally against synthetic evidence and receipts, including mismatch cases. **On 2026-09-27 this block, run from a fresh shell with the values above, printed `MATCH: canonical evidence, chain 4663, registry, subject, verdict, evidenceHash and observed block`.** On **2026-10-02** it printed the same line again from a fresh clone of `main`. On **2026-10-03** it printed the same line again against the `fb68f80` deployment, and again after each of the day's later deployments, against `760036d`, `abe28c1`, `350da0f` and `0bd9810`, all run from the pinned environment.
+
+## 4. Run the browser extension, unpacked
+
+The published extension is 3.0.1 and predates the chain-identification fix. Version 3.1.0 lives in `extension/` in this repository and loads without a build step:
+
+1. Open `chrome://extensions` and turn on Developer mode.
+2. Choose Load unpacked and select the `extension/` directory of this checkout.
+3. The card reads **ShieldAI Transaction Firewall 3.1.0** with no Errors button. Chrome warns that it cannot verify where an unpacked extension comes from; that applies to any unpacked extension.
+
+It needs no API key and no account. Open any HTTPS page that talks to an injected wallet and ask it to sign a message or send a transaction: the firewall's decision appears **before** the wallet prompt, and declining it rejects the request so the wallet is never asked. A signature request is the cheapest thing to try, because it moves no value.
+
+What it covers, and what it does not: it hooks nine methods on a wallet injected into the page, through `window.ethereum` or EIP-6963. WalletConnect sessions and anything begun inside the wallet are not seen. Switching the firewall off in its settings forwards every request to the wallet untouched, with two exceptions the extension's README records: a document the content script cannot reach, such as a same-origin frame or `about:blank`, is never told the setting and keeps refusing, and a request made in the moment before the first settings message is still chain-bound.
+
+This build has not been through Chrome Web Store review, and it has not been exercised against real MetaMask or Rabby installations; its behaviour is covered by the repository's extension tests and by a run in Chrome against a synthetic provider. Released browser protection for Robinhood Chain is not claimed.

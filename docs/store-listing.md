@@ -41,7 +41,7 @@ Settings
 • Balanced mode shows every verdict and leaves the choice to you. On a Block Recommended warning, the button to continue must be held down for 1.5 seconds.
 • When your wallet's network cannot be read or is not supported, the only option is Block.
 • Strict mode removes the option to continue when a check fails, the verdict is Unknown or Block Recommended, or the extension cannot read the request or its typed data.
-• Switching the extension off removes the warning, so requests go to your wallet without one. Requests from frames and popups the page can script are still rejected, the kinds of request it checks are still refused when they come through the older send and sendAsync methods, and transactions are still held to your wallet's current network.
+• Switching the extension off sends every request to your wallet as the page made it, with no warning, no analysis and no chain read. A frame or popup the page can script cannot be told the setting, so requests from one are still refused.
 • English, Tiếng Việt and 中文.
 
 Privacy
