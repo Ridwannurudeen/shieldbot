@@ -219,7 +219,7 @@ class RiskEngine:
             AnalyzerResult('behavioral', WEIGHT_BEHAVIORAL, behavioral, data=ethos_data),
             AnalyzerResult('honeypot', WEIGHT_HONEYPOT, honeypot_score, data=honeypot_data),
         ]
-        composite, category_scores, coverage, coverage_reasons, covered_weight, _ = self._covered_scores(component_results)
+        composite, category_scores, coverage, coverage_reasons, not_applicable, covered_weight, _ = self._covered_scores(component_results)
         required_unknown = is_token is not False and coverage.get('honeypot', 0) < 1
         incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
         if required_unknown:
@@ -314,6 +314,7 @@ class RiskEngine:
             'critical_flags': unique_flags,
             'confidence_level': confidence,
             'category_scores': category_scores,
+            'not_applicable': not_applicable,
             'coverage': coverage,
             'coverage_reasons': coverage_reasons,
             'status': 'unknown' if incomplete else 'ok',
@@ -345,7 +346,7 @@ class RiskEngine:
         dex_data = by_name.get("market", _EMPTY_RESULT).data
         ethos_data = by_name.get("behavioral", _EMPTY_RESULT).data
 
-        composite, category_scores, coverage, coverage_reasons, covered_weight, tx_share = self._covered_scores(results)
+        composite, category_scores, coverage, coverage_reasons, not_applicable, covered_weight, tx_share = self._covered_scores(results)
         required_unknown = is_token is not False and coverage.get('honeypot', 0) < 1
         incomplete = required_unknown or covered_weight < 1 - 1e-9 or any(fraction < 1 for fraction in coverage.values())
         # A fired floor's reason leads: the extension overlay shows only the first three flags.
@@ -482,6 +483,7 @@ class RiskEngine:
             'critical_flags': unique_flags,
             'confidence_level': confidence,
             'category_scores': category_scores,
+            'not_applicable': not_applicable,
             'coverage': coverage,
             'coverage_reasons': coverage_reasons,
             'status': 'unknown' if incomplete else 'ok',
@@ -494,6 +496,7 @@ class RiskEngine:
         coverage = {}
         reasons = {}
         scores = {}
+        not_applicable = {}
         included = []
         covered_weight = 0
         for result in results:
@@ -539,6 +542,7 @@ class RiskEngine:
             # A skipped analyzer does not apply to this target (a non-token has no market and no
             # sellability): it is covered, but a zero from it would only dilute the others.
             if not result.error and data.get('skipped'):
+                not_applicable[result.name] = data.get('reason') or ''
                 scores[result.name] = 0.0
             # Known adverse evidence remains actionable even if other fields are unknown.
             elif not result.error and (fraction == 1 or result.score > 0):
@@ -553,7 +557,7 @@ class RiskEngine:
         if weight and abs(weight - 1) > 1e-9:
             composite /= weight
             tx_share /= weight
-        return composite, scores, coverage, reasons, covered_weight, tx_share
+        return composite, scores, coverage, reasons, not_applicable, covered_weight, tx_share
 
     def _determine_archetype(self, contract_data, honeypot_data, dex_data, rug_prob, is_token: Optional[bool] = True):
         # Token-specific archetypes only apply to ERC-20 tokens.

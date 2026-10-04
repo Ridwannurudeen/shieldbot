@@ -148,6 +148,7 @@ def format_full_report(
     flags = risk_output.get('critical_flags', [])
     notes = risk_output.get('notes', [])
     scores = risk_output.get('category_scores', {})
+    not_applicable = risk_output.get('not_applicable', {})
     incomplete = is_scan_incomplete(risk_output) or bool(
         honeypot_data and honeypot_data.get('simulation_failed')
     )
@@ -224,11 +225,17 @@ def format_full_report(
     # Category scores
     lines.append('*Category Breakdown:*')
     for category in ('structural', 'market', 'behavioral', 'honeypot'):
-        score = scores.get(category)
-        value = f'{score}/100' if score is not None else 'Unknown'
-        reason = coverage_reasons.get(category)
-        if reason:
-            value += f' ({escape_untrusted(reason)})'
+        if category in not_applicable:
+            value = 'Not applicable'
+            reason = not_applicable[category]
+            if reason:
+                value += f' ({escape_untrusted(reason)})'
+        else:
+            score = scores.get(category)
+            value = f'{score}/100' if score is not None else 'Unknown'
+            reason = coverage_reasons.get(category)
+            if reason:
+                value += f' ({escape_untrusted(reason)})'
         lines.append(f'  {category.title()}: {value}')
     lines.append('')
 
