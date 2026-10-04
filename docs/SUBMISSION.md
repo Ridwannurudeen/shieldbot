@@ -239,7 +239,7 @@ Re-verified on **2026-10-03** at **`0bd9810`**, measured at the deployed commit 
 
 Re-verified on **2026-10-04** at **`1216d95`**, measured at the deployed commit in the same pinned environment: the two commands together completed with **6,618 passed, 8 skipped**, with no failures, and no test was changed to reach it. The extension was also exercised in Chrome 154 against a synthetic injected wallet: a transaction was intercepted, the overlay rendered, and the request was rejected by a pointer press, by Escape and by keyboard alone with the focus ring visible, the wallet seeing only a chain-id read in each case; switching the firewall off in the popup forwarded the next request untouched in the open tab without a reload, and switching it back on restored interception.
 
-Re-verified on **2026-10-04** at **`15af2e6`**, whose code is identical to the deployed `6d5df88`'s (only `docs/JUDGE_GUIDE.md` and `docs/SUBMISSION.md` differ): the same two commands completed with **6,550 passed** and **114 passed**, with no failures.
+Re-verified on **2026-10-04** at **`15af2e6`**, whose code is identical to the deployed `6d5df88`'s (only `docs/JUDGE_GUIDE.md` and `docs/SUBMISSION.md` differ): the same two commands completed with **6,550 passed** and **114 passed**, with no failures. This run used `requirements.txt` on Python 3.11.16 with web3 6.15.1, pytest 9.0.3 and `fakeredis` installed, so the eight tests the pinned environment skips ran and passed: 6,550 + 114 = 6,664, the same total as the 6,656 passed and 8 skipped recorded above for `6d5df88`.
 
 ## Owner completion checklist: 17 items, all done
 
