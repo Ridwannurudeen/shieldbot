@@ -116,6 +116,30 @@
     setTimeout(() => document.removeEventListener("shieldai:channel-request", answer), 0);
   }
 
+  // Tell inject.js, which cannot read chrome.storage, whether the firewall is
+  // switched on: now, and again whenever the setting changes. Each message
+  // carries a revision that only rises and a proof over the revision and the
+  // setting, so a page can neither forge one nor replay an earlier "off" once
+  // the user has switched the firewall back on. Only a document with a
+  // channel is told; a request inject.js checks before the first message
+  // arrives is let through below while the firewall is off.
+  let _settingsRevision = 0;
+  function tellSettings() {
+    getSettings().then((settings) => {
+      const enabled = Boolean(settings.enabled);
+      const revision = ++_settingsRevision;
+      channelProof(`settings:${revision}`, enabled ? "on" : "off").then((proof) => {
+        window.postMessage({ type: "SHIELDAI_SETTINGS", revision, enabled, proof }, "*");
+      });
+    });
+  }
+  if (!reachable) {
+    tellSettings();
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && "enabled" in changes) tellSettings();
+    });
+  }
+
   // inject.js says so when it rejects a request without asking the user: in
   // such a document, and for a checked method sent through send or
   // sendAsync. The messages are unsigned (a page can post them too), so all

@@ -106,7 +106,66 @@ def test_dashboard_says_nothing_checked_instead_of_protected_before_any_scan():
   assert.equal(byId('dash-cls-badge').textContent, 'dashNothingChecked');
   assert(!byId('dash-cls-badge').className.includes('cls-protected'));
   assert.notEqual(String(byId('dash-gauge-num').textContent), '100');
-  assert.notEqual(byId('dash-stat-safe').textContent, '100%');
+  assert.equal(byId('dash-stat-unknown').textContent, 0);
+""")
+
+
+def test_dashboard_counts_unknown_scans_and_shows_no_safe_rate():
+    run_popup(r"""
+  const complete = {...unknownScan, status: 'ok', coverage: {structural: 1}, coverage_reasons: {}};
+  context.renderDashStats([unknownScan, complete, {...complete, classification: 'BLOCK_RECOMMENDED'}]);
+  assert.equal(byId('dash-stat-total').textContent, 3);
+  assert.equal(byId('dash-stat-blocked').textContent, 1);
+  assert.equal(byId('dash-stat-unknown').textContent, 1);
+  assert(!nodes.has('dash-stat-safe'));
+""")
+    html = (EXTENSION / "popup.html").read_text(encoding="utf-8")
+    assert "statSafeRate" not in html and "dash-stat-safe" not in html
+    for language in ("en", "vi", "zh"):
+        messages = json.loads((EXTENSION / "locales" / language / "messages.json").read_text(encoding="utf-8"))
+        assert "statSafeRate" not in messages and messages["statUnknown"].strip(), language
+
+
+def test_dashboard_says_the_firewall_is_off_when_it_is():
+    run_popup(r"""
+  const store = {enabled: false};
+  context.chrome.storage.local.get = (defaults, cb) => cb({...defaults, ...store});
+  context.chrome.storage.local.set = (value, cb) => { Object.assign(store, value); if (cb) cb(); };
+  await ready();
+  context.initDashboard();
+  context.renderDashCenter(null);
+  assert.equal(byId('dash-ctr-meta').textContent, 'dashFirewallOff');
+  assert.equal(byId('dash-protected-list').style.display, 'none');
+  // Flipping the dashboard switch changes the idle centre at once.
+  byId('dash-enabled').checked = true;
+  byId('dash-enabled').dispatch('change');
+  assert.equal(byId('dash-ctr-meta').textContent, 'dashFirewallActive');
+  assert.equal(byId('dash-protected-list').style.display, 'block');
+  byId('dash-enabled').checked = false;
+  byId('dash-enabled').dispatch('change');
+  assert.equal(byId('dash-ctr-meta').textContent, 'dashFirewallOff');
+  // With a scan on screen the centre shows that scan, and the switch leaves it alone.
+  context.renderDashCenter(unknownScan);
+  byId('dash-enabled').checked = true;
+  byId('dash-enabled').dispatch('change');
+  assert.equal(byId('dash-cls-badge').textContent, 'classUnknown');
+  assert.notEqual(byId('dash-ctr-meta').textContent, 'dashFirewallActive');
+""")
+
+
+def test_firewall_toggle_is_saved_as_soon_as_it_is_flipped():
+    run_popup(r"""
+  const saved = [];
+  context.chrome.storage.local.set = value => saved.push(value);
+  await ready();
+  context.initDashboard();
+  for (const id of ['enabled', 'dash-enabled']) {
+    byId(id).checked = false;
+    byId(id).dispatch('change');
+  }
+  // Values made inside the vm context have their own Object.prototype: compare their text.
+  assert.deepEqual(saved.filter(value => 'enabled' in value).map(value => JSON.stringify(value)),
+    ['{"enabled":false}', '{"enabled":false}']);
 """)
 
 
@@ -261,6 +320,27 @@ def test_extension_copy_claims_only_what_it_does():
     for page, key in (("popup.html", "dashDeployerBlockSub"), ("welcome.html", "step1Desc")):
         shown = next(element for element in parse(page) if element.get("data-i18n") == key)
         assert shown["text"].strip() == english[key], (page, key)
+    # The firewall checks nine request methods sent through an injected wallet, not every
+    # transaction or wallet call; WalletConnect and the wallet's own screens are outside it.
+    everything = {
+        "en": ("all transactions", "all wallet calls", "every tx", "every transaction", "monitored"),
+        "vi": ("tất cả giao dịch", "tất cả lệnh gọi", "mỗi giao dịch", "giám sát"),
+        "zh": ("所有交易", "所有钱包调用", "每笔交易", "监控所有"),
+    }
+    for language in ("en", "vi", "zh"):
+        messages = json.loads((EXTENSION / "locales" / language / "messages.json").read_text(encoding="utf-8"))
+        for key in ("dashFirewallActive", "dashCheckTxFirewall", "dashTxFirewallSub", "welcomeActiveMsg"):
+            assert not any(phrase in messages[key].lower() for phrase in everything[language]), (language, key)
+        assert "WalletConnect" in messages["coverageNote"], language
+    for key in ("eth_sendTransaction", "wallet_sendCalls", "personal_sign", "eth_sign", "eth_signTypedData"):
+        assert key in english["dashCheckTxFirewall"], key
+    notes = [element for element in parse("popup.html") if element.get("data-i18n") == "coverageNote"]
+    assert len(notes) == 2 and all(note["text"].strip() == english["coverageNote"] for note in notes)
+    shown = next(element for element in parse("popup.html") if element.get("data-i18n") == "dashFirewallActive")
+    assert shown["text"].strip() == english["dashFirewallActive"]
+    # The dashboard names what runs, not a roadmap: a planned feature is not a security layer.
+    html = (EXTENSION / "popup.html").read_text(encoding="utf-8")
+    assert "PLANNED" not in html and "Phase" not in html
 
 
 def test_popup_markup_claims_no_protection_before_a_scan():
@@ -297,11 +377,6 @@ ready().then(() => {
 """
     result = subprocess.run([node, "-e", script], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert result.returncode == 0 and "completed" in result.stdout, result.stdout + result.stderr
-
-
-def test_contract_monitoring_row_has_its_own_fallback_text():
-    row = next(element for element in parse("popup.html") if element.get("data-i18n") == "dashContractMonitor")
-    assert row["text"].strip() == "Contract Monitoring"
 
 
 def test_extension_states_the_scan_chain_count_and_no_mempool_count():

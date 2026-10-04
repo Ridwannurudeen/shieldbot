@@ -61,6 +61,15 @@
   // and not kept, so no later page script can read it. null until then.
   let _channelKey = null;
 
+  // Whether the firewall is switched on in the extension's settings, which
+  // this script cannot read itself. content.js says so over the channel (see
+  // tellSettings there), with a revision that only rises, so a page can
+  // neither forge the message nor replay an earlier "off" once the user has
+  // switched the firewall back on. On until told otherwise; in a document
+  // with no channel it stays on.
+  let firewallOn = true;
+  let settingsRevision = 0;
+
   // content.js hands over no token in a document another script of this page
   // can reach before the handover completes (see reachableByPage there), and
   // the same rule applies here: in such a document a key offered here could
@@ -240,6 +249,22 @@
     return difference === 0;
   }
 
+  // Take the firewall's on/off setting from content.js. As with a verdict,
+  // only a message the browser dispatched counts, and only with the proof
+  // content.js makes for that revision and setting.
+  addWindowListener("message", (event) => {
+    if (_channelKey === null || ownValue(event, "isTrusted") !== true) return;
+    const data = event.data;
+    if (event.source !== window || !data || data.type !== "SHIELDAI_SETTINGS") return;
+    const { revision, enabled, proof } = data;
+    if (!isSafeInteger(revision) || revision <= settingsRevision || typeof enabled !== "boolean") return;
+    withProof(`settings:${revision}`, enabled ? "on" : "off", (expected) => {
+      if (revision <= settingsRevision || !sameProof(expected, proof)) return;
+      settingsRevision = revision;
+      firewallOn = enabled;
+    });
+  });
+
   /**
    * Wrap a provider's request method to intercept transactions.
    * Uses Object.defineProperty for compatibility with MetaMask v11+
@@ -282,6 +307,12 @@
     // request that was called, applied to this provider.
     const check = function (args, forwardTo) {
       return new NativePromise((resolve, reject) => {
+        // Switched off, the firewall reads nothing: the request goes to the
+        // wallet as the page made it.
+        if (!firewallOn) {
+          resolve(forwardTo(args));
+          return;
+        }
         // The method is read once, here so that a request object that throws
         // rejects, and the wallet is handed that string rather than the page's
         // object, which could answer the wallet's own read of method with
@@ -577,6 +608,7 @@
   // that cannot be wrapped, such as a prototype itself, is rejected.
   function requestReplacement(inherited) {
     return function (args) {
+      if (!firewallOn) return callFunction(inherited, this, args);
       const forwardedTo = forwardedFor(args);
       if (forwardedTo !== undefined && forwardedTo === this) return callFunction(inherited, this, args);
       wrapProvider(this);
@@ -602,6 +634,11 @@
   // method here and another to the wallet.
   function legacyReplacement(original) {
     return function (first, second) {
+      if (!firewallOn) {
+        return arguments.length < 2
+          ? callFunction(original, this, first)
+          : callFunction(original, this, first, second);
+      }
       let payload = first;
       let refused;
       if (typeof first === "string") {

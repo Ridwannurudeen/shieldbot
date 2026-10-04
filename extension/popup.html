@@ -310,7 +310,7 @@
     }
     .ctr-chip-num { font-size: 22px; font-weight: 800; color: #f8fafc; line-height: 1; }
     .ctr-chip-num.c-danger { color: #EF4444; }
-    .ctr-chip-num.c-safe   { color: #22C55E; }
+    .ctr-chip-num.c-unknown { color: #94A3B8; }
     .ctr-chip-lbl { font-size: 8px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 3px; }
 
     /* Divider */
@@ -381,14 +381,12 @@
     .rmd-live    { background: #22C55E; box-shadow: 0 0 8px rgba(34,197,94,.5); }
     @keyframes buildPulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
     .rmd-build   { background: #FACC15; animation: buildPulse 1.6s ease-in-out infinite; }
-    .rmd-planned { background: #1e293b; border: 1px solid #334155; }
     .rm-info { flex: 1; }
     .rm-name { font-size: 12px; color: #cbd5e1; font-weight: 500; }
     .rm-sub  { font-size: 9px; color: #94a3b8; margin-top: 1px; }
     .rm-tag  { font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.05em; }
     .rmt-live    { background: rgba(34,197,94,.1);   color: #22C55E; }
     .rmt-build   { background: rgba(250,204,21,.1);  color: #FACC15; }
-    .rmt-planned { background: rgba(71,85,105,.1);   color: #94a3b8; }
 
     /* ================================================================
        RIGHT — SETTINGS
@@ -463,6 +461,7 @@
   <div class="tab-content active" id="tab-settings" role="tabpanel" aria-labelledby="tab-settings-button">
     <div style="background:#1e293b;padding:10px;border-radius:6px;margin-bottom:12px;border-left:3px solid #22c55e;">
       <div style="font-size:11px;color:#94a3b8;line-height:1.4;" data-i18n="readyBanner">ShieldAI is ready — no setup needed. Pre-configured to our hosted server.</div>
+      <div style="font-size:11px;color:#94a3b8;line-height:1.4;margin-top:6px;" data-i18n="coverageNote">Checks requests a page sends through an injected wallet (window.ethereum or EIP-6963). WalletConnect connections and actions started inside the wallet are not checked.</div>
     </div>
     <div class="field">
       <label data-i18n="labelApiEndpoint">API Endpoint</label>
@@ -594,8 +593,8 @@
               <div class="ctr-chip-lbl" data-i18n="statBlocked">Blocked</div>
             </div>
             <div class="ctr-chip">
-              <div class="ctr-chip-num c-safe" id="dash-stat-safe">&ndash;</div>
-              <div class="ctr-chip-lbl" data-i18n="statSafeRate">Safe Rate</div>
+              <div class="ctr-chip-num c-unknown" id="dash-stat-unknown">0</div>
+              <div class="ctr-chip-lbl" data-i18n="statUnknown">Unknown</div>
             </div>
           </div>
 
@@ -617,14 +616,15 @@
           </div>
 
           <!-- Scan meta -->
-          <div class="ctr-meta" id="dash-ctr-meta" data-i18n="dashFirewallActive">Firewall active · all transactions monitored</div>
+          <div class="ctr-meta" id="dash-ctr-meta" data-i18n="dashFirewallActive">Firewall active · checks transactions, signatures and batched calls from injected wallets</div>
 
           <!-- Protected checklist (default/idle) -->
           <div id="dash-protected-list" class="ctr-idle">
-            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text" data-i18n="dashCheckTxFirewall">Transaction firewall intercepting all wallet calls</span></div>
+            <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text" data-i18n="dashCheckTxFirewall">Transaction firewall checking eth_sendTransaction, eth_signTransaction, wallet_sendCalls, personal_sign, eth_sign and eth_signTypedData</span></div>
             <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text" data-i18n="dashCheckPhishing">Phishing guard scanning visited URLs</span></div>
             <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text" data-i18n="dashCheckEIP712">EIP-712 signature analysis enabled</span></div>
             <div class="ctr-check"><span class="ctr-check-icon">&#10003;</span><span class="ctr-check-text" data-i18n="dashCheckChains">Transaction checks on 8 chains</span></div>
+            <div class="ctr-check"><span class="ctr-check-icon">&ndash;</span><span class="ctr-check-text" data-i18n="coverageNote">Checks requests a page sends through an injected wallet (window.ethereum or EIP-6963). WalletConnect connections and actions started inside the wallet are not checked.</span></div>
           </div>
 
           <!-- Verdict (shown after scan) -->
@@ -643,13 +643,13 @@
           <div class="dk-title" data-i18n="dashSecurityLayers">Security Layers</div>
 
           <!-- LIVE -->
-          <div class="rm-section">
+          <div class="rm-section" style="margin-bottom:0;">
             <div class="rm-section-title">&#9679; <span data-i18n="dashLiveNow">Live Now</span></div>
             <div class="rm-item">
               <div class="rm-dot rmd-live"></div>
               <div class="rm-info">
                 <div class="rm-name" data-i18n="dashTxFirewall">Transaction Firewall</div>
-                <div class="rm-sub" data-i18n="dashTxFirewallSub">Pre-sign risk analysis on every tx</div>
+                <div class="rm-sub" data-i18n="dashTxFirewallSub">Pre-sign risk analysis on each checked request</div>
               </div>
               <span class="rm-tag rmt-live">LIVE</span>
             </div>
@@ -661,11 +661,6 @@
               </div>
               <span class="rm-tag rmt-live">LIVE</span>
             </div>
-          </div>
-
-          <!-- LIVE — Phase 3 complete -->
-          <div class="rm-section">
-            <div class="rm-section-title">&#9679; <span data-i18n="dashPhase3">Phase 3 — Live</span></div>
             <div class="rm-item">
               <div class="rm-dot rmd-live"></div>
               <div class="rm-info">
@@ -681,27 +676,6 @@
                 <div class="rm-sub" data-i18n="dashThreatFeedSub">Live deployer alerts</div>
               </div>
               <span class="rm-tag rmt-live">LIVE</span>
-            </div>
-          </div>
-
-          <!-- PHASE 4 -->
-          <div class="rm-section" style="margin-bottom:0;">
-            <div class="rm-section-title">&#9711; <span data-i18n="dashPhase4">Phase 4 — Planned</span></div>
-            <div class="rm-item">
-              <div class="rm-dot rmd-planned"></div>
-              <div class="rm-info">
-                <div class="rm-name" data-i18n="dashContractMonitor">Contract Monitoring</div>
-                <div class="rm-sub" data-i18n="dashContractMonitorSub">Post-deploy alerts on watched contracts</div>
-              </div>
-              <span class="rm-tag rmt-planned">PLANNED</span>
-            </div>
-            <div class="rm-item">
-              <div class="rm-dot rmd-planned"></div>
-              <div class="rm-info">
-                <div class="rm-name" data-i18n="dashSoftLocking">Asset Soft-Locking</div>
-                <div class="rm-sub" data-i18n="dashSoftLockingSub">Freeze assets pending review</div>
-              </div>
-              <span class="rm-tag rmt-planned">PLANNED</span>
             </div>
           </div>
         </div>

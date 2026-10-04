@@ -732,7 +732,7 @@ load('background', 'function saveToHistory');
     assert.equal(nodes.get('dash-verdict').textContent.includes('SAFE'), complete);
   } else if (surface === 'stats') {
     context.renderDashStats([scan]);
-    assert.equal(nodes.get('dash-stat-safe').textContent, complete ? '100%' : '0%');
+    assert.equal(nodes.get('dash-stat-unknown').textContent, complete ? 0 : 1);
   } else if (surface === 'content' || surface === 'content-explain') {
     await context.showAnalysisOverlay('request', scan, false, {to: '0x' + 'a'.repeat(40), chainId: 56});
     html = appended.at(-1).innerHTML;

@@ -147,21 +147,28 @@ second limit below is the case where they did not.
 
 ## Switching it off
 
-Switching the extension off in its settings removes the warning and the analysis: requests of the
-checked kinds then go to the wallet without being shown. `inject.js` still runs, and what it does
-without anyone's decision still applies: requests from frames and popups the page can script are
-rejected, transactions and batches are still bound to the wallet's chain (a mismatch or an unknown
-chain is rejected, and the chain is named in the forwarded request), a signature is rejected when
-the wallet does not say which chain it is on, requests without a string
-method are rejected, and checked methods sent through `send` or `sendAsync` are refused. A switch
-that stops the scripts altogether would need them unregistered through `chrome.scripting` (and the
-`scripting` permission); that has not been decided.
+Switching the firewall off in its settings switches `inject.js` off too: every request, including
+one through `send` or `sendAsync`, goes to the wallet as the page made it, with no warning, no
+analysis, no chain read and no `chainId` added. `inject.js` cannot read the setting itself, so
+`content.js` tells it over the channel, at document_start and again whenever the setting changes,
+in a `SHIELDAI_SETTINGS` message that carries a revision and a proof over the revision and the
+setting. The revision only rises, so a page can neither forge the message nor replay an earlier
+"off" once the user has switched the firewall back on. Two limits follow. A document with no
+channel (one the page can reach first, see above) is never told, so the rejection there holds
+whether the firewall is on or off. And the setting is read after the handover, so a request a page
+makes before the first message arrives is still checked by `inject.js`, chain binding included:
+`content.js` lets it through without a warning when the analysis is reached, and a chain mismatch
+in that window is still rejected. The switch in the popup takes effect as soon as it is flipped,
+Save or not, in every open tab, and the dashboard's idle centre says the firewall is off.
 
 ## What it does not do
 
 - A page that reaches the wallet some other way than these methods is not seen: through the
   wallet's own messaging or internal methods, or a provider reachable only through
   `window.ethereum.providers[]` or `selectedProvider` that was not also announced through EIP-6963.
+- A wallet connected through WalletConnect (or any other relay) is not seen: the page's requests go
+  to the wallet over the relay, not through `window.ethereum` or an EIP-6963 provider, so nothing is
+  checked. Nor is anything the user starts inside the wallet. The popup says so.
 - A `window.ethereum` that replaces one `inject.js` already wrapped (the one present at startup, or
   the first one set afterwards) is not wrapped on assignment. It is checked only if it is also
   announced through EIP-6963 or its `request` comes from a prototype already replaced.
@@ -238,10 +245,11 @@ that stops the scripts altogether would need them unregistered through `chrome.s
 A page can find out that the extension is installed, in these ways:
 
 - The window messages between `inject.js` and `content.js` (`SHIELDAI_TX_INTERCEPT`,
-  `SHIELDAI_TX_SHOWN`, `SHIELDAI_TX_VERDICT`, `SHIELDAI_UNCHECKABLE` and `SHIELDAI_LEGACY_REFUSED`)
-  reach every `message` listener of the page. They carry proofs, never the key, so the page can read
-  them but not make them. While a warning shows, its host element is in the page's DOM (what it
-  holds is in a closed shadow root).
+  `SHIELDAI_TX_SHOWN`, `SHIELDAI_TX_VERDICT`, `SHIELDAI_SETTINGS`, `SHIELDAI_UNCHECKABLE` and
+  `SHIELDAI_LEGACY_REFUSED`) reach every `message` listener of the page. They carry proofs, never
+  the key, so the page can read them but not make them; `SHIELDAI_SETTINGS` also tells the page
+  whether the firewall is switched on. While a warning shows, its host element is in the page's DOM
+  (what it holds is in a closed shadow root).
 - The files `manifest.json` lists under `web_accessible_resources` (`overlay.css`, `welcome.html`,
   `i18n.js`, `locales/en/messages.json`, `locales/zh/messages.json` and `locales/vi/messages.json`)
   can be fetched by any https page from `chrome-extension://<extension id>/`. The ID of a Web Store
@@ -266,7 +274,9 @@ were written without a native speaker and need review by one before release:
 `overlayHashMessageNote`, `overlayOpaqueMessage`, `overlayOpaqueMessageNote`, `overlayNotes`,
 `overlayHoldNoteUnchecked`, `overlayIncompleteCoverage`, `overlayExplainAnalyzing`,
 `healthNoApprovals`, `healthNoApprovalsDash`, `healthScanSubtext`, `healthScanning`,
-`dashDeployerBlockSub`, `step1Desc`, `scanInjectionFound`, `scanNoInjectionPatterns`.
+`dashDeployerBlockSub`, `step1Desc`, `scanInjectionFound`, `scanNoInjectionPatterns`, `coverageNote`,
+`dashFirewallActive`, `dashFirewallOff`, `dashCheckTxFirewall`, `dashTxFirewallSub`, `statUnknown`,
+`welcomeActiveMsg`.
 
 ## Tests
 

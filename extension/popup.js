@@ -171,6 +171,11 @@ function initCompact() {
     checkConnection(data.apiUrl, statusDot, statusText);
   });
 
+  // The firewall switch takes effect as soon as it is flipped, Save or not.
+  enabledToggle.addEventListener("change", () => {
+    chrome.storage.local.set({ enabled: enabledToggle.checked });
+  });
+
   saveBtn.addEventListener("click", () => {
     const apiUrl = apiUrlInput.value.trim().replace(/\/+$/, "");
     const enabled = enabledToggle.checked;
@@ -426,6 +431,12 @@ function initDashboard() {
     checkConnection(data.apiUrl, dashDot, dashText);
   });
 
+  dashEnabled.addEventListener("change", () => {
+    chrome.storage.local.set({ enabled: dashEnabled.checked }, () => {
+      if (_dashIdle) showFirewallState();
+    });
+  });
+
   // Save
   dashSaveBtn.addEventListener("click", () => {
     const apiUrl = dashApiUrl.value.trim().replace(/\/+$/, "");
@@ -555,15 +566,27 @@ function renderDashStats(history) {
   if (!Array.isArray(history)) return;
   const total   = history.length;
   const blocked = history.filter((h) => h.classification === "BLOCK_RECOMMENDED").length;
-  const safe    = history.filter((h) => !isIncompleteScan(h) && h.classification === "SAFE").length;
-  const safeRate = total > 0 ? Math.round((safe / total) * 100) + "%" : "\u2013";
+  const unknown = history.filter(isIncompleteScan).length;
 
   document.getElementById("dash-stat-total").textContent   = total;
   document.getElementById("dash-stat-blocked").textContent = blocked;
-  document.getElementById("dash-stat-safe").textContent    = safeRate;
+  document.getElementById("dash-stat-unknown").textContent = unknown;
 }
 
 // ---- Center ----
+// Whether the centre shows the idle state (nothing checked yet), whose text
+// depends on the firewall switch.
+let _dashIdle = false;
+
+// The idle centre says what the switch says: off, nothing is checked, and the
+// list of checks is not shown.
+function showFirewallState() {
+  chrome.storage.local.get({ enabled: true }, ({ enabled }) => {
+    document.getElementById("dash-ctr-meta").textContent = enabled ? t("dashFirewallActive") : t("dashFirewallOff");
+    document.getElementById("dash-protected-list").style.display = enabled ? "block" : "none";
+  });
+}
+
 function renderDashCenter(lastScan) {
   const gaugeArc      = document.getElementById("dash-gauge-arc");
   const gaugeNum      = document.getElementById("dash-gauge-num");
@@ -573,14 +596,14 @@ function renderDashCenter(lastScan) {
   const verdictWrap   = document.getElementById("dash-verdict-wrap");
   const verdictEl     = document.getElementById("dash-verdict");
 
+  _dashIdle = !lastScan;
   if (!lastScan) {
     // Nothing has been checked yet, so there is no score to show.
     setGauge(gaugeArc, gaugeNum, null);
     gaugeNum.textContent = "\u2013";
     clsBadge.textContent = t("dashNothingChecked");
     clsBadge.className   = "cls-badge cls-idle";
-    metaEl.textContent   = t("dashFirewallActive");
-    protectedList.style.display = "block";
+    showFirewallState();
     verdictWrap.style.display   = "none";
     return;
   }

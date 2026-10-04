@@ -211,8 +211,14 @@ let analyze = async () => ({error: 'API error 503: unavailable'});
 let phishing = false, phishingChecks = 0;
 let clock = 1000000;
 let fetchDelays = [];
+const settingsListeners = [];
+const changed = value => settingsListeners.forEach(fn =>
+  fn(Object.fromEntries(Object.keys(value).map(key => [key, {newValue: value[key]}])), 'local'));
 const chrome = {
-  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }, set(value) { Object.assign(storage, value); }}},
+  storage: {
+    local: {get(defaults, cb) { cb({...defaults, ...storage}); }, set(value) { Object.assign(storage, value); changed(value); }},
+    onChanged: {addListener(fn) { settingsListeners.push(fn); }},
+  },
   runtime: {
     getURL: path => 'chrome-extension://id/' + path,
     async sendMessage(message) {
@@ -1644,8 +1650,14 @@ const provider = {
 window.ethereum = provider;
 window.dispatchEvent = () => {};
 const storage = {language: 'en'};
+const settingsListeners = [];
+const changed = value => settingsListeners.forEach(fn =>
+  fn(Object.fromEntries(Object.keys(value).map(key => [key, {newValue: value[key]}])), 'local'));
 const chrome = {
-  storage: {local: {get(defaults, cb) { cb({...defaults, ...storage}); }, set(value) { Object.assign(storage, value); }}},
+  storage: {
+    local: {get(defaults, cb) { cb({...defaults, ...storage}); }, set(value) { Object.assign(storage, value); changed(value); }},
+    onChanged: {addListener(fn) { settingsListeners.push(fn); }},
+  },
   runtime: {
     getURL: path => 'chrome-extension://id/' + path,
     async sendMessage(message) {
@@ -1798,31 +1810,101 @@ def test_a_refused_send_or_send_async_call_brings_one_notice():
     )
 
 
-# Switched off in its settings, the extension shows no warning, but what inject.js does without
-# anyone's decision still applies: the frame and popup refusal, and the chain binding.
+# Switched off in its settings, the extension is not there: no warning, no analysis, no chain
+# binding and no refusal of send or sendAsync, and the page's own request object reaches the
+# wallet. inject.js learns the setting over the channel, at document_start and again when it
+# changes, so a document with no channel (one the page can reach first) keeps rejecting the
+# requests it would check.
+@pytest.mark.parametrize("when", ["at-start", "later"])
 @pytest.mark.parametrize("kind", ["top", "cross-origin-frame", *REACHABLE])
-def test_switching_the_extension_off_removes_the_warning_only(kind):
+def test_switching_the_extension_off_switches_inject_off_too(kind, when):
     run_node(
-        FRAME_HARNESS
+        FRAME_HARNESS.replace(
+            "const storage = {language: 'en'};",
+            "const storage = {language: 'en', enabled: JSON.parse(process.argv[1])[3] !== 'at-start'};",
+        )
         + r"""
 (async () => {
-  storage.enabled = false;
+  if (JSON.parse(process.argv[1])[3] === 'later') chrome.storage.local.set({enabled: false});
+  for (let i = 0; i < 3; i++) await flush();
+  // Proofs are signed off the main thread, so two messages in flight can post in either order:
+  // the highest revision is the setting that holds.
+  const settings = () => posted.filter(message => message.type === 'SHIELDAI_SETTINGS')
+    .sort((a, b) => a.revision - b.revision);
   const tx = {to: '0x' + 'a'.repeat(40)};
   if (reachable) {
+    assert.equal(settings().length, 0, 'content.js told a document without a channel');
     await assert.rejects(provider.request({method: 'eth_sendTransaction', params: [tx]}),
       {code: 4100, message: /embedded frame or popup/});
     assert.equal(sent.length, 0);
     return;
   }
-  // No overlay: the transaction goes to the wallet, still named to the analysed chain.
+  assert.equal(settings().at(-1).enabled, false);
   assert.equal(await provider.request({method: 'eth_sendTransaction', params: [tx]}), 'sent');
-  assert.equal(sent[0].params[0].chainId, '0x38');
-  assert.equal(body.children.filter(el => el.shadow).length, 0, 'a warning was shown while switched off');
-  // A transaction naming another chain is still rejected.
-  await assert.rejects(provider.request({method: 'eth_sendTransaction', params: [{...tx, chainId: '0x1'}]}), /chain/);
-  assert.equal(sent.length, 1);
+  assert.equal(sent[0].params[0], tx, 'the wallet was handed a copy rather than the page\'s request');
+  assert.equal(tx.chainId, undefined, 'the chain was written into the request while switched off');
+  assert.equal(await provider.request({method: 'eth_sendTransaction', params: [{...tx, chainId: '0x1'}]}), 'sent');
+  assert.equal(await provider.request({method: 'personal_sign', params: ['0x00', tx.to]}), 'sent');
+  assert.equal(await provider.request({method: 'wallet_sendCalls', params: [{calls: 'unreadable'}]}), 'sent');
+  assert.equal(sent.length, 4);
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 0, 'a request was analysed');
+  assert.equal(body.children.filter(el => el.shadow).length, 0, 'a warning or notice was shown while switched off');
+  // send and sendAsync reach the wallet with their own arguments, and bring no notice.
+  const calls = [];
+  const legacy = {on() {}, async request() { return '0x38'; },
+    sendAsync(payload, callback) { calls.push(payload); callback(null, 'legacy'); },
+    send(payload) { calls.push(payload); return 'legacy'; }};
+  for (const fn of windowListeners['eip6963:announceProvider']) {
+    fn(new CustomEvent('eip6963:announceProvider', {detail: {provider: legacy, info: {name: 'legacy'}}}));
+  }
+  const payload = {method: 'eth_sendTransaction', params: [tx]};
+  let answered;
+  legacy.sendAsync(payload, (error, result) => { answered = [error, result]; });
+  assert.equal(legacy.send(payload), 'legacy');
+  await flush();
+  assert.deepEqual(answered, [null, 'legacy']);
+  assert.deepEqual(calls, [payload, payload]);
+  assert.equal(calls[0], payload);
+  assert.equal(body.children.filter(el => el.shadow).length, 0, 'a notice was shown while switched off');
 """,
-        [kind, "content-first", kind in REACHABLE],
+        [kind, "content-first", kind in REACHABLE, when],
+    )
+
+
+# A page sees the signed "off" content.js posts. Once the user switches the firewall back on,
+# replaying it, or posting an "off" of its own under a later revision, changes nothing.
+def test_a_stale_off_setting_cannot_be_replayed_once_the_firewall_is_back_on():
+    run_node(
+        FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
+        + r"""
+(async () => {
+  const settings = () => posted.filter(message => message.type === 'SHIELDAI_SETTINGS')
+    .sort((a, b) => a.revision - b.revision);
+  for (let i = 0; i < 3; i++) await flush();
+  assert.deepEqual(settings().map(({revision, enabled}) => [revision, enabled]), [[1, true]]);
+  chrome.storage.local.set({enabled: false});
+  for (let i = 0; i < 3; i++) await flush();
+  const stale = settings()[1];
+  assert.deepEqual([stale.revision, stale.enabled], [2, false]);
+  assert.deepEqual(bytes(stale.proof), bytes(await proofFor(offers[0], 'settings:2:off')));
+  const tx = {to: '0x' + 'a'.repeat(40)};
+  assert.equal(await provider.request({method: 'eth_sendTransaction', params: [tx]}), 'sent');
+  assert.equal(sent.length, 1);
+  chrome.storage.local.set({enabled: true});
+  for (let i = 0; i < 3; i++) await flush();
+  assert.deepEqual([settings()[2].revision, settings()[2].enabled], [3, true]);
+  deliver(stale);
+  deliver({type: 'SHIELDAI_SETTINGS', revision: 99, enabled: false, proof: stale.proof});
+  deliver({type: 'SHIELDAI_SETTINGS', revision: 99, enabled: false, proof: offers[0]});
+  deliver({type: 'SHIELDAI_SETTINGS', revision: 99, enabled: false, proof: await proofFor(offers[0], 'settings:99:off')}, false);
+  for (let i = 0; i < 3; i++) await flush();
+  const pending = provider.request({method: 'eth_sendTransaction', params: [tx]});
+  const proceed = await proceedButton();
+  assert.equal(sent.length, 1, 'a request went to the wallet without the user');
+  proceed.dispatch('click', {isTrusted: true});
+  assert.equal(await pending, 'sent');
+  assert.equal(sent.length, 2);
+""",
     )
 
 
