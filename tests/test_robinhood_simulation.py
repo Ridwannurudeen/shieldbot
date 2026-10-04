@@ -19,6 +19,7 @@ from core.extension_formatter import format_extension_alert
 from core.risk_engine import RiskEngine
 from services.honeypot_service import HoneypotService
 from services.robinhood_simulation import (
+    HOOKLESS_V4_FEE_TICK_SPACINGS,
     LOG_WINDOW_BLOCKS,
     MAX_LOG_WINDOWS,
     MAX_POOLS,
@@ -1046,6 +1047,7 @@ class FakeRpc:
         slot0=0,
         simulations=(),
         logs=None,
+        pool_slots=None,
         head=65_540_000,
     ):
         self.token = token
@@ -1054,6 +1056,7 @@ class FakeRpc:
         self.reserves = reserves
         self.state = state or doppler_state()
         self.slot0 = slot0
+        self.pool_slots = pool_slots or {}
         self.simulations = list(simulations)
         self.logs = logs or {}
         self.head = head
@@ -1100,7 +1103,9 @@ class FakeRpc:
             return {"result": self.state}
         if data.startswith("0x" + selector("extsload(bytes32)").hex()):
             assert target == POOL_MANAGER
-            return {"result": word(self.slot0)}
+            slot = data[-64:]
+            launcher_slot = pool_state_slot((ZERO, self.token, 2500, 25, ZERO))[2:]
+            return {"result": word(self.pool_slots.get(slot, self.slot0 if slot == launcher_slot else 0))}
         raise AssertionError(f"unexpected call {method} {params}")
 
 
@@ -1141,6 +1146,12 @@ def rpc_for(fixture, **overrides):
         options["slot0"] = 1 << 100
     elif fixture["route"] == "v4-doppler":
         options["state"] = doppler_state(tuple(fixture["key"]), fixture["numeraire"], status=2)
+    elif fixture["route"] == "v4-usdg":
+        state_slot = pool_state_slot(tuple(fixture["key"]))
+        options["pool_slots"] = {
+            state_slot[2:]: 1,
+            f"{(int(state_slot, 16) + 3):064x}": 1,
+        }
     elif fixture["route"] == "v2":
         options.update(pair=fixture["pair"], reserves=(10**20, 10**27))
     options.update(overrides)
@@ -1181,8 +1192,14 @@ async def test_liquidity_launcher_lookup_reads_the_derived_pool_slot():
         if method == "eth_call"
         and params[0]["data"].startswith("0x" + selector("extsload(bytes32)").hex())
     ]
-    assert extsload == [
+    assert extsload[0] == (
         "0x" + selector("extsload(bytes32)").hex() + pool_state_slot(tuple(fixture["key"]))[2:]
+    )
+    assert extsload[1:] == [
+        "0x" + selector("extsload(bytes32)").hex()
+        + f"{(int(pool_state_slot((USDG, fixture['token'], fee, spacing, ZERO)), 16) + offset):064x}"
+        for fee, spacing in HOOKLESS_V4_FEE_TICK_SPACINGS
+        for offset in (0, 3)
     ]
 
 
@@ -1276,7 +1293,7 @@ def unsupported_pool_logs(token, head):
     quotes = ["0x" + f"{index:02x}" * 20 for index in range(0xA0, 0xA5)]
     hooks = ["0x" + f"{index:02x}" * 19 + "cc" for index in range(1, 6)]
     tiers = ((100, 1), (500, 10), (2500, 25), (3000, 60), (10000, 200))
-    logs = [initialize_log(USDG, token, fee, spacing, ZERO, head) for fee, spacing in tiers]
+    logs = []
     logs += [
         initialize_log(token, quote, fee, spacing, ZERO, head)
         for quote in quotes
@@ -1306,9 +1323,9 @@ async def test_many_unsupported_pools_leave_one_bounded_note():
     assert rpc.simulations == []
     assert reason.count("unsupported route") == 1
     assert (
-        f"unsupported route: 35 v4 pools of this token cannot be simulated "
-        f"(hookless paired with {USDG}, hookless paired with {quotes[0]}, "
-        f"hookless paired with {quotes[1]} and 13 more)"
+        f"unsupported route: 30 v4 pools of this token cannot be simulated "
+        f"(hookless paired with {quotes[0]}, hookless paired with {quotes[1]}, "
+        f"hookless paired with {quotes[2]} and 12 more)"
     ) in reason
     assert "No supported pool found" in reason
     assert re.search(r"0x[0-9a-fA-F]{64}", reason) is None
@@ -1332,7 +1349,7 @@ async def test_unsupported_pool_note_stays_short_through_to_the_extension():
     risk = RiskEngine().compute_from_results([analyzed])
     extension = format_extension_alert(risk)
     flag = next(flag for flag in extension["top_flags"] if flag.startswith("Sellability unknown"))
-    assert "unsupported route: 35 v4 pools of this token cannot be simulated" in flag
+    assert "unsupported route: 30 v4 pools of this token cannot be simulated" in flag
     assert re.search(r"0x[0-9a-fA-F]{64}", flag) is None
     assert len(flag) < 600
     assert len(extension["coverage_reasons"]["honeypot"]) < 600
