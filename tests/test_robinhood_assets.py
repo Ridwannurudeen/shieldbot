@@ -758,7 +758,7 @@ async def test_a_token_at_an_official_address_is_official_on_robinhood_chain(
     check = await served.service.official(address, 4663)
 
     assert (check["status"], check["symbol"], check["canonical"]) == ("official", symbol, canonical)
-    assert official_asset_reason(check, "sell simulation") == (
+    assert official_asset_reason(check, "sell simulation does not apply") == (
         f"Canonical {symbol} of Robinhood Chain (exact address): sell simulation does not apply"
         if canonical
         else f"Official Robinhood Chain asset {symbol} (exact address on Robinhood's published list): "

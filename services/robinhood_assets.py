@@ -489,8 +489,8 @@ def with_impostor_check(scan: Dict, check: Dict) -> Dict:
     return labelled
 
 
-def official_asset_reason(check: Dict, test: str) -> str:
-    """Why ``test``, a measurement of how a token trades, does not apply to the official token ``check`` matched.
+def official_asset_reason(check: Dict, finding: str) -> str:
+    """The note stating ``finding``, such as "sell simulation does not apply", for the official token ``check``.
 
     The market and honeypot analyzers skip a 4663 token at an official address (RobinhoodAssets.official)
     with this as their reason and their note: the canonical WETH and USDG are the quote side of every
@@ -498,10 +498,10 @@ def official_asset_reason(check: Dict, test: str) -> str:
     in hookless USDG pools the simulator does not cover. A gap there is not evidence about the token.
     """
     if check["canonical"]:
-        return f"Canonical {check['symbol']} of Robinhood Chain (exact address): {test} does not apply"
+        return f"Canonical {check['symbol']} of Robinhood Chain (exact address): {finding}"
     return (
         f"Official Robinhood Chain asset {check['symbol']} "
-        f"(exact address on Robinhood's published list): {test} does not apply"
+        f"(exact address on Robinhood's published list): {finding}"
     )
 
 

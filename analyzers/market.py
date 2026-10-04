@@ -38,7 +38,7 @@ class MarketAnalyzer(Analyzer):
             )
         official = await self._assets.official(ctx.address, ctx.chain_id) if self._assets else None
         if official is not None:
-            reason = official_asset_reason(official, 'market-pair checks')
+            reason = official_asset_reason(official, 'market-pair checks do not apply')
             return AnalyzerResult(
                 name=self.name, weight=self.weight,
                 score=0, flags=[], data={'skipped': True, 'reason': reason, 'notes': [reason]},

@@ -38,7 +38,7 @@ class HoneypotAnalyzer(Analyzer):
             )
         official = await self._assets.official(ctx.address, ctx.chain_id) if self._assets else None
         if official is not None:
-            reason = official_asset_reason(official, 'sell simulation')
+            reason = official_asset_reason(official, 'sell simulation does not apply')
             return AnalyzerResult(
                 name=self.name, weight=self.weight,
                 score=0, flags=[], data={'skipped': True, 'reason': reason, 'notes': [reason]},

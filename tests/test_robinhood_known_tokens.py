@@ -67,12 +67,12 @@ BLACKLISTED = {
 IMPOSTOR_FLAG = f"Impersonates official NVDA token (Robinhood-issued); official contract {NVDA}"
 
 
-def note(symbol, test, canonical=True):
+def note(symbol, finding, canonical=True):
     if canonical:
-        return f"Canonical {symbol} of Robinhood Chain (exact address): {test} does not apply"
+        return f"Canonical {symbol} of Robinhood Chain (exact address): {finding}"
     return (
         f"Official Robinhood Chain asset {symbol} (exact address on Robinhood's published list): "
-        f"{test} does not apply"
+        f"{finding}"
     )
 
 
@@ -170,8 +170,8 @@ async def test_an_official_token_skips_the_market_and_sell_checks_and_says_so(
 
     market.fetch_token_market_data.assert_not_awaited()
     honeypot.fetch_honeypot_data.assert_not_awaited()
-    market_note = note(symbol, "market-pair checks", canonical)
-    sell_note = note(symbol, "sell simulation", canonical)
+    market_note = note(symbol, "market-pair checks do not apply", canonical)
+    sell_note = note(symbol, "sell simulation does not apply", canonical)
     assert [(result.score, result.flags, result.data) for result in results] == [
         (0, [], {"skipped": True, "reason": market_note, "notes": [market_note]}),
         (0, [], {"skipped": True, "reason": sell_note, "notes": [sell_note]}),
@@ -188,7 +188,7 @@ async def test_the_verdict_comes_from_the_analyzers_that_apply():
     assert (output["coverage_reasons"], output["failed_sources"]) == ({}, [])
     assert output["critical_flags"] == []
     # Covered, but never silently: each skipped check is named.
-    assert output["notes"] == [note("USDG", "market-pair checks"), note("USDG", "sell simulation")]
+    assert output["notes"] == [note("USDG", "market-pair checks do not apply"), note("USDG", "sell simulation does not apply")]
 
 
 @pytest.mark.asyncio
@@ -215,7 +215,7 @@ async def test_a_telegram_scan_of_an_official_token_now_publishes_the_computed_v
     assert verdict_for(output, honeypot) is Verdict.LOW
     evidence = build_evidence(CHAIN, USDG, output, honeypot)
     assert (evidence["verdict"], evidence["status"], evidence["observed_block"]) == ("LOW", "ok", 0)
-    assert evidence["honeypot"] == {"reason": note("USDG", "sell simulation")}
+    assert evidence["honeypot"] == {"reason": note("USDG", "sell simulation does not apply")}
     assert evidence["coverage"] == {"structural": 1, "market": 1, "honeypot": 1}
 
 
@@ -388,7 +388,7 @@ async def test_a_swap_into_official_tokens_is_judged_not_unknown(monkeypatch, ca
     assert resp["notes"] == [
         f"{address}: {note(symbol, test, canonical)}"
         for (symbol, _, canonical), address in zip(tokens, checksummed)
-        for test in ("market-pair checks", "sell simulation")
+        for test in ("market-pair checks do not apply", "sell simulation does not apply")
     ]
     assert [(item["address"], item["status"]) for item in resp["raw_checks"]["tokens_analyzed"]] == [
         (address, "ok") for address in checksummed
@@ -413,8 +413,8 @@ async def test_an_unknown_token_behind_usdg_is_still_fully_scanned_and_still_unk
     assert "Unknown" in resp["verdict"]
     assert resp["plain_english"].startswith(f"Unknown: {MARKET_UNKNOWN}; {HONEYPOT_UNKNOWN}")
     assert resp["notes"] == [
-        f"{usdg}: {note('USDG', 'market-pair checks')}",
-        f"{usdg}: {note('USDG', 'sell simulation')}",
+        f"{usdg}: {note('USDG', 'market-pair checks do not apply')}",
+        f"{usdg}: {note('USDG', 'sell simulation does not apply')}",
     ]
     assert [(item["address"], item["status"]) for item in resp["raw_checks"]["tokens_analyzed"]] == [
         (usdg, "ok"),
