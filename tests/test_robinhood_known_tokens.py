@@ -1,10 +1,10 @@
 """Official Robinhood Chain tokens are not judged by the checks that cannot apply to them.
 
-The canonical WETH and USDG are the quote side of every pair, so DexScreener prices no pair in them and
-the sell simulator buys with them; Robinhood's tokenised stocks trade in hookless USDG pools the simulator
-does not cover. The market and honeypot analyzers skip a 4663 token at an official address with a note,
-every other analyzer still runs, and a token at any other address, or a stock token while the published
-list is unavailable, gets the full scan. A swap through a trusted router judges each token the same way.
+The canonical WETH and USDG are funding assets, so DexScreener prices no pair in them and the sell
+simulator buys with them. Official stocks are simulated when the route resolves and retain the skip note
+when it does not. The market analyzer continues to skip official addresses; other analyzers run, and a token
+at any other address, or a stock token while the published list is unavailable, gets the full scan. A swap
+through a trusted router judges each token the same way.
 """
 
 from types import SimpleNamespace
@@ -157,7 +157,7 @@ def registry(official, structural=CLEAN_STRUCTURAL, market=None, honeypot=None):
     "address, symbol, canonical",
     [(USDG, "USDG", True), (WETH, "WETH", True), (NVDA, "NVDA", False)],
 )
-async def test_an_official_token_skips_the_market_and_sell_checks_and_says_so(
+async def test_canonical_tokens_and_unresolved_official_stocks_keep_the_skip_note(
     address, symbol, canonical
 ):
     market, honeypot, official = market_service(), honeypot_service(), assets()
@@ -169,13 +169,55 @@ async def test_an_official_token_skips_the_market_and_sell_checks_and_says_so(
     ]
 
     market.fetch_token_market_data.assert_not_awaited()
-    honeypot.fetch_honeypot_data.assert_not_awaited()
+    if canonical:
+        honeypot.fetch_honeypot_data.assert_not_awaited()
+    else:
+        honeypot.fetch_honeypot_data.assert_awaited_once_with(
+            Web3.to_checksum_address(address), chain_id=CHAIN
+        )
     market_note = note(symbol, "market-pair checks do not apply", canonical)
     sell_note = note(symbol, "sell simulation does not apply", canonical)
     assert [(result.score, result.flags, result.data) for result in results] == [
         (0, [], {"skipped": True, "reason": market_note, "notes": [market_note]}),
         (0, [], {"skipped": True, "reason": sell_note, "notes": [sell_note]}),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "is_honeypot, can_sell, expected_score",
+    [(False, True, 0), (True, False, 100)],
+)
+async def test_a_resolved_official_stock_uses_the_simulation_result(
+    is_honeypot, can_sell, expected_score
+):
+    honeypot = MagicMock(
+        fetch_honeypot_data=AsyncMock(
+            return_value={
+                "is_honeypot": is_honeypot,
+                "can_buy": True,
+                "can_sell": can_sell,
+                "buy_tax": 0,
+                "sell_tax": 0,
+                "status": "ok",
+            }
+        )
+    )
+    result = await HoneypotAnalyzer(honeypot, assets()).analyze(
+        AnalysisContext(address=Web3.to_checksum_address(NVDA), chain_id=CHAIN)
+    )
+
+    honeypot.fetch_honeypot_data.assert_awaited_once_with(
+        Web3.to_checksum_address(NVDA), chain_id=CHAIN
+    )
+    assert not result.data.get("skipped")
+    assert (result.score, result.data["is_honeypot"], result.data["can_sell"]) == (
+        expected_score,
+        is_honeypot,
+        can_sell,
+    )
+    assert result.data["coverage"]["is_honeypot"] is True
+    assert result.data["coverage"]["can_sell"] is True
 
 
 @pytest.mark.asyncio
@@ -374,7 +416,12 @@ async def test_a_swap_into_official_tokens_is_judged_not_unknown(monkeypatch, ca
     resp = await router_swap(monkeypatch, assets(), calldata, market, honeypot)
 
     market.fetch_token_market_data.assert_not_awaited()
-    honeypot.fetch_honeypot_data.assert_not_awaited()
+    if any(not canonical for _, _, canonical in tokens):
+        honeypot.fetch_honeypot_data.assert_awaited_once_with(
+            Web3.to_checksum_address(NVDA), chain_id=CHAIN
+        )
+    else:
+        honeypot.fetch_honeypot_data.assert_not_awaited()
     assert (resp["status"], resp["classification"], resp["partial"]) == ("ok", "SAFE", False)
     assert "Unknown" not in resp["verdict"]
     assert resp["danger_signals"] == []

@@ -10,9 +10,8 @@ logger = logging.getLogger(__name__)
 class HoneypotAnalyzer(Analyzer):
     """Analyzes honeypot status and tax info.
 
-    An official Robinhood Chain token (services.robinhood_assets) is skipped: the canonical WETH and
-    USDG are what the simulator buys with, not a token to sell, and a tokenised stock trades in
-    hookless USDG pools it does not cover. The gap is named in a note, not scored.
+    Canonical WETH and USDG are the simulator's funding assets, not tokens to sell. Official stocks
+    are simulated when a supported route resolves; unresolved routes retain the explicit skip note.
     """
 
     def __init__(self, honeypot_service, robinhood_assets=None):
@@ -37,7 +36,7 @@ class HoneypotAnalyzer(Analyzer):
                 score=0, flags=[], data={'skipped': True, 'reason': 'non-token contract'},
             )
         official = await self._assets.official(ctx.address, ctx.chain_id) if self._assets else None
-        if official is not None:
+        if official is not None and official.get('canonical') is True:
             reason = official_asset_reason(official, 'sell simulation does not apply')
             return AnalyzerResult(
                 name=self.name, weight=self.weight,
@@ -48,6 +47,14 @@ class HoneypotAnalyzer(Analyzer):
         data = dict(data)
         if (data.get('simulation_failed') or data.get('rpc_failed')) and data.get('can_sell') is True:
             data['can_sell'] = None
+        if official is not None and (
+            data.get('is_honeypot') is None or data.get('can_sell') is None
+        ):
+            reason = official_asset_reason(official, 'sell simulation does not apply')
+            return AnalyzerResult(
+                name=self.name, weight=self.weight,
+                score=0, flags=[], data={'skipped': True, 'reason': reason, 'notes': [reason]},
+            )
         fields = ('is_honeypot', 'buy_tax', 'sell_tax', 'can_buy', 'can_sell')
         data['coverage'] = {field: data.get(field) is not None for field in fields}
         if data.get('simulation_failed'):
