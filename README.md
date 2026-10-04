@@ -4,33 +4,32 @@
 
 **ShieldBot is the security layer that says what it checked.** Every verdict carries its coverage, and an agent can refuse to act on anything stale or Unknown; the verdict registry and guard that let a Robinhood Chain contract do the same are built, tested and deployed on Robinhood Chain ([addresses](docs/DEPLOYMENTS.md)). We build on GoPlus, honeypot.is and others; we do not pretend to replace them.
 
-[Judge guide](docs/JUDGE_GUIDE.md) · [Recorded simulations](tests/fixtures/robinhood_simulation/) · [Verdict registry source](contracts/base/src/ShieldBotVerdictRegistry.sol) · [Deployed contracts](docs/DEPLOYMENTS.md) · [Test results](docs/TESTING.md)
+[Try it](#try-it) · [Browser extension](extension/) · [Judge guide](docs/JUDGE_GUIDE.md) · [Recorded simulations](tests/fixtures/robinhood_simulation/) · [Verdict registry source](contracts/base/src/ShieldBotVerdictRegistry.sol) · [Deployed contracts](docs/DEPLOYMENTS.md) · [Test results](docs/TESTING.md)
 
 </div>
 
 A token can accept a buy and refuse the sell. A familiar stock ticker can belong to an unrelated contract. On Robinhood Chain (**4663**, an Arbitrum Orbit L2), ShieldBot checks token launches, simulates supported buy/sell routes, and preserves missing evidence as **UNKNOWN**.
 
-The core scan path refuses to call incomplete data safe and flags dangers supported by its checks. **This is not a claim that every interface blocks every unknown transaction.** Human interfaces can offer a proceed option; SDK callers must enforce the returned decision. Robinhood Chain tokens are compared with Robinhood's published list of official stock tokens. A listed contract is reported as official. A token is reported as an impostor when its ticker and name both copy an official token, when it claims Robinhood beside an official ticker or company name, or when it matches only after look-alike characters are folded. A bare shared ticker or name, or a symbol in another issuer's convention (TSLAx named an xStock, TSLA.d, wTSLA, bTSLA named Backed), is a collision. This is a name check against Robinhood's list, not authentication of any issuer; an impostor label heads the report and the launch alert, and no label changes the risk score or the published on-chain verdict.
+The core scan path refuses to call incomplete data safe and flags dangers supported by its checks. **This is not a claim that every interface blocks every unknown transaction.** Human interfaces can offer a proceed option; SDK callers must enforce the returned decision.
 
 **Start with the [ten-minute judge guide](docs/JUDGE_GUIDE.md).** Its recorded honeypot and three-outcome examples run locally without a network connection or API key once Python dependencies are installed.
+
+## Try it
+
+1. **Replay the evidence offline.** With the Python dependencies from the [judge guide's preparation](docs/JUDGE_GUIDE.md#preparation) installed, the [local evidence path](#run-the-local-evidence-path) replays the recorded honeypot and the other simulations with no network connection or API key.
+2. **Load the browser extension.** [`extension/`](extension/) is version 3.1.0 and loads unpacked: open `chrome://extensions`, turn on Developer mode, choose Load unpacked and select `extension/`. It needs no API key or account, and [SETUP_GUIDE.md](SETUP_GUIDE.md) says what each surface shows. The [demo page](https://shieldbotsecurity.online/try/) sends one Robinhood Chain transaction per firewall outcome.
+3. **The Web Store build is older.** The [Chrome Web Store listing](https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk) served 3.0.1 on 2026-10-04, which predates the chain-identification fix. Evaluate the unpacked build.
+4. **Check a live record.** [Section 3 of the judge guide](docs/JUDGE_GUIDE.md#3-verify-a-verdict-without-trusting-the-api) hashes a served evidence document and matches it to its event in the verdict registry `0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`, deployed on Robinhood Chain on 2026-09-27.
+
+Live: [shieldbotsecurity.online](https://shieldbotsecurity.online) · [threat dashboard](https://api.shieldbotsecurity.online/dashboard)
 
 ## On-chain permission before funds move
 
 [`ShieldBotVerdictGuard`](contracts/base/src/ShieldBotVerdictGuard.sol) reads the latest registry record and allows only LOW or MEDIUM within the caller's publication-age tolerance. `check(address subject, uint64 maxAge)` returns `(bool allowed, uint8 reason)`; `requireAllowed(address subject, uint64 maxAge)` reverts with `NotAllowed(subject, reason)` on denial. MEDIUM deliberately accepts moderate reported risk; permission is not a token-safety guarantee.
 
-| Code | Reason | Meaning |
-|---|---|---|
-| 0 | `ALLOWED` | Recorded LOW/MEDIUM, non-future and within a positive `maxAge` |
-| 1 | `NO_RECORD` | No evidence hash has been recorded |
-| 2 | `UNKNOWN` | Fresh record with incomplete evidence |
-| 3 | `HIGH` | High risk, even when expired or future-dated |
-| 4 | `HONEYPOT` | Proven sell trap in the recorded verdict, even when expired or future-dated |
-| 5 | `EXPIRED` | Non-adverse record exceeds `maxAge`, or `maxAge` is zero |
-| 6 | `FUTURE_TIMESTAMP` | Non-adverse publication is ahead of the check clock |
+The guard answers one of seven reason codes, from `ALLOWED` (0) to `FUTURE_TIMESTAMP` (6). A high-risk or honeypot record keeps its adverse reason even when expired, and a zero `maxAge` always denies. The [reason table and its precedence](docs/JUDGE_GUIDE.md#what-the-on-chain-guard-enforces) are in the judge guide.
 
-Denial precedence is `NO_RECORD → HIGH/HONEYPOT → FUTURE_TIMESTAMP → EXPIRED → UNKNOWN`; fresh LOW/MEDIUM returns `ALLOWED`. An old honeypot still reports `HONEYPOT`, avoiding a misleading suggestion to retry after a refresh. A zero tolerance always denies.
-
-The worked consumer is [`ShieldBotGuardedTransfer`](contracts/base/GUARDED_TRANSFER.md): it pins the guard, subject, USDG token and recipient. After approval, a caller invokes `transfer(amount, maxAge)`. The guard must allow the subject before `safeTransferFrom` runs; the recipient's balance increase must then equal `amount` exactly or the entire call reverts with `ShortDelivery(requested, delivered)`. Only a successful exact credit emits `GuardedTransfer`. This rejects transfers that deduct a fee from the recipient's credit. A token that debits the sender by more than `amount` while crediting the recipient exactly `amount` would pass this check. Recipients must be EOAs or passive contracts; forwarding in a recipient hook fails the credit check. A Robinhood Chain simulation transferred 500,000 units of Paxos USDG and credited the recipient exactly 500,000 units.
+The worked consumer is [`ShieldBotGuardedTransfer`](contracts/base/GUARDED_TRANSFER.md): it pins the guard, subject, USDG token and recipient, asks the guard before `safeTransferFrom` runs, and reverts with `ShortDelivery(requested, delivered)` unless the recipient's balance rises by exactly `amount`. A Robinhood Chain simulation transferred 500,000 units of Paxos USDG and credited the recipient exactly 500,000 units. What exact credit catches, what it does not, and the recipient constraint are in the [judge guide](docs/JUDGE_GUIDE.md#on-chain-transfer-demonstration-offline).
 
 [Run the local allowed/honeypot/unknown/expired demonstration](docs/JUDGE_GUIDE.md#on-chain-transfer-demonstration-offline). It uses the real registry, guard and transfer in the Foundry test VM with a mock ERC-20; it does not establish a live deployment.
 
@@ -39,10 +38,14 @@ The worked consumer is [`ShieldBotGuardedTransfer`](contracts/base/GUARDED_TRANS
 - **Repository versus release:** the browser extension's provider-bound chain-identification fix is on `main` but remains unreleased. The shipped extension still has an omitted-chain identification limitation. Source tests do not establish released Robinhood coverage; real MetaMask, Rabby and EIP-6963 testing and Chrome Web Store review remain outstanding.
 - **Simulation is route-bounded:** Robinhood support covers the implemented native/WETH v4 routes, Doppler-hooked v4 routes, and WETH-quoted V2 pairs. USDG is supported only for Doppler-hooked v4 pools. Hookless USDG pools are explicitly unsupported; the V2 adapter discovers WETH pairs, not USDG pairs. No V2 USDG route is covered. Whether any V2 USDG pairs exist has not been rechecked.
 - **Unknown is an outcome:** RPC failure, unsupported routes, insufficient liquidity, unattributed reverts or unmeasurable fields must not be read as a clean bill of health. A successful simulated round-trip describes that amount, route and recorded state, not future sellability.
-- **Coverage is partial across surfaces:** scan metadata reaches the REST, MCP, Telegram and SDK paths, but auxiliary MCP tools, phishing checks, signature heuristics and dashboard summaries do not all have equivalent coverage semantics. The dashboard is not an evidence viewer. See [the detailed limitations](docs/TECHNICAL.md).
+- **Coverage is partial across surfaces:** scan metadata reaches the REST, MCP, Telegram and SDK paths, but auxiliary MCP tools, phishing checks, signature heuristics and dashboard summaries do not all have equivalent coverage semantics. The dashboard's Robinhood Chain panel links each blocked launch to its stored evidence document at `/api/verdict`; its other tiles are summaries. See [the detailed limitations](docs/TECHNICAL.md).
 - **On-chain publication covers a bounded set:** the registry is live on Robinhood Chain ([DEPLOYMENTS.md](docs/DEPLOYMENTS.md)). Production records Telegram scans, guard rescans, and launches or rechecks that are blocked or guard-watched; other launch verdicts are stored with `onchain_status: off`, which is not on-chain evidence.
 
 ## What is different
+
+### Stock-token impostors are labelled, not scored
+
+Robinhood Chain tokens are compared with Robinhood's published list of official stock tokens. A listed contract is reported as official. A token is reported as an impostor when its ticker and name both copy an official token, when it claims Robinhood beside an official ticker or company name, or when it matches only after look-alike characters are folded. A bare shared ticker or name, or a symbol in another issuer's convention (TSLAx named an xStock, TSLA.d, wTSLA, bTSLA named Backed), is a collision. This is a name check against Robinhood's list, not authentication of any issuer; an impostor label heads the report and the launch alert, and no label changes the risk score or the published on-chain verdict.
 
 ### Missing evidence has a representation
 
@@ -74,9 +77,7 @@ That comparison proves document integrity against a recorder's on-chain commitme
 
 The [verdict guard](contracts/base/VERDICT_GUARD.md) enforces **publication freshness**, not observation freshness. The registry sets `Record.timestamp = block.timestamp` when the recording transaction executes. The publisher's observation-age cutoff gates broadcast only; an already broadcast transaction can land arbitrarily later, so observation age is not bounded on-chain.
 
-Use **`maxAge = 600` seconds for the demo only with `GUARD_WATCH_MAX_SUBJECTS=1`**. This is a required condition: `GuardedTransfer.subject` is a single immutable address, and the demo watches exactly that subject. Use **900 seconds as the production minimum at the default four watched subjects**. These figures are calculations, not on-chain observations. They use `age = I + s + d(N+1) - d(N)`, with the 300 second rescan interval plus measured scan and publication delays. Live scan p90 was about 5.4 seconds. The resulting ages are typically **320 to 360 seconds**, about **437 seconds** in a healthy worst case, about **625 seconds** when four subjects bunch after a restart, and about **740 seconds** after one lost interval. A `maxAge` of 300 seconds would deny a healthy token for about **6 to 30 percent of wall time**. Foundry's `MAX_AGE = 300` is a boundary-test fixture, not operating guidance. Confirm these calculations against live records after the registry, guard and transfer contracts are deployed on Robinhood Chain.
-
-Recurring publication covers only the bounded [watched set](docs/guard-rescans.md). Neither operating window guarantees uninterrupted permission: lost intervals, scan overruns, repeated failures and delayed inclusion can cause denials. An overrun can publish UNKNOWN and cause **60 to 150 seconds** of content denial in the calculated scenario, even before expiry; choose a demo subject whose scans complete reliably.
+Use **`maxAge = 600` seconds for the demo only with `GUARD_WATCH_MAX_SUBJECTS=1`**, and **900 seconds as the production minimum at the default four watched subjects**. Both are calculations, not on-chain observations, and neither guarantees uninterrupted permission. Recurring publication covers only the bounded [watched set](docs/guard-rescans.md); the derivation and the denial windows are in the [judge guide](docs/JUDGE_GUIDE.md#freshness-operating-conditions).
 
 ### Seven recorded request/response pairs
 
@@ -151,7 +152,7 @@ python -m pytest tests/test_robinhood_simulation.py tests/test_robinhood_simulat
 python -m pytest sdk/python/tests/ -q -p no:cacheprovider
 ```
 
-Verified on **2026-09-23** at `main` revision **`27aca4d`**: the main Python suite returned **3,054 passed, 1 skipped**, excluding the bot app suite; the Python SDK returned **32 passed**; and the TypeScript SDK returned **21 passed**. CI run **35863129734** passed Foundry tests, Solidity security, Python tests and security, and the SDK audit and build. Commands, exclusions and dependency qualifications are in [TESTING.md](docs/TESTING.md). These counts are test results, not scan volume or detection-accuracy measurements.
+Verified on **2026-10-04** at `main` revision **`0f1c326`**: the main Python suite returned **6,550 passed**, and the two fresh-process import test files, run separately, returned **114 passed**. Commands, exclusions and dependency qualifications are in [TESTING.md](docs/TESTING.md), and earlier measurements in [SUBMISSION.md](docs/SUBMISSION.md#reproducible-verification). These counts are test results, not scan volume or detection-accuracy measurements.
 
 For dependency setup and the short copy/paste examples, follow [JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md). No wallet, private key, deployment or broadcast is needed for the offline path.
 
