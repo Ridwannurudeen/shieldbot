@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>ShieldBot extension demo</title>
+<link rel="icon" href="/favicon.png" />
+<style>
+  :root {
+    --bg: #0b1220; --card: #111c30; --line: #24324a; --ink: #f8fafc;
+    --muted: #94a3b8; --emerald: #34d399; --red: #ef4444; --amber: #f59e0b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 32px 16px;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h1 span { color: var(--emerald); }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin: 0 0 6px; }
+  .card p { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  button {
+    font: inherit; font-weight: 600; border-radius: 8px; padding: 11px 16px;
+    border: 1px solid var(--line); background: #1b2740; color: var(--ink); cursor: pointer;
+  }
+  button:hover { border-color: var(--emerald); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--emerald); color: #0f172a; border-color: var(--emerald); }
+  button.primary:hover { background: #10b981; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .pill { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; }
+  .expect { font-size: 12px; margin-top: 10px; }
+  .expect b { color: var(--ink); }
+  .block b { color: var(--red); }
+  .unknown b { color: var(--amber); }
+  .safe b { color: var(--emerald); }
+  #log {
+    background: #0a1020; border: 1px solid var(--line); border-radius: 8px; padding: 14px;
+    font: 12px/1.6 "JetBrains Mono", ui-monospace, Consolas, monospace; white-space: pre-wrap;
+    color: var(--muted); min-height: 120px;
+  }
+  .warn { border-left: 3px solid var(--amber); padding-left: 12px; font-size: 13px; color: var(--muted); }
+  .warn b { color: var(--amber); }
+  a { color: var(--emerald); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Shield<span>Bot</span> extension demo</h1>
+  <div class="sub">
+    Three transactions on Robinhood Chain (4663), one per outcome, so the firewall can be watched deciding.
+    Load the extension unpacked first: see
+    <a href="https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/JUDGE_GUIDE.md">the judge guide</a>.
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button class="primary" id="connect">Connect wallet</button>
+      <button id="switch">Switch to Robinhood Chain</button>
+      <span class="pill" id="acct">not connected</span>
+      <span class="pill" id="chain">chain unknown</span>
+    </div>
+    <div class="warn" style="margin-top:14px">
+      <b>Nothing is spent.</b> ShieldBot decides before the wallet is asked, so declining in its overlay ends the
+      request there. If you press Proceed Anyway it reaches your wallet, where you should <b>reject it</b>.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>1. Block recommended</h2>
+    <p>An unlimited approval granted to a plain address rather than a contract, on a token the launch watch blocked.</p>
+    <button data-test="block">Send unlimited approval</button>
+    <div class="expect block">Expect <b>Do not proceed with this transaction</b>, with a drainer pattern and an unlimited approval among the signals.</div>
+  </div>
+
+  <div class="card">
+    <h2>2. Unknown, never safe</h2>
+    <p>A transfer to a token whose sell behaviour the scan could not settle.</p>
+    <button data-test="unknown">Send transfer</button>
+    <div class="expect unknown">Expect <b>Unknown</b>, naming what could not be checked, rather than a clean result.</div>
+  </div>
+
+  <div class="card">
+    <h2>3. No major risks</h2>
+    <p>A transfer to the burn address, which holds no contract and grants no approval.</p>
+    <button data-test="safe">Send transfer</button>
+    <div class="expect safe">Expect <b>No major risks detected</b>.</div>
+  </div>
+
+  <div class="card">
+    <h2>Result</h2>
+    <div id="log">Waiting.</div>
+  </div>
+</main>
+<script src="./harness.js"></script>
+</body>
+</html>
