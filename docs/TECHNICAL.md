@@ -21,7 +21,7 @@ ShieldBot follows a **3-tier architecture**. The delivery, intelligence and data
 │                      INTELLIGENCE ENGINE                         │
 ├─────────────────────────────────────────────────────────────────┤
 │  • RiskEngine: Composite weighted scoring (4 categories)         │
-│  • AI Analyzer: LLM-powered forensic analysis                    │
+│  • AI Analyzer: optional LLM prose over a decided verdict        │
 │  • Calldata Decoder: Function signature + router detection       │
 │  • Tenderly Simulator: Pre-execution transaction simulation      │
 └─────────────────────────────────────────────────────────────────┘
@@ -321,11 +321,15 @@ contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.g
 
 ---
 
-### 4. AI Analyzer (LLM-Powered)
+### 4. AI Analyzer (optional, explanation only)
 
 **File**: `utils/ai_analyzer.py`
 
-Uses an **LLM API** for contextual risk analysis:
+Uses an **LLM API** to put a decided verdict into prose. It never sets a verdict: the engine decides, and of the model's reply only the narrative is kept (`api.py:1634`). A failure is swallowed and costs prose alone.
+
+> **Status.** This layer is not running in the current deployment: its Anthropic credential is rejected (401), so no report on any surface has carried model prose. Every verdict, score, flag and coverage reason shown to a user is produced deterministically without it.
+
+Shape of the call:
 
 ```python
 # Input: Composite risk data from all services

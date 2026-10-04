@@ -198,11 +198,21 @@ class Advisor:
             except UnsupportedChainError:
                 raise
             except Exception as e:
-                logger.error("Advisor chat failed: %s", type(e).__name__)
-                response_text = (
-                    "I encountered an error processing your request. "
-                    "Please try again."
-                )
+                name = type(e).__name__
+                logger.error("Advisor chat failed: %s", name)
+                # A rejected credential or a retired model never succeeds on a retry, so say so
+                # rather than invite one, and say what still works.
+                if name in ("AuthenticationError", "PermissionDeniedError", "NotFoundError"):
+                    response_text = (
+                        "The assistant is unavailable: this deployment has no working language model "
+                        "configured. Scanning, the transaction firewall and the on-chain guard do not use "
+                        "it and are unaffected."
+                    )
+                else:
+                    response_text = (
+                        "I encountered an error processing your request. "
+                        "Please try again."
+                    )
             else:
                 try:
                     await self.db.add_ai_tokens_used(_utc_day(), tokens)
