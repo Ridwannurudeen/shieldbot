@@ -155,7 +155,7 @@ Values from the deployment on **2026-09-27**:
 | Chain | Robinhood Chain, 4663 |
 | `ShieldBotVerdictRegistry` | [`0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`](https://robin.etherscan.io/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) |
 | Deployment provenance | transaction [`0x14275435a6f9cff13681b15b230f69c7c40579a4e308a7cc503d25ff1b731fef`](https://robin.etherscan.io/tx/0x14275435a6f9cff13681b15b230f69c7c40579a4e308a7cc503d25ff1b731fef) (block 74,214,980); source [exact match](https://sourcify.dev/server/v2/contract/4663/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) on Sourcify and [verified source](https://robinhoodchain.blockscout.com/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138?tab=contract) on Blockscout; built from `main` at `c9ae9c9` |
-| API serving that revision | `https://api.shieldbotsecurity.online` (the owner deployed `1216d95` on 2026-10-04, which keeps the registry wiring `c9ae9c9` added; the API does not report its revision) |
+| API serving that revision | `https://api.shieldbotsecurity.online` (the owner deployed `3a7394e` on 2026-10-04, which keeps the registry wiring `c9ae9c9` added; the API does not report its revision) |
 | Published example | WOOD `0xf8bc08092c06db6148114dcf82af881f1085f92b`, recorded in transaction [`0xe5fc0372f7b0665208b817ddb3ea5d4b6b293a9d53658dc644a7542599849581`](https://robin.etherscan.io/tx/0xe5fc0372f7b0665208b817ddb3ea5d4b6b293a9d53658dc644a7542599849581) |
 | Independent read RPC | `https://robinhood-rpc.publicnode.com`, which the API does not use; any chain-4663 RPC works |
 
@@ -226,7 +226,7 @@ Hash the **served string**, not a freshly serialized `evidence` object: JSON num
 
 A match establishes that the designated recorder committed those bytes. It does not establish scanner accuracy, issuer authenticity or future sellability. RPC receipt inclusion is also not independent verification of parent-chain finality. `off`, `deduplicated`, `dropped`, `pending`, `sending`, `submitted`, `unconfirmed`, `failed` and `reverted` do not satisfy this check; a 404 means no stored verdict for that address.
 
-The verification block was checked locally against synthetic evidence and receipts, including mismatch cases. **On 2026-09-27 this block, run from a fresh shell with the values above, printed `MATCH: canonical evidence, chain 4663, registry, subject, verdict, evidenceHash and observed block`.** On **2026-10-02** it printed the same line again from a fresh clone of `main`. On **2026-10-03** it printed the same line again against the `fb68f80` deployment, and again after each later deployment, against `760036d`, `abe28c1`, `350da0f`, `0bd9810` and `1216d95`, all run from the pinned environment.
+The verification block was checked locally against synthetic evidence and receipts, including mismatch cases. **On 2026-09-27 this block, run from a fresh shell with the values above, printed `MATCH: canonical evidence, chain 4663, registry, subject, verdict, evidenceHash and observed block`.** On **2026-10-02** it printed the same line again from a fresh clone of `main`. On **2026-10-03** it printed the same line again against the `fb68f80` deployment, and again after each later deployment, against `760036d`, `abe28c1`, `350da0f`, `0bd9810`, `1216d95` and `3a7394e`, all run from the pinned environment.
 
 ## 4. Run the browser extension, unpacked
 
