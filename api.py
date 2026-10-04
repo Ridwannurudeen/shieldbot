@@ -1319,12 +1319,18 @@ async def _firewall_verdict(
             code = await web3_client.get_bytecode(to_addr, chain_id=req.chainId)
             has_code, delegated = code_kind(code)
             is_contract = None if has_code is None else has_code and not delegated
-            try:
-                is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
-            except UnsupportedChainError:
-                raise
-            except Exception:
-                pass
+            # An address with no code has no symbol() to answer, so it is not a token and the
+            # probe's round-trips are skipped: on a slow public RPC they cost seconds before the
+            # wallet is asked, and the answer is already known.
+            if has_code is False:
+                is_token = False
+            else:
+                try:
+                    is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
+                except UnsupportedChainError:
+                    raise
+                except Exception:
+                    pass
             if is_contract is not False:
                 try:
                     verified_result = await web3_client.is_verified_contract(to_addr, chain_id=req.chainId, code=code)

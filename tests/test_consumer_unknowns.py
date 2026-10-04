@@ -109,6 +109,20 @@ async def test_fresh_response_preserves_token_identification(consumer_api, incom
 
 
 @pytest.mark.asyncio
+async def test_a_codeless_target_is_never_probed_for_a_token(consumer_api, incomplete_output):
+    # An address with no code cannot answer symbol(), so the answer is already known and the
+    # probe's round-trips are not spent while the signer waits.
+    api, services = consumer_api
+    api.web3_client.get_bytecode.return_value = '0x'
+    api.risk_engine.compute_from_results.return_value = incomplete_output
+    await api.firewall(
+        api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40),
+        SimpleNamespace(headers={}),
+    )
+    api.web3_client.is_token_contract.assert_not_awaited()
+    assert api.risk_engine.compute_from_results.call_args.kwargs['is_token'] is False
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('identification', [True, False, None, 'error'])
 async def test_legacy_firewall_only_skips_token_scan_for_confirmed_non_token(
     consumer_api, incomplete_output, monkeypatch, identification,
