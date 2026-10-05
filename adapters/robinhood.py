@@ -71,15 +71,15 @@ class RobinhoodAdapter(EvmAdapter):
 
     supports_honeypot_simulation = True
 
-    def __init__(self, rpc_url: str = None, read_rpc_url: str = None):
+    def __init__(self, rpc_url: str = None, read_rpc_url: str = None, sim_rpc_url: str = None):
         from services.robinhood_simulation import RobinhoodSimulator
 
         rpc = rpc_url or os.getenv('ROBINHOOD_RPC_URL') or 'https://rpc.mainnet.chain.robinhood.com'
-        # The node that answers the adapter's reads (code, calls, blocks, transactions). The
-        # simulator's eth_simulateV1 and eth_getLogs stay on the full node: a public read node can
-        # refuse log queries, while the official endpoint answers each read in 0.2 s or 1.2-1.9 s and
-        # a scan makes eleven to fifteen of them in a row.
+        # The node that answers the adapter's reads (code, calls, blocks, transactions). Simulator
+        # discovery and log scans stay on the official RPC; only per-pool headers and eth_simulateV1
+        # may use the optional simulation node, with failures falling back to the official RPC.
         read = read_rpc_url or os.getenv('ROBINHOOD_READ_RPC_URL') or rpc
+        sim = sim_rpc_url or os.getenv('ROBINHOOD_SIM_RPC_URL') or None
 
         super().__init__(
             chain_id_value=4663,
@@ -93,7 +93,7 @@ class RobinhoodAdapter(EvmAdapter):
             known_spenders=KNOWN_SPENDERS,
             router_v2_factories=ROUTER_V2_FACTORIES,
         )
-        self._simulator = RobinhoodSimulator(rpc)
+        self._simulator = RobinhoodSimulator(rpc, sim_rpc_url=sim)
 
     async def check_honeypot(self, address: str) -> Dict:
         simulation = await self._simulator.simulate(address)

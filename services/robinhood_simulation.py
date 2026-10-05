@@ -789,8 +789,9 @@ def _call_result(row: dict, lookup: str, may_revert: bool = False) -> Optional[b
 class RobinhoodSimulator:
     """Runs and caches one buy/sell simulation per token."""
 
-    def __init__(self, rpc_url: str):
+    def __init__(self, rpc_url: str, sim_rpc_url: Optional[str] = None):
         self._rpc_url = rpc_url
+        self._sim_rpc_url = sim_rpc_url or None
         self._cache = TTLCache(maxsize=1024, ttl=CACHE_TTL_SECONDS)
         self._inflight = {}
 
@@ -864,6 +865,36 @@ class RobinhoodSimulator:
                 pool, f"Simulation request could not be encoded ({type(e).__name__})", simulation_failed=True
             )
         try:
+            if self._sim_rpc_url:
+                try:
+                    headers = await self._sim_request(
+                        session, [("eth_getBlockByNumber", ["latest", False])]
+                    )
+                    header = headers[0].get("result")
+                    source_block = _quantity(header.get("number")) if isinstance(header, dict) else None
+                    if source_block is None:
+                        raise SimulationUnavailable("Simulation source block header unavailable")
+                    rows = await self._sim_request(
+                        session, [("eth_simulateV1", [request, hex(source_block)])]
+                    )
+                    row = rows[0]
+                    error = row.get("error")
+                    if error is not None:
+                        code = error.get("code") if isinstance(error, dict) else None
+                        if code == -32601 or "does not exist" in str(error).lower():
+                            raise SimulationUnavailable("eth_simulateV1 unsupported by the RPC")
+                        raise SimulationUnavailable(f"eth_simulateV1 failed (JSON-RPC error {code})")
+                    if "result" not in row or row.get("result") is None:
+                        raise SimulationUnavailable("Malformed RPC response")
+                    outcome = evaluate_simulation(
+                        pool, token, amount, buyer, row.get("result"), sell_amount
+                    )
+                    # eth_simulateV1 returns synthetic blocks after the real source header.
+                    outcome["block"] = source_block
+                    return outcome
+                except (SimulationUnavailable, aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    logger.warning("Robinhood simulation provider fallback: %s", type(e).__name__)
+
             headers = await self._request(session, [("eth_getBlockByNumber", ["latest", False])])
             header = headers[0].get("result")
             source_block = _quantity(header.get("number")) if isinstance(header, dict) else None
@@ -902,19 +933,31 @@ class RobinhoodSimulator:
             rows = await self._post(session, calls)
         return rows
 
-    async def _post(self, session, calls: list) -> list:
-        """POST one JSON-RPC request or batch; retry HTTP 429 and JSON-RPC rate limits with backoff."""
+    async def _sim_request(self, session, calls) -> list:
+        return await self._post(session, calls, url=self._sim_rpc_url, fail_fast=True)
+
+    async def _post(self, session, calls: list, url=None, fail_fast: bool = False) -> list:
+        """POST one JSON-RPC request or batch; optionally retry rate limits with backoff."""
         body = [
             {"jsonrpc": "2.0", "id": index, "method": method, "params": params}
             for index, (method, params) in enumerate(calls)
         ]
+        target_url = self._rpc_url if url is None else url
         reason = "RPC rate limited"
         for attempt in range(RPC_ATTEMPTS):
             async with session.post(
-                self._rpc_url, json=body if len(body) > 1 else body[0]
+                target_url, json=body if len(body) > 1 else body[0]
             ) as response:
                 status = response.status
-                payload = await response.json(content_type=None) if status == 200 else None
+                if status == 200:
+                    try:
+                        payload = await response.json(content_type=None)
+                    except (TypeError, ValueError) as e:
+                        if fail_fast:
+                            raise SimulationUnavailable("Malformed RPC response") from e
+                        raise
+                else:
+                    payload = None
             if status == 200:
                 rows = payload if isinstance(payload, list) else [payload]
                 if (
@@ -927,8 +970,12 @@ class RobinhoodSimulator:
                     by_id = {row["id"]: row for row in rows}
                     return [by_id[index] for index in range(len(body))]
                 reason = "RPC rate limited (JSON-RPC rate limit error)"
+                if fail_fast:
+                    raise SimulationUnavailable(reason)
             elif status == 429:
                 reason = "RPC rate limited (HTTP 429)"
+                if fail_fast:
+                    raise SimulationUnavailable(reason)
             else:
                 raise SimulationUnavailable(f"RPC HTTP {status}")
             if attempt < RPC_ATTEMPTS - 1:
