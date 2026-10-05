@@ -30,7 +30,7 @@ When a website asks your wallet to send a transaction, the extension shows an ov
 When a check cannot finish, for example because a data provider did not answer or a contract's age is not available, the verdict is Unknown and the overlay says why. An incomplete check is never shown as Safe.
 
 What it covers
-• Transactions on 8 EVM chains: Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.
+• Transactions on eight EVM chains. The extension's welcome page lists them.
 • Wallets that give web pages a standard provider (window.ethereum or EIP-6963).
 • Signature requests are checked by the server like transactions and shown in readable form: permits, Permit2, and Seaport and Blur marketplace orders (including Seaport bulk orders) that give your NFTs away for nothing or pay someone else. Blur listings sign only a summary of what is listed, not its prices, so they are shown as High Risk. A Sign-In with Ethereum message made for another site than the one asking is flagged Block Recommended, and so is every eth_sign request, which can sign a transaction. A message that is not readable text is flagged High Risk, and 32 bytes of it, which can be a hash signed in your name, Block Recommended. The text of a message you sign is never sent.
 • EIP-7702 delegations: a transaction that hands your account to a contract is flagged Block Recommended, with the contract's address and whether it is verified and how old it is.
@@ -87,7 +87,10 @@ smoke test in section 3 has passed with them.
    no Errors button. Then run the smoke test below. Do not upload until its release gate (steps 8
    to 29) has passed on both MetaMask and Rabby.
 5. Developer Dashboard, Package tab: upload the zip.
-6. Store listing tab: paste the description above. Replace the screenshots with real 3.1.0 captures
+6. Store listing tab: paste the description above, in every listed language. Do not name the
+   chains one by one: the first 3.1.0 submission (2026-10-05) was rejected for keyword spam
+   ("Yellow Argon") because the English, Chinese and Vietnamese descriptions listed all eight.
+   Replace the screenshots with real 3.1.0 captures
    (capture them at 1280×800 with the extension loaded unpacked). Do not upload any image that
    shows screens the extension does not have, such as the light "Threat Dashboard" mock.
 7. Privacy practices tab: `docs/CHROME_WEB_STORE_DISCLOSURE.md` still says the chain-resolution fix
