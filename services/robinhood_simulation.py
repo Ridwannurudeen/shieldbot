@@ -86,6 +86,9 @@ USDG_MIN_TRAP_COST = 10**6
 RPC_ATTEMPTS = 3
 RPC_BACKOFF_SECONDS = 1.0
 RPC_TIMEOUT_SECONDS = 30
+# A request to the optional simulation node gives up quickly, so a node that hangs costs a pool
+# seconds before it falls back to the official RPC rather than the whole scan's deadline.
+SIM_RPC_TIMEOUT_SECONDS = 5
 CACHE_TTL_SECONDS = 60
 
 MAX_UINT256 = 2**256 - 1
@@ -946,7 +949,9 @@ class RobinhoodSimulator:
         reason = "RPC rate limited"
         for attempt in range(RPC_ATTEMPTS):
             async with session.post(
-                target_url, json=body if len(body) > 1 else body[0]
+                target_url,
+                json=body if len(body) > 1 else body[0],
+                **({"timeout": aiohttp.ClientTimeout(total=SIM_RPC_TIMEOUT_SECONDS)} if fail_fast else {}),
             ) as response:
                 status = response.status
                 if status == 200:

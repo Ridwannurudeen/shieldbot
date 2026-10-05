@@ -234,3 +234,21 @@ def test_adapter_reads_optional_sim_rpc_environment_variable(monkeypatch):
     with patch("adapters.evm_base.Web3"):
         unset = RobinhoodAdapter()
     assert unset._simulator._sim_rpc_url is None
+
+
+@pytest.mark.asyncio
+async def test_only_the_simulation_node_gets_the_short_timeout():
+    from services.robinhood_simulation import SIM_RPC_TIMEOUT_SECONDS
+    from tests.test_robinhood_simulation import http_response, http_session
+
+    simulator = RobinhoodSimulator("https://official.example")
+    row = {"jsonrpc": "2.0", "id": 0, "result": "0x1"}
+
+    sim_session = http_session(http_response(200, row))
+    await simulator._post(sim_session, [("eth_blockNumber", [])], url="https://sim.example", fail_fast=True)
+    timeout = sim_session.post.call_args.kwargs["timeout"]
+    assert timeout.total == SIM_RPC_TIMEOUT_SECONDS == 5
+
+    official_session = http_session(http_response(200, row))
+    await simulator._post(official_session, [("eth_blockNumber", [])])
+    assert "timeout" not in official_session.post.call_args.kwargs
