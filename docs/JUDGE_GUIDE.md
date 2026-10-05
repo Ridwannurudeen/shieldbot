@@ -1,6 +1,6 @@
 # Judge guide: inspect the evidence in ten minutes
 
-**Limits first.** This checkout does not establish released Robinhood browser protection: the extension on the Chrome Web Store is 3.0.1 and keeps its chain-identification limitation. The fix is in 3.1.0 in this repository, which section 4 below loads unpacked; that build has not been through Web Store review and has not been tested against MetaMask or Rabby. Simulation covers selected routes and amounts, not every launch. USDG support is Doppler-hooked v4 only; hookless USDG is unsupported and V2 USDG pairs are not covered. There is no stock-issuer authenticity check. Unknown data can produce a user-overridable warning in human interfaces; it is not a blanket transaction block.
+**Limits first.** This checkout does not establish released Robinhood browser protection: the extension on the Chrome Web Store is 3.0.1 and keeps its chain-identification limitation. The fix is in 3.1.0 in this repository, which section 4 below loads unpacked; that build was submitted for Web Store review on 2026-10-05, is not yet approved, and has not been tested against MetaMask or Rabby. Simulation covers selected routes and amounts, not every launch. USDG support covers Doppler-hooked v4 pools and hookless v4 pools found by direct lookup at standard fee and tick-spacing pairs; V2 USDG pairs are not covered. There is no stock-issuer authenticity check. Unknown data can produce a user-overridable warning in human interfaces; it is not a blanket transaction block.
 
 The RPC proxy only sees requests routed through it; contract creation bypasses analysis, and raw transactions are already signed. On-chain enforcement is explicit: `ShieldBotVerdictGuard` reads the registry, and `ShieldBotGuardedTransfer` requires an allowed verdict before moving funds.
 
@@ -230,7 +230,7 @@ The verification block was checked locally against synthetic evidence and receip
 
 ## 4. Run the browser extension, unpacked
 
-The published extension is 3.0.1 and predates the chain-identification fix. Version 3.1.0 lives in `extension/` in this repository and loads without a build step:
+The published extension is 3.0.1 and predates the chain-identification fix; 3.1.0 was submitted for Web Store review on 2026-10-05 and is not yet approved. Version 3.1.0 lives in `extension/` in this repository and loads without a build step:
 
 1. Open `chrome://extensions` and turn on Developer mode.
 2. Choose Load unpacked and select the `extension/` directory of this checkout.
