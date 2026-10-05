@@ -1,5 +1,6 @@
 """Offline regressions for coverage-aware product consumers."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -87,7 +88,34 @@ async def test_fresh_response_persists_unknowns(consumer_api, incomplete_output)
     metadata = stored['category_scores']['_scan_metadata']
     assert metadata['status'] == 'unknown'
     assert metadata['coverage'] == incomplete_output['coverage']
-    assert services.registry.run_all.call_args.args[0].extra['is_verified'] is None
+    assert await services.registry.run_all.call_args.args[0].extra['verification'] is None
+
+
+@pytest.mark.asyncio
+async def test_the_analyzers_do_not_wait_for_the_verification_lookup(consumer_api, incomplete_output):
+    # Sourcify and Blockscout take up to 8 s on Robinhood Chain; the honeypot simulation's own
+    # round-trips must run beside that wait, not after it, while the signer waits.
+    api, services = consumer_api
+    release = asyncio.Event()
+
+    async def verification(*args, **kwargs):
+        await release.wait()
+        return (True, None)
+
+    async def run_all(ctx, **kwargs):
+        started_before_verification = not release.is_set()
+        release.set()
+        assert started_before_verification
+        assert await ctx.extra['verification'] is True
+        return []
+
+    api.web3_client.is_verified_contract = verification
+    services.registry.run_all = run_all
+    api.risk_engine.compute_from_results.return_value = incomplete_output
+    await asyncio.wait_for(api.firewall(
+        api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40),
+        SimpleNamespace(headers={}),
+    ), timeout=5)
 
 
 @pytest.mark.asyncio
@@ -910,7 +938,8 @@ async def test_verification_lookup_failure_stays_unknown(consumer_api, surface):
     else:
         await api._analyze_router_swap(req, req.to, req.sender,
             {'params': {'path': ['0x' + 'c' * 40]}}, 'Router', 0)
-    assert services.registry.run_all.call_args.args[0].extra['is_verified'] is None
+    from analyzers.intent import _verified
+    assert await _verified(services.registry.run_all.call_args.args[0]) is None
 
 
 @pytest.mark.parametrize('compact', [True, False], ids=['compact', 'dashboard'])

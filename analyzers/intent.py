@@ -100,7 +100,7 @@ class IntentMismatchAnalyzer(Analyzer):
 
         # 4. Unknown selector — skip entirely for verified/non-token contracts
         if decoded.get('category') == 'unknown':
-            is_verified = ctx.extra.get('is_verified')
+            is_verified = await _verified(ctx)
             if ctx.is_token is False or is_verified:
                 # Verified contracts and non-token contracts (marketplaces,
                 # bridges, governance) commonly have selectors outside our
@@ -209,7 +209,7 @@ class IntentMismatchAnalyzer(Analyzer):
             # A wallet takes payments; there is no contract to judge, and an explorer calls every
             # wallet unverified.
             return None, None, None
-        is_verified = ctx.extra.get('is_verified')
+        is_verified = await _verified(ctx)
         claim = decoded.get('category') == 'claim'
         call = decoded.get('signature') or f"0x{decoded['selector']}"
         sends = f'{call} sends {payment / 1e18:g} native value to'
@@ -233,6 +233,16 @@ class IntentMismatchAnalyzer(Analyzer):
         if age >= 7:
             return 60, f'{sends} an unverified contract', None
         return 85, f'{sends} an unverified contract {age} days old', None
+
+
+async def _verified(ctx: AnalysisContext) -> Optional[bool]:
+    """The target's verification: the firewall's lookup, running beside the analyzers, when it
+    started one, otherwise what the caller read before them. Shielded, so an analyzer cancelled
+    at the deadline leaves the firewall's lookup running."""
+    pending = ctx.extra.get('verification')
+    if pending is not None:
+        return await asyncio.shield(pending)
+    return ctx.extra.get('is_verified')
 
 
 def _parse_value(value) -> int:
