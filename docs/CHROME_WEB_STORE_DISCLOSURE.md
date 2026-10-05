@@ -2,7 +2,7 @@
 
 This document provides the exact wording to use when completing the Chrome Web Store Developer Dashboard privacy questionnaire for ShieldAI Transaction Firewall.
 
-These are source-tree disclosures for review, not confirmation of the currently published store version. The shipped extension can analyze on BNB Chain when a dApp omits `chainId`; it does not establish Robinhood Chain or other multichain protection in that case. The chain-resolution repair is unreleased (see [TECHNICAL.md](TECHNICAL.md)).
+These disclosures describe version 3.1.0. It asks the wallet which chain it is on before analysing a request, so a dApp that omits `chainId` no longer defaults to BNB Chain. A request whose chain cannot be read, does not match the wallet's, or is not supported is not analysed, and the overlay offers only Block. Version 3.0.1 and earlier defaulted to BNB Chain in that case (see [TECHNICAL.md](TECHNICAL.md)).
 
 ## Privacy Practices
 
