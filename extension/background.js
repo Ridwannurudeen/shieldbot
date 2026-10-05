@@ -480,9 +480,11 @@ async function handleAnalyze(tx, sender) {
 
   if (!response.ok) {
     const text = await response.text();
-    // The API refuses a chain it does not support with a 400 that says so.
-    const unsupported = response.status === 400 && /"detail":\s*"(Unsupported chain ID[^"]*)"/.exec(text);
-    if (unsupported) return unknownChain(unsupported[1]);
+    // The API refuses a chain it does not support with a 400 that says so;
+    // the user is told in plain words, not the API's.
+    if (response.status === 400 && /"detail":\s*"Unsupported chain ID/.test(text)) {
+      return unknownChain(`This network (chain ${chainId}) is not supported, so the request was not analyzed.`);
+    }
     throw new Error(`API error ${response.status}: ${text}`);
   }
 

@@ -318,7 +318,14 @@ def test_an_unsupported_chain_is_answered_as_an_unknown_chain():
   assert.equal(response.result.status, 'unknown');
   assert.equal(response.result.classification, 'UNKNOWN');
   assert.equal(response.result.coverage.chain, false);
-  assert.match(response.result.coverage_reasons.chain, /Unsupported chain ID 324/);
+  assert.equal(response.result.coverage_reasons.chain,
+    'This network (chain 324) is not supported, so the request was not analyzed.');
+  // The API's own wording, whatever its form, is not shown.
+  answer = async () => ({ok: false, status: 400,
+    text: async () => JSON.stringify({detail: 'Unsupported chain ID: must be between 1 and 10000000.'})});
+  const outOfRange = await respond({type: 'SHIELDAI_ANALYZE', tx: {to: '0x' + 'a'.repeat(40), chainId: '0x3b9aca00'}});
+  assert.equal(outOfRange.result.coverage_reasons.chain,
+    'This network (chain 1000000000) is not supported, so the request was not analyzed.');
   // Any other refusal is still an error, shown as Analysis Unavailable.
   answer = async () => ({ok: false, status: 400, text: async () => JSON.stringify({detail: "Invalid 'to' address"})});
   const other = await respond({type: 'SHIELDAI_ANALYZE', tx: {to: 'nope', chainId: 56}});
