@@ -143,7 +143,7 @@ context.document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'tes
     const method = scenario.split(':')[1];
     const pending = provider.request({method, params: ['0x' + 'a'.repeat(40), '{}']});
     if (scenario.startsWith('signature-offline:')) {
-      await assert.rejects(pending, /chain/i);
+      await assert.rejects(pending, {message: /chain/i, code: 4001});
       assert.equal(sent.length, 0);
       assert.equal(intercepted[0].chainId, null);
     } else {
@@ -164,7 +164,7 @@ context.document.dispatchEvent(new CustomEvent('shieldai:channel', {detail: 'tes
     'changed-during', 'changed-back', 'changed-during-query', 'changed-without-event', 'failed-recheck'].includes(scenario);
   const pending = provider.request({method: scenario === 'sign-transaction' ? 'eth_signTransaction' : 'eth_sendTransaction', params: [tx]});
   if (blocked) {
-    await assert.rejects(pending, /chain|network/i);
+    await assert.rejects(pending, {message: /chain|network/i, code: 4001});
     assert.equal(sent.length, 0);
     if (['mismatch', 'invalid-explicit', 'unavailable', 'invalid-provider', 'timeout', 'changed-during-query'].includes(scenario)) {
       assert.equal(intercepted[0].chainId, null);

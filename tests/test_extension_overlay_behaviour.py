@@ -1397,7 +1397,7 @@ def test_fail_closed_timer_stops_only_for_an_authentic_shown_signal(shown):
     deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: await proof(requestId, 'proceed')});
     assert.equal(await pending, 'sent');
   } else {
-    await assert.rejects(pending, /blocked/);
+    await assert.rejects(pending, {message: /blocked/, code: 4001});
     assert.equal(sent.length, 0);
   }
 """,
@@ -1439,7 +1439,7 @@ def test_forged_verdicts_are_ignored(forgery):
   await flush();
   assert.equal(sent.length, 0, 'a forged verdict sent the transaction');
   deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
-  await assert.rejects(pending, /blocked/);
+  await assert.rejects(pending, {message: /blocked/, code: 4001});
   assert.equal(sent.length, 0);
 """,
         forgery,
@@ -1460,7 +1460,7 @@ def test_a_message_a_page_dispatched_itself_decides_nothing_even_with_a_correct_
   await flush();
   assert.equal(signatures, made, 'inject.js checked the proof of an untrusted message');
   assert(fireFailClosedTimer(), 'an untrusted shown signal stopped the fail-closed timer');
-  await assert.rejects(pending, /blocked/);
+  await assert.rejects(pending, {message: /blocked/, code: 4001});
   assert.equal(sent.length, 0, 'an untrusted verdict sent the transaction');
 """,
         kind,
@@ -1494,7 +1494,7 @@ def test_a_proof_is_read_whole_whatever_its_bytes(guess):
   }
   assert.equal(sent.length, 0, 'a wrong proof sent the transaction');
   deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
-  await assert.rejects(pending, /blocked/);
+  await assert.rejects(pending, {message: /blocked/, code: 4001});
   assert.equal(sent.length, 0);
 """,
         guess,
@@ -1526,7 +1526,7 @@ def test_a_proof_that_is_not_32_byte_values_fails(shape):
   assert.equal(sent.length, 0, 'a proof that is not 32 byte values sent the transaction');
   assert.deepEqual(converted, [], 'comparing the proof ran page code');
   deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
-  await assert.rejects(pending, /blocked/);
+  await assert.rejects(pending, {message: /blocked/, code: 4001});
   assert.equal(sent.length, 0);
 """,
         shape,
@@ -1548,7 +1548,7 @@ def test_replacing_the_root_element_rejects_a_request_waiting_on_the_overlay():
   // so the Block content.js then posts would never arrive.
   html.remove();
   document.documentElement = new El('html');
-  await assert.rejects(pending, /blocked/);
+  await assert.rejects(pending, {message: /blocked/, code: 4001});
   assert.equal(sent.length, 0);
 """
     )
@@ -1563,7 +1563,7 @@ def test_verdict_after_the_timeout_is_ignored():
   fireFailClosedTimer();
   deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: await proof(requestId, 'proceed')});
   await flush();
-  await assert.rejects(pending, /blocked/);
+  await assert.rejects(pending, {message: /blocked/, code: 4001});
   assert.equal(sent.length, 0);
 """
     )
@@ -1599,7 +1599,7 @@ def test_inject_fails_closed_at_once_without_the_channel():
         + r"""
 (async () => {
   const pending = provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]});
-  await assert.rejects(pending, /blocked/);
+  await assert.rejects(pending, {message: /blocked/, code: 4001});
   assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_INTERCEPT').length, 0);
   assert.equal(sent.length, 0);
 """
@@ -2028,7 +2028,7 @@ def test_fail_closed_timer_survives_replaced_timers():
   vm.runInContext('setTimeout = () => 0; clearTimeout = () => {};', context);
   const {pending} = await startRequest();
   assert(fireFailClosedTimer(), 'the fail-closed timer was not armed');
-  await assert.rejects(pending, /blocked/);
+  await assert.rejects(pending, {message: /blocked/, code: 4001});
   assert.equal(sent.length, 0);
 """
     )
@@ -2106,7 +2106,7 @@ def test_a_replaced_error_constructor_cannot_stop_a_rejection():
   vm.runInContext("Error = function () { throw new TypeError('page Error'); };", context);
   const {pending, requestId} = await startRequest();
   deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
-  await assert.rejects(pending, /blocked/);
+  await assert.rejects(pending, {message: /blocked/, code: 4001});
   await assert.rejects(provider.request({method: 1}), /string method/);
   assert.equal(sent.length, 0);
 """
@@ -2246,7 +2246,7 @@ def test_a_request_that_cannot_be_read_is_never_forwarded_unseen(method, params)
     assert.equal(tx.unknownStructure, true);
     deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action, proof: await proof(requestId, action)});
     if (action === 'block') {
-      await assert.rejects(pending, /blocked/);
+      await assert.rejects(pending, {message: /blocked/, code: 4001});
       assert.equal(sent.length, 0);
     } else {
       assert.equal(await pending, 'sent');
@@ -2273,7 +2273,7 @@ def test_a_signature_request_without_params_is_still_shown_first(method):
   assert.equal(intercept.tx.signMethod, method);
   deliver({type: 'SHIELDAI_TX_VERDICT', requestId: intercept.requestId, action: 'block',
     proof: await proof(intercept.requestId, 'block')});
-  await assert.rejects(pending, /blocked/);
+  await assert.rejects(pending, {message: /blocked/, code: 4001});
 """,
         method,
     )
@@ -2562,7 +2562,7 @@ def test_a_request_taken_from_the_provider_prototype_is_checked_too(patch):
     assert.equal(intercepts().length, before + 1, 'the request was not sent for a decision');
     const {requestId} = intercepts().at(-1);
     deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
-    await assert.rejects(pending, /blocked/);
+    await assert.rejects(pending, {message: /blocked/, code: 4001});
   }
   await assert.rejects(inherited.call(undefined, tx), /blocked/);
   // Called on the prototype itself there is no provider to check for, and the check stays put.

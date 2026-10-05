@@ -450,9 +450,10 @@ def test_hero_image_describes_its_recorded_api_reply():
         '? "UNKNOWN" : result.classification || "CAUTION";',
         'const scoreDisplay = incomplete ? _t("overlayIncompleteCoverage") : '
         '`${_t("overlaySafety")} ${100 - result.risk_score}/100`;',
-        # A verdict the overlay raised itself (a look-alike or a delegation) shows no score; the
-        # recorded reply has neither, so its badge follows the API's verdict.
-        '${escapeHtml(label)}${classification === "UNKNOWN" || classification !== verdict ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}',
+        # A verdict the overlay raised itself (a look-alike or a delegation) shows no score, and an
+        # incomplete one leaves the coverage text to the analysis line; the recorded reply is neither,
+        # so its badge follows the API's verdict.
+        '${escapeHtml(label)}${classification === "UNKNOWN" || classification !== verdict || incomplete ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}',
         'return Object.values(result.coverage_reasons || {}).filter(Boolean).join("; ") || '
         '_t("unknownNoReason");',
     ):
@@ -479,13 +480,8 @@ def test_hero_image_describes_its_recorded_api_reply():
             "UNKNOWN": "classUnknown",
         }[shown]
     ]
-    if shown != "UNKNOWN":
-        score_display = (
-            messages["overlayIncompleteCoverage"]
-            if incomplete
-            else f"{messages['overlaySafety']} {100 - score}/100"
-        )
-        label = f"{label} — {score_display}"
+    if shown != "UNKNOWN" and not incomplete:
+        label = f"{label} — {messages['overlaySafety']} {100 - score}/100"
     assert f"The verdict badge reads {label}" in figure
     if reply.get("danger_signals"):
         assert f"The danger signals include {reply['danger_signals'][0]}" in figure

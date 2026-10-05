@@ -1075,7 +1075,7 @@
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
-        <div class="shieldai-badge ${badgeClass}">${escapeHtml(label)}${classification === "UNKNOWN" || classification !== verdict ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}</div>
+        <div class="shieldai-badge ${badgeClass}">${escapeHtml(label)}${classification === "UNKNOWN" || classification !== verdict || incomplete ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}</div>
         ${incomplete ? `
           <p class="shieldai-unknown-why">${_t("unknownWhy")} ${escapeHtml(unknownReason(result))}</p>
         ` : ""}

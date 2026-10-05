@@ -28,6 +28,21 @@
   const objectPrototype = Object.prototype;
   const hasOwn = Object.hasOwn;
   const setPrototypeOf = Object.setPrototypeOf;
+
+  // EIP-1193 4001: User Rejected Request. A request the firewall stops, on the user's word or on
+  // their behalf, is reported the way a wallet reports a user's rejection, so a dApp treats it as
+  // a cancellation rather than as a failure.
+  function rejectedRequest(message) {
+    const error = new NativeError(message);
+    defineProperty(error, "code", {
+      __proto__: null,
+      value: 4001,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+    return error;
+  }
   const freeze = Object.freeze;
   const isFrozen = Object.isFrozen;
   const ownKeys = Reflect.ownKeys;
@@ -468,11 +483,11 @@
             if (index < decisions) {
               requestAnalysis(method, unreadable ? callsOnAnotherChain : payloadAt(index, chainId), (action) => {
                 if (structured && chainId === null) {
-                  reject(new NativeError("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
+                  reject(rejectedRequest("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
                   return;
                 }
                 if (action !== "proceed") {
-                  reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
+                  reject(rejectedRequest("Transaction blocked by ShieldAI Firewall"));
                   return;
                 }
                 decide(index + 1);
@@ -487,7 +502,7 @@
             // even when the provider does not implement chainChanged events.
             resolveChainId((latestChainId) => {
               if (revision !== chainRevision || latestChainId !== chainId) {
-                reject(new NativeError("Transaction blocked by ShieldAI: wallet chain changed; retry analysis"));
+                reject(rejectedRequest("Transaction blocked by ShieldAI: wallet chain changed; retry analysis"));
                 return;
               }
               // The wallet holds the request to the analysed chain only when
@@ -612,7 +627,7 @@
       const check = checkOf(this);
       if (check === undefined) {
         return new NativePromise((resolve, reject) => {
-          reject(new NativeError("Transaction blocked by ShieldAI Firewall"));
+          reject(rejectedRequest("Transaction blocked by ShieldAI Firewall"));
         });
       }
       const target = this;
