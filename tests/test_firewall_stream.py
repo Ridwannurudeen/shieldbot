@@ -516,6 +516,29 @@ async def test_a_hanging_pre_step_still_gets_the_first_at_the_timer(stream_api, 
     timer(monkeypatch, api, FIRST_VERDICT_SECONDS * SCALE)
     gate = asyncio.Event()
 
+    async def identification(*args, **kwargs):
+        await gate.wait()
+        return True
+
+    mock_web3_client.is_token_contract = AsyncMock(side_effect=identification)
+    events = events_of(api)
+    kind, first = await next_event(events)
+
+    assert kind == "first"
+    assert not scan_task().done()
+    assert first["pending_sources"] == sorted(WEIGHTS)
+    assert (first["coverage"], first["classification"], first["status"]) == ({}, verdicts.CAUTION, "unknown")
+    gate.set()
+    assert [kind for kind, _ in await remaining(events)] == ["final"]
+
+
+@pytest.mark.asyncio
+async def test_a_hanging_verification_does_not_hold_back_the_analyzers(stream_api, monkeypatch, mock_web3_client):
+    # Verification runs beside the analyzers, so by the first verdict they have all answered.
+    api, _ = stream_api
+    timer(monkeypatch, api, FIRST_VERDICT_SECONDS * SCALE)
+    gate = asyncio.Event()
+
     async def verification(*args, **kwargs):
         await gate.wait()
         return (True, None)
@@ -526,8 +549,7 @@ async def test_a_hanging_pre_step_still_gets_the_first_at_the_timer(stream_api, 
 
     assert kind == "first"
     assert not scan_task().done()
-    assert first["pending_sources"] == sorted(WEIGHTS)
-    assert (first["coverage"], first["classification"], first["status"]) == ({}, verdicts.CAUTION, "unknown")
+    assert first["pending_sources"] == []
     gate.set()
     assert [kind for kind, _ in await remaining(events)] == ["final"]
 

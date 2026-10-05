@@ -32,6 +32,7 @@ from utils.scam_db import BLACKLIST_RELOAD_SECONDS
 from core.risk_engine import HONEYPOT_FLOOR, apply_local_match, database_matches, medium_matches, scam_match_floor
 from services import rpc_guard
 from services.counterparty_service import code_kind
+from analyzers.intent import reads_verification
 from services.mempool_service import supports_pending_transactions
 from core import verdicts
 from core.auth import TIER_LIMITS, hash_key
@@ -1342,10 +1343,14 @@ async def _firewall_verdict(
                     raise
                 except Exception:
                     pass
-            # Verification takes up to 8 s on Robinhood Chain (Sourcify and Blockscout), so it runs
-            # beside the analyzers rather than before them; the intent analyzer awaits it.
+            # Verification takes up to 8 s on Robinhood Chain (Sourcify and Blockscout) and 16 s
+            # on an Etherscan chain, so it runs beside the analyzers. When the intent analyzer will
+            # read it, it is settled first, as before, so that wait is not spent inside the
+            # analyzers' deadline.
             if is_contract is not False:
                 verification = asyncio.create_task(_target_verification(to_addr, req.chainId, code))
+                if reads_verification(req.data, req.value):
+                    await verification
 
             ctx = AnalysisContext(
                 address=to_addr, chain_id=req.chainId, from_address=from_addr,

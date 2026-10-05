@@ -137,6 +137,19 @@ async def test_unknown_selector_reads_a_verification_still_running(analyzer, ver
     assert result.data['status'] == ('unknown' if verified is None else 'ok')
 
 
+@pytest.mark.parametrize('calldata, value, reads', [
+    ('0xdeadbeef', '0', True),
+    ('0x095ea7b3' + '0' * 128, '0', False),
+    ('0x095ea7b3' + '0' * 128, hex(10**17), True),
+    ('0x', hex(10**17), False),
+    ('0x', '0', False),
+], ids=['unknown-selector', 'approval', 'approval-with-value', 'native-transfer', 'empty'])
+def test_reads_verification_names_the_calls_that_read_it(calldata, value, reads):
+    from analyzers.intent import reads_verification
+
+    assert reads_verification(calldata, value) is reads
+
+
 @pytest.mark.asyncio
 async def test_a_cancelled_intent_leaves_the_verification_running(analyzer):
     # The registry cancels an analyzer past its deadline; the lookup it was waiting on is the

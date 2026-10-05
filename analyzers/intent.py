@@ -235,6 +235,15 @@ class IntentMismatchAnalyzer(Analyzer):
         return 85, f'{sends} an unverified contract {age} days old', None
 
 
+def reads_verification(calldata: str, value) -> bool:
+    """Whether analyze() reads the target's verification for this call: for an unknown selector,
+    or for native value paid with a call."""
+    decoded = _decoder.decode(calldata)
+    return decoded.get('category') == 'unknown' or (
+        _parse_value(value) > 0 and bool(decoded.get('selector'))
+    )
+
+
 async def _verified(ctx: AnalysisContext) -> Optional[bool]:
     """The target's verification: the firewall's lookup, running beside the analyzers, when it
     started one, otherwise what the caller read before them. Shielded, so an analyzer cancelled

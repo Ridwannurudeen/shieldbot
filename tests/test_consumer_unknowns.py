@@ -97,16 +97,16 @@ async def test_the_analyzers_do_not_wait_for_the_verification_lookup(consumer_ap
     # round-trips must run beside that wait, not after it, while the signer waits.
     api, services = consumer_api
     release = asyncio.Event()
+    seen = {}
 
     async def verification(*args, **kwargs):
         await release.wait()
         return (True, None)
 
     async def run_all(ctx, **kwargs):
-        started_before_verification = not release.is_set()
+        seen['started_before_verification'] = not release.is_set()
         release.set()
-        assert started_before_verification
-        assert await ctx.extra['verification'] is True
+        seen['verified'] = await ctx.extra['verification']
         return []
 
     api.web3_client.is_verified_contract = verification
@@ -116,6 +116,34 @@ async def test_the_analyzers_do_not_wait_for_the_verification_lookup(consumer_ap
         api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40),
         SimpleNamespace(headers={}),
     ), timeout=5)
+    assert seen == {'started_before_verification': True, 'verified': True}
+    api.risk_engine.compute_from_results.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('data, value', [('0xdeadbeef', '0'), ('0x4e71d92d', hex(10**17))], ids=['unknown-selector', 'payable'])
+async def test_verification_is_settled_first_when_the_intent_analyzer_reads_it(consumer_api, incomplete_output, data, value):
+    # Its wait is then not spent inside the analyzers' deadline, so the intent verdict is the same.
+    api, services = consumer_api
+    order = []
+
+    async def verification(*args, **kwargs):
+        await asyncio.sleep(0.01)
+        order.append('verification')
+        return (False, None)
+
+    async def run_all(ctx, **kwargs):
+        order.append('analyzers')
+        return []
+
+    api.web3_client.is_verified_contract = verification
+    services.registry.run_all = run_all
+    api.risk_engine.compute_from_results.return_value = incomplete_output
+    await api.firewall(
+        api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40, data=data, value=value),
+        SimpleNamespace(headers={}),
+    )
+    assert order == ['verification', 'analyzers']
 
 
 @pytest.mark.asyncio
