@@ -1,11 +1,10 @@
 """Sourcify v2 verification and deployment records, and Blockscout contract enrichment."""
 
 import asyncio
-import heapq
-import itertools
 import os
 import re
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -67,22 +66,27 @@ def _redact_api_key(value, api_key: str):
 # True in background work (the deployer indexer, the hunter's sweep, the launch watch), whose
 # Blockscout lookups wait behind any a user is waiting on.
 BACKGROUND: ContextVar[bool] = ContextVar("explorer_background", default=False)
+# After this many turns in a row to user lookups, the oldest waiting background lookup gets one, so
+# a stream of scans cannot starve the indexer, the hunter or the launch watch.
+USER_TURNS_BEFORE_BACKGROUND = 4
 
 
 class _Lane:
     """One Blockscout request at a time, like the lock it replaces. When it frees, a waiting lookup
-    a user is waiting on goes before waiting background ones, each kind in arrival order."""
+    a user is waiting on goes before waiting background ones, each kind in arrival order, except
+    that every USER_TURNS_BEFORE_BACKGROUND user turns in a row a background one goes next."""
 
     def __init__(self):
         self._held = False
-        self._waiting: list = []
-        self._order = itertools.count()
+        self._users: deque = deque()
+        self._background: deque = deque()
+        self._user_turns = 0
 
     @asynccontextmanager
     async def hold(self, background: bool):
         if self._held:
             turn = asyncio.get_running_loop().create_future()
-            heapq.heappush(self._waiting, (background, next(self._order), turn))
+            (self._background if background else self._users).append(turn)
             try:
                 await turn
             except asyncio.CancelledError:
@@ -98,11 +102,16 @@ class _Lane:
             self._release()
 
     def _release(self):
-        while self._waiting:
-            turn = heapq.heappop(self._waiting)[2]
-            if not turn.done():
-                turn.set_result(None)
-                return
+        queues = (self._users, self._background)
+        if self._user_turns >= USER_TURNS_BEFORE_BACKGROUND:
+            queues = (self._background, self._users)
+        for queue in queues:
+            while queue:
+                turn = queue.popleft()
+                if not turn.done():
+                    self._user_turns = self._user_turns + 1 if queue is self._users else 0
+                    turn.set_result(None)
+                    return
         self._held = False
 
 

@@ -422,6 +422,47 @@ async def test_a_cancelled_waiter_does_not_hold_the_lane(http):
 
 
 @pytest.mark.asyncio
+async def test_a_waiter_cancelled_as_it_is_handed_the_lane_passes_it_on(http):
+    asked, gates = _held_blockscout(http, 2)
+    service = ExplorerService()
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        first = asyncio.create_task(_lookup(service, "0x" + "1" * 40, True))
+        for _ in range(50):
+            await asyncio.sleep(0)
+        handed = asyncio.create_task(_lookup(service, "0x" + "2" * 40, False))
+        last = asyncio.create_task(_lookup(service, "0x" + "3" * 40, True))
+        for _ in range(50):
+            await asyncio.sleep(0)
+        gates[0].set()
+        while not first.done():
+            await asyncio.sleep(0)
+        # first has just handed the lane to the user's lookup, which has not run yet.
+        handed.cancel()
+        gates[1].set()
+        await asyncio.wait_for(last, timeout=5)
+    assert asked == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_background_lookups_get_a_turn_after_four_user_turns(http):
+    # Users go first, but a steady stream of them cannot starve background work.
+    asked, gates = _held_blockscout(http, 7)
+    service = ExplorerService()
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        tasks = []
+        for i, background in enumerate((True, True, False, False, False, False, False)):
+            tasks.append(asyncio.create_task(_lookup(service, "0x" + f"{i:040x}", background)))
+            for _ in range(50):
+                await asyncio.sleep(0)
+        for gate in gates:
+            gate.set()
+        await asyncio.gather(*tasks)
+    assert [call.args[0].rsplit("/", 1)[1] for call in http[1].get.call_args_list] == [
+        "0x" + f"{i:040x}" for i in (0, 2, 3, 4, 5, 1, 6)
+    ]
+
+
+@pytest.mark.asyncio
 async def test_ttl_expiry_and_chain_cache_separation(http):
     clock = [0]
     for chain_id in (4663, 56, 4663):
