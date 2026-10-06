@@ -1,9 +1,13 @@
 """Sourcify v2 verification and deployment records, and Blockscout contract enrichment."""
 
 import asyncio
+import heapq
+import itertools
 import os
 import re
 import time
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -60,6 +64,48 @@ def _redact_api_key(value, api_key: str):
     return value
 
 
+# True in background work (the deployer indexer, the hunter's sweep, the launch watch), whose
+# Blockscout lookups wait behind any a user is waiting on.
+BACKGROUND: ContextVar[bool] = ContextVar("explorer_background", default=False)
+
+
+class _Lane:
+    """One Blockscout request at a time, like the lock it replaces. When it frees, a waiting lookup
+    a user is waiting on goes before waiting background ones, each kind in arrival order."""
+
+    def __init__(self):
+        self._held = False
+        self._waiting: list = []
+        self._order = itertools.count()
+
+    @asynccontextmanager
+    async def hold(self, background: bool):
+        if self._held:
+            turn = asyncio.get_running_loop().create_future()
+            heapq.heappush(self._waiting, (background, next(self._order), turn))
+            try:
+                await turn
+            except asyncio.CancelledError:
+                # Handed the lane as it was cancelled: pass it on.
+                if turn.done() and not turn.cancelled():
+                    self._release()
+                raise
+        else:
+            self._held = True
+        try:
+            yield
+        finally:
+            self._release()
+
+    def _release(self):
+        while self._waiting:
+            turn = heapq.heappop(self._waiting)[2]
+            if not turn.done():
+                turn.set_result(None)
+                return
+        self._held = False
+
+
 class ExplorerService:
     """Cache provider responses (five minutes, a failure 30 seconds); pace each Blockscout host.
 
@@ -69,7 +115,7 @@ class ExplorerService:
 
     def __init__(self):
         self._cache = TLRUCache(maxsize=2048, ttu=_result_ttu)
-        self._blockscout_locks: dict[str, asyncio.Lock] = {}
+        self._blockscout_lanes: dict[str, _Lane] = {}
         self._inflight: dict[tuple, asyncio.Task] = {}
         self._last_request: dict[str, float] = {}
 
@@ -152,14 +198,14 @@ class ExplorerService:
         # cached nor shared, so lookups resume as soon as it closes, and it counts as failed.
         try:
             if provider == "blockscout":
-                lock = self._blockscout_locks.get(host)
-                if lock is None:
-                    lock = self._blockscout_locks[host] = asyncio.Lock()
-                async with lock:
+                lane = self._blockscout_lanes.get(host)
+                if lane is None:
+                    lane = self._blockscout_lanes[host] = _Lane()
+                async with lane.hold(BACKGROUND.get()):
                     cached = self._cache.get(cache_key)
                     if cached is not None:
                         return cached
-                    # Inside the host's lock, so a lookup queued behind the one that opened the
+                    # Inside the host's lane, so a lookup queued behind the one that opened the
                     # breaker sends nothing.
                     provider_breakers.check(provider, chain_id)
                     return self._keep(provider, chain_id, cache_key, await fetch())

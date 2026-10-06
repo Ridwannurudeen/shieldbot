@@ -35,6 +35,7 @@ from core.extension_formatter import is_scan_incomplete
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS
 from core.verdict_evidence import build_evidence
 from core.verdicts import BLOCK_MIN, SAFE_MAX
+from services.explorer_service import BACKGROUND
 from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.launch_discovery import LaunchDiscoveryError, WrongChainError
 from services.rpc_guard import CLOSED, BreakerOpenError
@@ -281,6 +282,7 @@ class Hunter:
 
     async def _loop(self, interval: int):
         """Main loop: sweep then sleep."""
+        BACKGROUND.set(True)
         while self._running:
             try:
                 await self.sweep()

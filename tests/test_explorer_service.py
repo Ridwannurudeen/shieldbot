@@ -354,6 +354,73 @@ async def test_blockscout_rate_limit_shared_across_requests(http):
     assert all(b - a >= 0.209 for a, b in zip(starts, starts[1:]))
 
 
+def _held_blockscout(http, count):
+    """count Blockscout replies, each released by its own event; records the order they were asked."""
+    asked, gates = [], []
+    for index in range(count):
+        gate = asyncio.Event()
+        response = http[0](BLOCKSCOUT_ADDRESS)
+
+        async def reply(index=index, gate=gate):
+            asked.append(index)
+            await gate.wait()
+            return BLOCKSCOUT_ADDRESS
+
+        response.json.side_effect = reply
+        gates.append(gate)
+    return asked, gates
+
+
+async def _lookup(service, address, background):
+    from services.explorer_service import BACKGROUND
+
+    BACKGROUND.set(background)
+    return await service.get_contract_creation_info(address, 4663)
+
+
+@pytest.mark.asyncio
+async def test_a_waiting_user_lookup_goes_before_waiting_background_ones(http):
+    # One Blockscout request at a time, as before; when it frees, the lookup a user is waiting on
+    # is sent before background ones that queued earlier, so the request rate is unchanged.
+    asked, gates = _held_blockscout(http, 4)
+    service = ExplorerService()
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        tasks = []
+        for i, background in enumerate((True, True, True, False)):
+            tasks.append(asyncio.create_task(_lookup(service, "0x" + f"{i:040x}", background)))
+            await asyncio.sleep(0)
+        for _ in range(50):
+            await asyncio.sleep(0)
+        assert asked == [0]
+        for gate in gates:
+            gate.set()
+        await asyncio.gather(*tasks)
+    # The user's lookup (task 3) went second; background ones kept their order.
+    assert http[1].get.call_count == 4
+    assert [call.args[0].rsplit("/", 1)[1] for call in http[1].get.call_args_list] == [
+        "0x" + f"{i:040x}" for i in (0, 3, 1, 2)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_waiter_does_not_hold_the_lane(http):
+    asked, gates = _held_blockscout(http, 2)
+    service = ExplorerService()
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        first = asyncio.create_task(_lookup(service, "0x" + "1" * 40, True))
+        await asyncio.sleep(0)
+        cancelled = asyncio.create_task(_lookup(service, "0x" + "2" * 40, False))
+        last = asyncio.create_task(_lookup(service, "0x" + "3" * 40, True))
+        for _ in range(50):
+            await asyncio.sleep(0)
+        cancelled.cancel()
+        for gate in gates:
+            gate.set()
+        await asyncio.wait_for(asyncio.gather(first, last), timeout=5)
+    assert asked == [0, 1]
+    assert http[1].get.call_count == 2
+
+
 @pytest.mark.asyncio
 async def test_ttl_expiry_and_chain_cache_separation(http):
     clock = [0]

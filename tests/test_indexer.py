@@ -412,3 +412,26 @@ class TestDeployerIndexer:
         assert 'ClientResponseError' in caplog.text
         assert synthetic_key not in caplog.text
         assert 'https://' not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_worker_marks_its_lookups_as_background(mock_web3, db):
+    # Its Blockscout lookups wait behind any a user is waiting on; the caller's own do not.
+    from services.explorer_service import BACKGROUND
+
+    seen = []
+    indexer = DeployerIndexer(mock_web3, db)
+
+    async def index(address, chain_id):
+        seen.append(BACKGROUND.get())
+
+    indexer._index_contract = index
+    await indexer.start()
+    indexer.enqueue('0x' + 'a' * 40, 4663)
+    for _ in range(50):
+        if seen:
+            break
+        await asyncio.sleep(0.01)
+    await indexer.stop()
+    assert seen == [True]
+    assert BACKGROUND.get() is False
