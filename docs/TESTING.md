@@ -70,4 +70,4 @@ The Paxos USDG exact-delivery observation was recorded earlier and was not re-pr
 
 The owner must verify deployment addresses, source revision, a confirmed publication and the served evidence document before presenting the online judge path. Live `GET /api/stats` figures require an owner-supplied snapshot and timestamp. Familiar token names or addresses are not fixed expected-safe test cases: provider coverage can change the result.
 
-The unreleased extension chain-identification repair still needs real MetaMask, Rabby and EIP-6963 tests, including chain switching and provider errors, followed by Chrome Web Store review. It is not part of the shipped-extension claim for this submission.
+The unreleased extension chain-identification repair has been tested with Rabby and still needs real MetaMask and wider EIP-6963 wallet tests, including chain switching and provider errors, followed by Chrome Web Store review. It is not part of the shipped-extension claim for this submission.
