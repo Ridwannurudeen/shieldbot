@@ -233,7 +233,7 @@ The verification block was checked locally against synthetic evidence and receip
 The published extension is 3.0.1 and predates the chain-identification fix; 3.1.0 was submitted for Web Store review on 2026-10-05 and is not yet approved. Version 3.1.0 lives in `extension/` in this repository and loads without a build step:
 
 1. Open `chrome://extensions` and turn on Developer mode.
-2. Choose Load unpacked and select the `extension/` directory of this checkout.
+2. Choose Load unpacked and select the `extension/` directory of this checkout. Without a checkout, download `shieldbot-extension-v3.1.0.zip` from the [`extension-v3.1.0` release](https://github.com/Ridwannurudeen/shieldbot/releases/tag/extension-v3.1.0), unzip it, and select the unzipped folder (the one holding `manifest.json`); it is the same build, made after the submission deadline.
 3. The card reads **ShieldAI Transaction Firewall 3.1.0** with no Errors button. Chrome warns that it cannot verify where an unpacked extension comes from; that applies to any unpacked extension.
 
 It needs no API key and no account. Open any HTTPS page that talks to an injected wallet and ask it to sign a message or send a transaction: the firewall's decision appears **before** the wallet prompt, and declining it rejects the request so the wallet is never asked. A signature request is the cheapest thing to try, because it moves no value.
