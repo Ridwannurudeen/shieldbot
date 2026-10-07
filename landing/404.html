@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0F172A" />
+  <script>(function(){try{if(localStorage.getItem("shieldbot-theme")==="light"){var d=document;d.documentElement.setAttribute("data-theme","light");d.querySelector('meta[name="theme-color"]').setAttribute("content","#FFFFFF");d.querySelector('meta[name="color-scheme"]').setAttribute("content","light")}}catch(e){}})()</script>
+  <title>Page not found | ShieldBot</title>
+  <meta name="description" content="This page could not be found on ShieldBot." />
+  <meta name="robots" content="noindex">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
+  <link rel="shortcut icon" href="/favicon.png">
+  <style>
+    :root {
+      --c-surface: 15 23 42; --c-surface-2: 10 16 32; --c-surface-3: 30 41 59;
+      --c-line: 39 51 73; --c-ink: 248 250 252; --c-body: 203 213 225; --c-muted: 148 163 184;
+      --c-emerald: 52 211 153; --c-emerald-tint: 15 42 34; --c-emerald-line: 31 95 71;
+      --c-safe-fg: 74 222 128; --c-safe-tint: 15 46 29;
+      --c-caution-fg: 250 204 21; --c-caution-tint: 48 39 8;
+      --c-high-fg: 251 146 60; --c-high-tint: 53 26 11;
+      --c-block-fg: 248 113 113; --c-block-tint: 58 20 24;
+      color-scheme: dark;
+    }
+    :root[data-theme="light"] {
+      --c-surface: 255 255 255; --c-surface-2: 246 248 250; --c-surface-3: 238 242 246;
+      --c-line: 227 232 239; --c-ink: 11 18 32; --c-body: 51 65 85; --c-muted: 71 85 105;
+      --c-emerald: 4 120 87; --c-emerald-tint: 236 253 245; --c-emerald-line: 167 243 208;
+      --c-safe-fg: 22 101 52; --c-safe-tint: 220 252 231;
+      --c-caution-fg: 133 77 14; --c-caution-tint: 254 249 195;
+      --c-high-fg: 154 52 18; --c-high-tint: 255 237 213;
+      --c-block-fg: 185 28 28; --c-block-tint: 254 226 226;
+      color-scheme: light;
+    }
+    @font-face {
+      font-family: "Manrope Variable";
+      font-style: normal;
+      font-weight: 200 800;
+      font-display: swap;
+      src: url("/fonts/manrope-latin-wght-normal.woff2") format("woff2-variations");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: "Manrope Fallback";
+      src: local("Arial");
+      size-adjust: 128.11%;
+      ascent-override: 83.21%;
+      descent-override: 23.42%;
+      line-gap-override: 0%;
+    }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: "Manrope Variable", "Manrope Fallback", Arial, Helvetica, sans-serif;
+      background: rgb(var(--c-surface));
+      color: rgb(var(--c-body));
+      line-height: 1.7;
+      padding: 0 16px;
+    }
+    a { color: rgb(var(--c-emerald)); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    p a { text-decoration: underline; }
+
+    .nav {
+      max-width: 760px; margin: 0 auto;
+      padding: 20px 0;
+      display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid rgb(var(--c-line));
+      margin-bottom: 48px;
+    }
+    .nav-logo { font-size: 22px; }
+    .nav-name { font-size: 15px; font-weight: 700; color: rgb(var(--c-ink)); }
+    .nav-back { margin-left: auto; font-size: 13px; color: rgb(var(--c-muted)); }
+    .nav-back:hover { color: rgb(var(--c-emerald)); text-decoration: none; }
+
+    .wrap { max-width: 680px; margin: 0 auto; padding-bottom: 80px; }
+
+    .hero { margin-bottom: 40px; }
+    .hero h1 {
+      font-size: 32px; font-weight: 800; color: rgb(var(--c-ink));
+      letter-spacing: -0.02em; margin-bottom: 10px;
+    }
+    .hero-meta { font-size: 13px; color: rgb(var(--c-muted)); }
+
+    h2 {
+      font-size: 20px; font-weight: 700; color: rgb(var(--c-ink));
+      margin: 40px 0 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgb(var(--c-line));
+    }
+    h3 { font-size: 17px; }
+    p { margin-bottom: 12px; font-size: 15px; color: rgb(var(--c-body)); }
+    ul { margin: 8px 0 14px 20px; }
+    li { font-size: 15px; color: rgb(var(--c-body)); margin-bottom: 6px; }
+    li strong { color: rgb(var(--c-ink)); }
+
+    .callout {
+      background: rgb(var(--c-emerald-tint));
+      border: 1px solid rgb(var(--c-emerald-line));
+      border-left: 3px solid rgb(var(--c-emerald));
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 20px 0;
+      font-size: 13px; color: rgb(var(--c-body));
+    }
+
+    .footer {
+      max-width: 760px; margin: 48px auto 0;
+      padding-top: 24px;
+      border-top: 1px solid rgb(var(--c-line));
+      font-size: 12px; color: rgb(var(--c-muted));
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    }
+  </style>
+    <script src="/js/plausible-init.js"></script>
+    <script async src="/js/script.js"></script>
+</head>
+<body>
+
+  <nav class="nav">
+    <span class="nav-logo" aria-hidden="true">&#128737;</span>
+    <span class="nav-name">ShieldAI Firewall</span>
+    <a href="/" class="nav-back">&#8592; Back to home</a>
+  </nav>
+
+  <main class="wrap">
+
+    <div class="hero">
+      <h1>This page does not exist.</h1>
+    </div>
+
+    <p>The address may be wrong, or the page may have moved.</p>
+
+    <ul>
+      <li><a href="/">Home</a></li>
+      <li><a href="/about.html">How it works</a></li>
+      <li><a href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk">Chrome extension</a></li>
+      <li><a href="https://t.me/shieldbot_bnb_bot">Telegram bot</a></li>
+      <li><a href="mailto:support@shieldbotsecurity.online">Support</a></li>
+    </ul>
+
+  </main>
+
+  <footer class="footer">
+    <span>&#169; 2026 ShieldBot Security. All rights reserved.</span>
+    <span>ShieldAI Transaction Firewall</span>
+    <nav aria-label="Footer">
+      <a href="/">Home</a>
+      <a href="/about.html">About</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/security.html">Security</a>
+      <a href="mailto:support@shieldbotsecurity.online">Support</a>
+    </nav>
+  </footer>
+
+</body>
+</html>

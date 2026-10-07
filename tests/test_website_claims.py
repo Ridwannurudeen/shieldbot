@@ -497,6 +497,7 @@ def test_hero_image_describes_its_recorded_api_reply():
 @pytest.mark.parametrize(
     "name",
     [
+        "404.html",
         "about.html",
         "privacy.html",
         "terms.html",
@@ -533,6 +534,15 @@ def test_analytics_are_proxied_so_the_content_security_policy_stays_self():
         assert upstream in block and "proxy_pass" in block and "proxy_ssl_verify on" in block, path
     assert "plausible.io" not in re.search(r'Content-Security-Policy "([^"]*)"', conf).group(1)
     assert 'endpoint: "/stats/event"' in read(LANDING_SRC / "public" / "js" / "plausible-init.js")
+
+
+def test_missing_pages_use_the_custom_404_page():
+    conf = read(ROOT / "deploy" / "nginx-shieldbotsecurity-new.conf")
+    first_server = re.search(r"(?ms)^server \{\n(.*?)^\}", conf).group(1)
+    assert "error_page 404 /404.html;" in first_server
+    assert re.search(r"location = /404\.html \{\s*internal;\s*\}", first_server)
+    assert 'name="robots" content="noindex"' in read(LANDING_SRC / "public" / "404.html")
+    assert "404.html" not in read(LANDING_SRC / "public" / "sitemap.xml")
 
 
 def test_the_theme_restore_script_is_allowed_by_the_content_security_policy():
@@ -622,9 +632,11 @@ def test_no_unbacked_marketing_claims_anywhere_on_the_site():
         "landing-src/public/privacy.html": read(LANDING_SRC / "public" / "privacy.html"),
         "landing-src/public/terms.html": read(LANDING_SRC / "public" / "terms.html"),
         "landing-src/public/security.html": read(LANDING_SRC / "public" / "security.html"),
+        "landing-src/public/404.html": read(LANDING_SRC / "public" / "404.html"),
         "landing/privacy.html": read(ROOT / "landing" / "privacy.html"),
         "landing/terms.html": read(ROOT / "landing" / "terms.html"),
         "landing/security.html": read(ROOT / "landing" / "security.html"),
+        "landing/404.html": read(ROOT / "landing" / "404.html"),
         "bundle": bundle,
     }
     for name, text in pages.items():
@@ -656,7 +668,7 @@ def test_fonts_are_self_hosted_and_the_build_copies_them():
 
 
 def test_every_static_page_declares_its_manrope_face():
-    for name in ("about.html", "privacy.html", "terms.html", "security.html"):
+    for name in ("404.html", "about.html", "privacy.html", "terms.html", "security.html"):
         for page in (LANDING_SRC / "public" / name, ROOT / "landing" / name):
             html = read(page)
             assert not any(line.startswith("+") for line in html.splitlines()), page
