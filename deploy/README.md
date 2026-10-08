@@ -195,16 +195,18 @@ each and requiring exactly one hash in the policy, so a reformatted script or a 
 the suite rather than breaking the live site silently. The test cannot see the live vhost, which is why
 the curl above is not optional.
 
-The reference landing vhost serves `/404.html` for missing pages. Mirror the `error_page 404 /404.html;`
-line and the internal `location = /404.html` block in the live vhost by hand, then run
-`nginx -t && systemctl reload nginx`. Until then, `landing/404.html` is deployed but unused.
-
 **Changing the hash later has an unavoidable gap.** That test requires *exactly one* `'sha256-` in
 `script-src`, so the policy cannot carry the old and new hashes side by side across a cutover. The order
 is therefore: cut over first, then edit the vhost and reload immediately after. Between those two steps
 the new script is refused and light-choosers see dark. Keep the gap to seconds, and verify with the curl
 above once the reload is done. This does not apply to the first deploy of a dark build, because the live
 site has no inline script yet and the hash can be added before the cutover, inert until the swap.
+
+### Custom 404 page
+
+The reference landing vhost serves `/404.html` for missing pages. Mirror the `error_page 404 /404.html;`
+line and the internal `location = /404.html` block in the live vhost by hand, then run
+`nginx -t && systemctl reload nginx`. Until then, `landing/404.html` is deployed but unused.
 
 ### Landing analytics (Plausible)
 

@@ -538,9 +538,10 @@ def test_analytics_are_proxied_so_the_content_security_policy_stays_self():
 
 def test_missing_pages_use_the_custom_404_page():
     conf = read(ROOT / "deploy" / "nginx-shieldbotsecurity-new.conf")
-    first_server = re.search(r"(?ms)^server \{\n(.*?)^\}", conf).group(1)
+    first_server = re.search(r"^server \{\n(.*?)^\}", conf, re.MULTILINE | re.DOTALL).group(1)
     assert "error_page 404 /404.html;" in first_server
     assert re.search(r"location = /404\.html \{\s*internal;\s*\}", first_server)
+    assert "proxy_intercept_errors" not in conf
     assert 'name="robots" content="noindex"' in read(LANDING_SRC / "public" / "404.html")
     assert "404.html" not in read(LANDING_SRC / "public" / "sitemap.xml")
 
