@@ -191,6 +191,7 @@ TOKEN_REFUSED = {
     "v4-native": "TRANSFER_FROM_FAILED",
     "v4-weth": "TRANSFER_FROM_FAILED",
     "v4-doppler": "TRANSFER_FROM_FAILED",
+    "v4-usdg": "TRANSFER_FROM_FAILED",
     "v2": "TransferHelper: TRANSFER_FROM_FAILED",
 }
 
