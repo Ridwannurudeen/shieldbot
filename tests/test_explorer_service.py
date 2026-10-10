@@ -406,16 +406,16 @@ async def _adapter_lookup(adapter, address, background):
         BACKGROUND.reset(token)
 
 
-def _tracked_adapter(service, foreground_address, fetch_addresses):
-    adapter = EvmAdapter(4663, "Robinhood Chain", "https://rpc.invalid")
+def _tracked_adapter(service, foreground_address, fetch_addresses, chain_id=4663):
+    adapter = EvmAdapter(chain_id, "Creation test chain", "https://rpc.invalid")
     adapter._explorer_service = service
     fetch_started = {address: asyncio.Event() for address in fetch_addresses}
     original_fetch = adapter._fetch_creation_info
 
-    async def track_fetch(address, promoted):
+    async def track_fetch(address):
         if address in fetch_started:
             fetch_started[address].set()
-        return await original_fetch(address, promoted)
+        return await original_fetch(address)
 
     adapter._fetch_creation_info = track_fetch
     original_lookup = adapter.get_contract_creation_info
@@ -457,13 +457,23 @@ async def test_a_waiting_user_lookup_goes_before_waiting_background_ones(http):
 
 
 @pytest.mark.asyncio
-async def test_foreground_adapter_join_promotes_queued_background_creation(http):
+@pytest.mark.parametrize(
+    "chain_id,base_url,expected_params",
+    [
+        (8453, "https://base.blockscout.com", {}),
+        (4663, "https://api.blockscout.com/4663", {"apikey": "test-key"}),
+    ],
+    ids=["base-public-instance", "pro-gateway"],
+)
+async def test_foreground_adapter_join_promotes_queued_background_creation(
+    http, chain_id, base_url, expected_params
+):
     addresses = ["0x" + f"{i:040x}" for i in (1, 2, 3)]
     blocker, target, other = addresses
     gates, started = _held_adapter_blockscout(http, 3)
     service = ExplorerService()
     adapter, fetch_started, foreground_joined = _tracked_adapter(
-        service, target, (target, other)
+        service, target, (target, other), chain_id
     )
     tasks = []
     with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
@@ -491,6 +501,15 @@ async def test_foreground_adapter_join_promotes_queued_background_creation(http)
         blocker,
         target,
         other,
+    ]
+    assert [call.args[0] for call in http[1].get.call_args_list] == [
+        f"{base_url}/api/v2/addresses/{address}"
+        for address in (blocker, target, other)
+    ]
+    assert [call.kwargs["params"] for call in http[1].get.call_args_list] == [
+        expected_params,
+        expected_params,
+        expected_params,
     ]
 
 

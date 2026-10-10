@@ -388,32 +388,35 @@ class EvmAdapter(ChainAdapter):
         self, address: str, key: tuple, flight_key: tuple, promoted: asyncio.Event
     ) -> Optional[Dict]:
         try:
-            info = await self._fetch_creation_info(address, promoted)
+            from services.explorer_service import BACKGROUND
+
+            token = (
+                BACKGROUND.set(False)
+                if promoted.is_set()
+                and self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout')
+                else None
+            )
+            try:
+                info = await self._fetch_creation_info(address)
+            finally:
+                if token is not None:
+                    BACKGROUND.reset(token)
         finally:
             self._creation_inflight.pop(flight_key, None)
         if info and info.get('age_days') is not None:
             self._creation_infos[key] = info
         return info
 
-    async def _fetch_creation_info(
-        self, address: str, promoted: asyncio.Event
-    ) -> Optional[Dict]:
+    async def _fetch_creation_info(self, address: str) -> Optional[Dict]:
         """The contract's creator and creation transaction from its explorer, dated by _date_creation.
         None when no source knows the contract; undated when a source knows it but it could not be
         dated, so the next caller asks again.
         """
         try:
             if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
-                from services.explorer_service import BACKGROUND
-
-                token = BACKGROUND.set(False) if promoted.is_set() else None
-                try:
-                    result = await self._explorer_service.get_contract_creation_info(
-                        address, self._chain_id
-                    )
-                finally:
-                    if token is not None:
-                        BACKGROUND.reset(token)
+                result = await self._explorer_service.get_contract_creation_info(
+                    address, self._chain_id
+                )
                 if result.status == 'unknown':
                     logger.warning("[%s] Creation unknown: %s", self._chain_name, result.reason)
                     return None

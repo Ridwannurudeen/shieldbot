@@ -148,14 +148,15 @@ class ExplorerService:
         self._last_request: dict[str, float] = {}
 
     async def _request(
-        self, provider: str, url: str, params: dict, chain_id: int
+        self, provider: str, url: str, params: dict, chain_id: int, cache_key=None
     ) -> ExplorerResult:
-        cache_key = (
-            url,
-            tuple(
-                sorted((key, value) for key, value in params.items() if key != "apikey")
-            ),
-        )
+        if cache_key is None:
+            cache_key = (
+                url,
+                tuple(
+                    sorted((key, value) for key, value in params.items() if key != "apikey")
+                ),
+            )
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
@@ -283,31 +284,43 @@ class ExplorerService:
             return ExplorerResult(
                 "unknown", reason="BLOCKSCOUT_API_KEY is missing", provider="blockscout"
             )
+        url, request_params, cache_key = self._blockscout_request_details(
+            path, chain_id, params
+        )
+        return await self._request(
+            "blockscout", url, request_params, chain_id, cache_key
+        )
+
+    def _blockscout_request_details(self, path, chain_id, params=None):
         instance = BLOCKSCOUT_INSTANCES.get(chain_id)
         if instance:
-            return await self._request(
-                "blockscout", f"{instance}/api/v2/{path}", params or {}, chain_id
-            )
-        return await self._request(
-            "blockscout",
-            f"https://api.blockscout.com/{chain_id}/api/v2/{path}",
-            {**(params or {}), "apikey": os.getenv("BLOCKSCOUT_API_KEY")},
-            chain_id,
+            url = f"{instance}/api/v2/{path}"
+            request_params = params or {}
+        else:
+            url = f"https://api.blockscout.com/{chain_id}/api/v2/{path}"
+            request_params = {**(params or {}), "apikey": os.getenv("BLOCKSCOUT_API_KEY")}
+        cache_key = (
+            url,
+            tuple(
+                sorted(
+                    (key, value)
+                    for key, value in request_params.items()
+                    if key != "apikey"
+                )
+            ),
         )
+        return url, request_params, cache_key
+
+    def _contract_creation_request_details(self, address, chain_id):
+        return self._blockscout_request_details(f"addresses/{address.lower()}", chain_id)
 
     def promote_contract_creation_lookup(self, address: str, chain_id: int) -> None:
         if not _is_address(address):
             return
-        address = address.lower()
-        instance = BLOCKSCOUT_INSTANCES.get(chain_id)
-        url = (
-            f"{instance}/api/v2/addresses/{address}"
-            if instance
-            else f"https://api.blockscout.com/{chain_id}/api/v2/addresses/{address}"
-        )
+        url, _, cache_key = self._contract_creation_request_details(address, chain_id)
         lane = self._blockscout_lanes.get(urlsplit(url).hostname)
         if lane is not None:
-            lane.promote((url, ()))
+            lane.promote(cache_key)
 
     async def get_sourcify_verification(
         self, address: str, chain_id: int
@@ -446,7 +459,12 @@ class ExplorerService:
     ) -> ExplorerResult:
         if not _is_address(address):
             return ExplorerResult("unknown", reason="Invalid address")
-        result = await self._blockscout(f"addresses/{address.lower()}", chain_id)
+        if not self.can_reach_blockscout(chain_id):
+            return ExplorerResult(
+                "unknown", reason="BLOCKSCOUT_API_KEY is missing", provider="blockscout"
+            )
+        url, params, cache_key = self._contract_creation_request_details(address, chain_id)
+        result = await self._request("blockscout", url, params, chain_id, cache_key)
         if result.status == "unknown":
             return result
         data = result.data
