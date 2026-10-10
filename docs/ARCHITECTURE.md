@@ -1,6 +1,6 @@
 # ShieldBot Architecture
 
-This is the original February 2026 architecture sketch. Its component diagrams and example outputs are historical, not a current deployment inventory. The persistence and sender constraints below are current source-tree requirements; see [TECHNICAL.md](TECHNICAL.md) for coverage limits, including the unreleased extension chain-resolution fix.
+This is the original February 2026 architecture sketch. Its component diagrams and example outputs are historical, not a current deployment inventory. The persistence and sender constraints below are current source-tree requirements; see [TECHNICAL.md](TECHNICAL.md) for the released extension's chain-identification behavior and other coverage limits.
 
 ## System Overview
 

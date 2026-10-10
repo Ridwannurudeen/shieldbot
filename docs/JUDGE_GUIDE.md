@@ -1,6 +1,6 @@
 # Judge guide: inspect the evidence in ten minutes
 
-**Limits first.** This checkout does not establish released Robinhood browser protection: the extension on the Chrome Web Store is 3.0.1 and keeps its chain-identification limitation. The fix is in 3.1.0 in this repository, which section 4 below loads unpacked; that build was submitted for Web Store review on 2026-10-05, is not yet approved, and has not been tested against MetaMask or Rabby. Simulation covers selected routes and amounts, not every launch. USDG support covers Doppler-hooked v4 pools and hookless v4 pools found by direct lookup at standard fee and tick-spacing pairs; V2 USDG pairs are not covered. There is no stock-issuer authenticity check. Unknown data can produce a user-overridable warning in human interfaces; it is not a blanket transaction block.
+**Limits first.** The Chrome Web Store listing for ShieldAI Transaction Firewall serves version 3.1.0, the same version as `extension/` in this repository. Version 3.1.0 asks the wallet which chain it is on. It has been tested with a real Rabby installation; MetaMask and wider EIP-6963 wallet testing remain outstanding. Simulation covers selected routes and amounts, not every launch. USDG support covers Doppler-hooked v4 pools and hookless v4 pools found by direct lookup at standard fee and tick-spacing pairs; V2 USDG pairs are not covered. There is no stock-issuer authenticity check. Unknown data can produce a user-overridable warning in human interfaces; it is not a blanket transaction block.
 
 The RPC proxy only sees requests routed through it; contract creation bypasses analysis, and raw transactions are already signed. On-chain enforcement is explicit: `ShieldBotVerdictGuard` reads the registry, and `ShieldBotGuardedTransfer` requires an allowed verdict before moving funds.
 
@@ -118,16 +118,16 @@ The on-chain enum expresses evidence, not these client actions: `UNKNOWN=0`, `LO
 
 Precedence is `NO_RECORD → HIGH/HONEYPOT → FUTURE_TIMESTAMP → EXPIRED → LOW/MEDIUM allowed → UNKNOWN`. The numeric codes are unchanged. Adverse-first changes only the explanation: an expired LOW loses permission with `EXPIRED`, while an expired HONEYPOT reports `HONEYPOT`, not an apparent invitation to retry. UNKNOWN has no adverse content, so expiry takes precedence over it.
 
-### On-chain transfer demonstration (offline)
+### On-chain transfer demonstration
 
-This needs Foundry. If `forge` is not installed, install it with `curl -L https://foundry.paradigm.xyz | bash`, open a new shell and run `foundryup`; these cases were checked with Forge 1.7.1. Then run these from the repository root in Bash/Git Bash. The pinned Solidity dependencies are git submodules; the `git submodule` line fetches them into `contracts/base/lib/` when the clone was made without `--recursive`. The first command reproduces the proven honeypot classifier from section 1; the Foundry command separately records each verdict into the real registry and exercises the real guard and transfer with a mock ERC-20. It is an offline composition of classifier evidence and consumer enforcement, not a live scan-to-publication transaction.
+This needs Foundry. If `forge` is not installed, install it with `curl -L https://foundry.paradigm.xyz | bash`, open a new shell and run `foundryup`; these cases were checked with Forge 1.7.1. Then run these from the repository root in Bash/Git Bash. The pinned Solidity dependencies are git submodules; the `git submodule` line fetches them into `contracts/base/lib/` when the clone was made without `--recursive`. The first command reproduces the proven honeypot classifier from section 1, and the Python cases run offline. The Foundry command separately records each verdict into the real registry and exercises the real guard and transfer with a mock ERC-20. On a fresh install, the first `forge test` downloads the pinned solc 0.8.28 compiler once and needs a network connection; later runs use the cached compiler. This is a local composition of classifier evidence and consumer enforcement, not a live scan-to-publication transaction.
 
 ```bash
 python -m pytest tests/test_robinhood_simulation.py::test_live_honeypot_is_proven_unsellable tests/test_robinhood_simulation.py::test_4663_proven_honeypot_is_flagged_through_the_analyzer -v -p no:cacheprovider
 export PATH="$HOME/.foundry/bin:$PATH"
 git submodule update --init --recursive
 cd contracts/base
-forge test --offline --match-contract ShieldBotGuardedTransferTest --match-test 'test_Transfer_(FreshLow|HoneypotDeniesBeforeTokenCall|UnknownDeniesBeforeTokenCall|ExpiredDeniesBeforeTokenCall)' -vv
+forge test --match-contract ShieldBotGuardedTransferTest --match-test 'test_Transfer_(FreshLow|HoneypotDeniesBeforeTokenCall|UnknownDeniesBeforeTokenCall|ExpiredDeniesBeforeTokenCall)' -vv
 ```
 
 Expected: both Python cases and all four Foundry cases pass. `FreshLow` proves the approved caller loses exactly the requested amount, the pinned recipient receives it, and `GuardedTransfer(subject, caller, amount, maxAge)` matches. The other cases prove `NotAllowed` with `HONEYPOT`, `UNKNOWN` and `EXPIRED`, unchanged balances/allowance, and **zero token transfer calls**. UNKNOWN and expired are two forms of the third outcome: no current permission. The tests use `MAX_AGE = 300` solely to exercise boundaries; use the operating values below for the demo.
@@ -230,7 +230,7 @@ The verification block was checked locally against synthetic evidence and receip
 
 ## 4. Run the browser extension, unpacked
 
-The published extension is 3.0.1 and predates the chain-identification fix; 3.1.0 was submitted for Web Store review on 2026-10-05 and is not yet approved. Version 3.1.0 lives in `extension/` in this repository and loads without a build step:
+The Chrome Web Store listing for ShieldAI Transaction Firewall serves version 3.1.0, the same version as `extension/` in this repository, and it loads without a build step:
 
 1. Open `chrome://extensions` and turn on Developer mode.
 2. Choose Load unpacked and select the `extension/` directory of this checkout. Without a checkout, download `shieldbot-extension-v3.1.0.zip` from the [`extension-v3.1.0` release](https://github.com/Ridwannurudeen/shieldbot/releases/tag/extension-v3.1.0), unzip it, and select the unzipped folder (the one holding `manifest.json`); it is the same build, made after the submission deadline.
@@ -240,4 +240,4 @@ It needs no API key and no account. Open any HTTPS page that talks to an injecte
 
 What it covers, and what it does not: it hooks nine methods on a wallet injected into the page, through `window.ethereum` or EIP-6963. WalletConnect sessions and anything begun inside the wallet are not seen. Switching the firewall off in its settings forwards every request to the wallet untouched, with two exceptions the extension's README records: a document the content script cannot reach, such as a same-origin frame or `about:blank`, is never told the setting and keeps refusing, and a request made in the moment before the first settings message is still chain-bound.
 
-This build has not been through Chrome Web Store review, and it has been tested with a real Rabby installation but not with MetaMask; its behaviour is covered by the repository's extension tests and by a run in Chrome against a synthetic provider at `1216d95`. The popup, side panel and content script changed after that run (`958c166`, `b47f2c2`, `a580654`); this guide records no later run against a synthetic provider. Released browser protection for Robinhood Chain is not claimed.
+Version 3.1.0 has been tested with a real Rabby installation but not with MetaMask; its behaviour is covered by the repository's extension tests and by a run in Chrome against a synthetic provider at `1216d95`. The popup, side panel and content script changed after that run (`958c166`, `b47f2c2`, `a580654`); this guide records no later run against a synthetic provider. Commit `21e2869` reports a stopped request as EIP-1193 4001, and `e23ac00` explains unsupported networks in plain words.

@@ -1,6 +1,6 @@
 # ShieldBot Roadmap
 
-Historical March 2026 planning record. Repository checklists below are not current deployment evidence. Current repository coverage and the shipped extension limitation are in [README.md](README.md) and [docs/TECHNICAL.md](docs/TECHNICAL.md). Future targets below are proposals, not measured outcomes.
+Historical March 2026 planning record. Repository checklists below are not current deployment evidence. Current repository coverage and the extension's remaining wallet testing limits are in [README.md](README.md) and [docs/TECHNICAL.md](docs/TECHNICAL.md). Future targets below are proposals, not measured outcomes.
 
 ShieldBot is a transaction security service for eight EVM chains. The V2 plan below frames it as a **cross-chain security intelligence network**; shared observations can inform later scans, and missing observations remain unknown.
 
@@ -18,7 +18,7 @@ ShieldBot is a transaction security service for eight EVM chains. The V2 plan be
 
 | Channel | Repository scope | Release qualification |
 |---------|------------------|-----------------------|
-| Chrome Extension | Wrapped provider requests and risk overlays | Shipped omitted-chain limitation; provider-chain repair unreleased; proceed overrides remain |
+| Chrome Extension | Wrapped provider requests and risk overlays | Version 3.1.0 is released; proceed overrides remain |
 | RPC Proxy | Transaction-checking proxy implementation | Deployment and wallet compatibility not verified by this roadmap; coverage depends on chain and providers |
 | SDK | See `sdk/` and the current README | Package publication status not verified here |
 | Telegram | 12 registered command handlers | Running deployment not verified here; chain support is not complete provider coverage |
@@ -65,7 +65,7 @@ ShieldBot is a transaction security service for eight EVM chains. The V2 plan be
 - [x] **SDK code**: See `sdk/`; package publication is not verified by this roadmap.
 - [x] **Public threat dashboard** — Real-time feed of detected threats and campaigns.
 - [x] **Threat Feed API** — Subscribe to ShieldBot's intelligence.
-- [ ] **Chrome Web Store release evidence**: Owner must verify the published version; the provider-chain repair remains unreleased.
+- [x] **Chrome Web Store release evidence**: The store was checked on 8 October 2026 through Google's update service and serves 3.1.0.
 - [x] **Landing page**: Historical URL https://shieldbotsecurity.online; deployment is not verified here.
 
 ---

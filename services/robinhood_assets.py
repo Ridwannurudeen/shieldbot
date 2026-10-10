@@ -492,10 +492,10 @@ def with_impostor_check(scan: Dict, check: Dict) -> Dict:
 def official_asset_reason(check: Dict, finding: str) -> str:
     """The note stating ``finding``, such as "sell simulation does not apply", for the official token ``check``.
 
-    The market and honeypot analyzers skip a 4663 token at an official address (RobinhoodAssets.official)
-    with this as their reason and their note: the canonical WETH and USDG are the quote side of every
-    pair, so no pair prices them and their own pools are not a sell route, and a tokenised stock trades
-    in hookless USDG pools the simulator does not cover. A gap there is not evidence about the token.
+    The market analyzer skips every official address with this reason and note. The honeypot analyzer
+    always skips canonical WETH and USDG, but simulates official tokenised stocks, including through
+    hookless USDG pools. It uses this note for a stock token only when the simulation leaves
+    is_honeypot or can_sell undecided. A gap there is not evidence about the token.
     """
     if check["canonical"]:
         return f"Canonical {check['symbol']} of Robinhood Chain (exact address): {finding}"

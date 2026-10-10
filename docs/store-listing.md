@@ -1,6 +1,8 @@
 # Chrome Web Store listing and release checklist for 3.1.0
 
-The published listing (checked 23 September 2026) is version 3.0.1, English only, and says the
+Version 3.1.0 was uploaded to the Chrome Web Store and is now served under the listing title ShieldAI Transaction Firewall, the same version as `extension/` in this repository. The version was checked on 8 October 2026 through Google's update service.
+
+The listing checked on 23 September 2026 was version 3.0.1, English only, and said the
 extension "blocks the transaction", offers "Tenderly pre-execution simulation" and "Permit2
 signature analysis". The shipped code does none of those things from the extension, so the text
 below replaces it. Everything in it is true of the 3.1.0 code in this repository.
@@ -71,8 +73,8 @@ smoke test in section 3 has passed with them.
 ## 2. Release checklist (owner)
 
 1. Merge the release branches into main and run `python -m pytest -q -p no:cacheprovider`.
-2. Confirm `extension/manifest.json` says `"version": "3.1.0"`. The store refuses a package whose
-   version is not higher than the published 3.0.1.
+2. Confirm `extension/manifest.json` says `"version": "3.1.0"`. At the time 3.1.0 was prepared,
+   the published version was 3.0.1, so the package version had to be higher.
 3. Build the package from the `extension` folder, leaving out `README.md`. `manifest.json` must
    sit at the root of the zip. This command,
    run from the repository root, writes it with forward-slash entry names on any system:
@@ -84,19 +86,18 @@ smoke test in section 3 has passed with them.
 4. In a clean Chrome profile (Chrome 111 or later, which the manifest now requires) open
    `chrome://extensions`, turn on Developer mode, use Load unpacked
    on the `extension` folder, and check: name "ShieldAI Transaction Firewall", version 3.1.0,
-   no Errors button. Then run the smoke test below. Do not upload until its release gate (steps 8
-   to 29) has passed on both MetaMask and Rabby.
-5. Developer Dashboard, Package tab: upload the zip.
-6. Store listing tab: paste the description above, in every listed language. Do not name the
+   no Errors button. Then run the smoke test below. Its manual release gate remains outstanding on
+   both MetaMask and Rabby.
+5. Developer Dashboard, Package tab: 3.1.0 was uploaded and is now served.
+6. Store listing tab: check that the description matches the text above in every listed language. Do not name the
    chains one by one: the first 3.1.0 submission (2026-10-05) was rejected for keyword spam
    ("Yellow Argon") because the English, Chinese and Vietnamese descriptions listed all eight.
    Replace the screenshots with real 3.1.0 captures
    (capture them at 1280×800 with the extension loaded unpacked). Do not upload any image that
    shows screens the extension does not have, such as the light "Threat Dashboard" mock.
-7. Privacy practices tab: `docs/CHROME_WEB_STORE_DISCLOSURE.md` still says the chain-resolution fix
-   is unreleased; with 3.1.0 it ships, so update that sentence before copying from the file.
-8. Submit for review. After approval, confirm the listing shows 3.1.0 and the new text, and that
-   an existing 3.0.1 install updates without a "Setup Required" message.
+7. Privacy practices tab: compare the listing with the 3.1.0 wording in
+   `docs/CHROME_WEB_STORE_DISCLOSURE.md`.
+8. The listing serves 3.1.0, as checked on 8 October 2026 through Google's update service.
 
 ## 3. Fifteen-minute smoke test (MetaMask, then Rabby)
 
@@ -134,9 +135,9 @@ wallet. Reject every wallet popup unless you mean to spend.
 **Release gate.** Steps 8 to 29 check what the automated tests cannot: how this build's request
 handling (the frozen request copies, the chain it names, the wrapped prototypes, send and
 sendAsync, signatures sent for analysis, the hold on Block Recommended) and its warning work with a
-real wallet and a real page. They have not been run yet. All must pass on MetaMask and on Rabby
-before the package is uploaded. Where a step asks for a request that should be refused, press
-Block or Reject on the warning and never sign.
+real wallet and a real page. They have not been run yet. The package is now uploaded and served.
+Run every step on MetaMask and on Rabby before treating this manual release gate as complete. Where
+a step asks for a request that should be refused, press Block or Reject on the warning and never sign.
 
 8. **Everyday calls** (2 minutes). On a dApp, connect the wallet, see the balance, and switch the
    network from the dApp. All work as without the extension, with no ShieldAI warning.

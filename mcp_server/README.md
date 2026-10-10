@@ -32,7 +32,7 @@ How the transport behaves (`server.py`):
 ## Authentication
 
 - Both `/mcp/sse` and `/mcp/messages` require an `X-API-Key` header. Without a valid key the request is refused (401 or 403).
-- Keys start with `sb_`. They are issued by an administrator only: `POST /api/keys` with the `X-Admin-Secret` header. There is no self-service signup, so an outside user cannot get a key today.
+- Keys start with `sb_`. A free key can be requested with `POST /api/keys/free` when the server has an email provider configured; otherwise the ShieldBot operator issues keys. See the [main README](../README.md).
 - Every request made with a key counts against that key's per-minute and daily limits (free tier 60 per minute and 1,000 per day, pro tier 300 and 50,000). Opening a stream counts once; each POST counts once. Over the limit the API answers 429.
 
 ## Tools (9)
