@@ -191,8 +191,7 @@ export default function Chains() {
             /launchalerts in Telegram.
           </li>
           <li>
-            The released browser extension does not cover Robinhood Chain yet;
-            the API and Telegram bot do.
+            Version 3.1.0 of the browser extension, on the Chrome Web Store, asks the wallet which chain it is on and sends Robinhood Chain requests to the API for analysis. It has been tested with Rabby; MetaMask testing is still outstanding.
           </li>
         </ul>
       </div>
