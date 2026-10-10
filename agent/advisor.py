@@ -218,12 +218,9 @@ class Advisor:
             except (anthropic.RateLimitError, anthropic.APIConnectionError, AIEmptyResponse) as e:
                 logger.error("Advisor chat failed: %s", type(e).__name__)
                 response_text = "I encountered an error processing your request. Please try again."
-            except anthropic.APIStatusError as e:
-                logger.error("Advisor chat failed: %s", type(e).__name__)
-                if e.status_code >= 500:
-                    response_text = "I encountered an error processing your request. Please try again."
-                else:
-                    response_text = "I encountered an error processing your request. Please try again."
+            except anthropic.APIStatusError as error:
+                logger.error("Advisor chat failed: %s", type(error).__name__)
+                response_text = "I encountered an error processing your request. Please try again."
             except Exception as e:
                 name = type(e).__name__
                 logger.error("Advisor chat failed: %s", name)

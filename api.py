@@ -1612,9 +1612,13 @@ async def _firewall_verdict(
             pass
 
         if is_token is not False:
-            contract_scan = await token_scanner.check_token(to_addr, chain_id=req.chainId)
+            contract_scan = await token_scanner.check_token(
+                to_addr, chain_id=req.chainId, forensic=False,
+            )
         else:
-            contract_scan = await tx_scanner.scan_address(to_addr, chain_id=req.chainId)
+            contract_scan = await tx_scanner.scan_address(
+                to_addr, chain_id=req.chainId, forensic=False,
+            )
 
         contract_scan.pop("forensic_report", None)
         contract_scan.pop("source_code", None)
@@ -1706,7 +1710,7 @@ async def scan(req: ScanRequest):
             raise HTTPException(status_code=400, detail="Invalid address")
 
         address = web3_client.to_checksum_address(address)
-        result = await tx_scanner.scan_address(address, chain_id=req.chainId)
+        result = await tx_scanner.scan_address(address, chain_id=req.chainId, forensic=False)
 
         # Strip large fields
         result.pop("source_code", None)

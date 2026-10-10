@@ -411,7 +411,6 @@ def test_legacy_bot_unknown_values_never_look_safe(bot_report_functions, formatt
         'buy_tax': None, 'sell_tax': None, 'simulation_failed': failed_simulation,
         'checks': {'can_buy': None, 'can_sell': None, 'ownership_renounced': None,
                    'liquidity_locked': None, 'verified_source': None},
-        'ai_risk_score': {'risk_score': 0, 'risk_level': 'SAFE', 'recommendation': 'SAFE'},
         'ai_analysis': 'SAFE', 'forensic_report': 'SAFE',
     }
     report = bot_report_functions[formatter](result, 56)
@@ -987,7 +986,7 @@ def test_the_bot_legacy_token_report_header_of_an_incomplete_proven_honeypot_is_
     result = {'address': '0x' + 'a' * 40, 'status': 'ok', 'coverage': {'honeypot': 1}, 'safety_level': 'danger',
               'risk_score': 80, 'confidence': 90, 'is_honeypot': True, 'buy_tax': 0, 'sell_tax': None,
               'checks': {'can_buy': True, 'can_sell': False}, 'forensic_report': 'AI REPORT',
-              'ai_analysis': 'AI ANALYSIS', 'ai_risk_score': {'risk_score': 5, 'risk_level': 'LOW'}}
+              'ai_analysis': 'AI ANALYSIS'}
     report = bot_report_functions['format_token_result'](result, 4663)
     assert '**Safety:** 🔴 DANGER' in report
     for ai in ('AI REPORT', 'AI ANALYSIS', 'AI Risk Assessment'):

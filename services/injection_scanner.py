@@ -20,6 +20,7 @@ import unicodedata
 from collections import Counter
 from typing import Dict, List, Tuple
 
+from agent.prompts import HAIKU_MODEL
 from services.injection_patterns import (
     INJECTION_PATTERNS,
     CATEGORY_CONFIDENCE,
@@ -374,19 +375,12 @@ class InjectionScanner:
                 "Answer YES or NO with a brief reason.\n\n"
                 f"Text: {content[:500]}"
             )
-            response = await self._ai.compute_ai_risk_score({"raw_text": prompt})
-
-            # Parse the LLM response — check key_findings or recommendation
-            answer_text = ""
-            if isinstance(response, dict):
-                findings = response.get("key_findings", [])
-                rec = response.get("recommendation", "")
-                answer_text = " ".join(findings) + " " + rec
-            elif isinstance(response, str):
-                answer_text = response
-
-            answer_lower = answer_text.lower()
-            is_injection = "yes" in answer_lower
+            answer_text = await self._ai.chat(
+                model=HAIKU_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=60,
+            )
+            is_injection = re.match(r"\s*yes\b", answer_text, re.IGNORECASE) is not None
             confidence = 0.80 if is_injection else 0.20
 
             return {

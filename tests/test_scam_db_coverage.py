@@ -169,7 +169,6 @@ async def test_transaction_scanner_incomplete_lookup_keeps_matches_and_floor(
     mock_ai_analyzer,
     is_contract,
 ):
-    mock_ai_analyzer.compute_ai_risk_score.return_value = {"risk_score": 0}
     result = await _scan(mock_web3_client, is_contract, _incomplete([SCAM_MATCH]), mock_ai_analyzer)
     assert result["scam_matches"] == [SCAM_MATCH]
     assert type(result["scam_matches"]) is list

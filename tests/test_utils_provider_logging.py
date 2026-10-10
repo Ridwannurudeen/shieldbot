@@ -47,7 +47,6 @@ async def test_goplus_failure_logs_class_only(caplog, goplus_cache):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method,args", [
-    ("compute_ai_risk_score", (ADDRESS, {})),
     ("generate_forensic_report", (ADDRESS, {}, "contract")),
     ("generate_firewall_report", ({"to": ADDRESS}, {}, "CAUTION", 40)),
 ])

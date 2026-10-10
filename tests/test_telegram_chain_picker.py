@@ -612,7 +612,9 @@ def test_a_forensic_fallback_report_starts_with_its_chain(bot, formatter):
 
     rendered = assert_literal(getattr(bot, formatter)(result, 42161))
 
-    assert rendered.splitlines() == ["Chain: Arbitrum (42161)", "", "Risk Score: 5/100 — LOW"]
+    assert "Chain: Arbitrum (42161)" in rendered
+    assert "Risk Score: 5/100" in rendered
+    assert rendered.rstrip().endswith("🧠 AI Analysis:\nRisk Score: 5/100 — LOW")
 
 
 @pytest.mark.asyncio

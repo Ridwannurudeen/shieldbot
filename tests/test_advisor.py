@@ -480,7 +480,6 @@ async def test_explain_scan_ai_exception_falls_back(advisor, mock_ai):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('method,args', [
-    ('compute_ai_risk_score', ('0xABC', {'chain_id': 4663})),
     ('generate_forensic_report', ('0xABC', {'chain_id': 4663}, 'token')),
     ('generate_firewall_report', ({'chainId': 4663}, {'chain_id': 4663}, 'CAUTION', 40)),
 ])
@@ -511,8 +510,6 @@ def test_advisor_prompt_uses_supplied_chain_identity():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('method,args', [
-    ('compute_ai_risk_score', ('0xABC', {})),
-    ('compute_ai_risk_score', ('0xABC', {'chain_id': None})),
     ('generate_forensic_report', ('0xABC', {}, 'token')),
     ('generate_forensic_report', ('0xABC', {'chain_id': None}, 'token')),
     ('generate_firewall_report', ({}, {}, 'CAUTION', 40)),

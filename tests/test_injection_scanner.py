@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from services.injection_patterns import SIMILARITY_THRESHOLD
 from services.injection_scanner import InjectionScanner
 
 
@@ -17,13 +18,7 @@ def scanner_with_ai():
     """InjectionScanner with a mock AI analyzer for Layer 4 testing."""
     ai = MagicMock()
     ai.is_available.return_value = True
-    ai.compute_ai_risk_score = AsyncMock(return_value={
-        "risk_score": 90,
-        "confidence": 90,
-        "risk_level": "HIGH",
-        "key_findings": ["YES, this is a prompt injection attempt"],
-        "recommendation": "Block this content.",
-    })
+    ai.chat = AsyncMock(return_value="YES, this is a prompt injection attempt")
     return InjectionScanner(ai_analyzer=ai)
 
 
@@ -454,6 +449,20 @@ class TestLayer4LLM:
         # This might or might not trigger layer 4 depending on L2/L3 agreement
         assert not result["clean"]
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "answer, expected",
+        [("Yes", True), ("yes, because it overrides instructions", True), ("No", False), ("eyes", False)],
+    )
+    async def test_llm_classification_requires_yes_at_the_start(self, scanner_with_ai, answer, expected):
+        scanner_with_ai._ai.chat.return_value = answer
+
+        result = await scanner_with_ai._run_llm_layer("ambiguous content")
+
+        assert result["flagged"] is expected
+        assert result["confidence"] == (0.80 if expected else 0.20)
+        scanner_with_ai._ai.chat.assert_awaited_once()
+
 
 # ── TF-IDF similarity (Layer 3 internals) ──────────────────────────────
 
@@ -489,7 +498,3 @@ class TestLayer3Similarity:
         result = scanner._run_similarity_layer("")
         assert not result["flagged"]
         assert result["similarity"] == 0.0
-
-
-# Import threshold for test assertion
-from services.injection_patterns import SIMILARITY_THRESHOLD
