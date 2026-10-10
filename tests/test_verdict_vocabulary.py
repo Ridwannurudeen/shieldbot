@@ -181,10 +181,6 @@ ALLOWED = {
         "services/guardian.py",
         'risk_level = self._map_risk_level(a.get("risk_level", "UNKNOWN"))',
     ): "the rescue scan's approval tiers, mapped to wallet health's own words (follow-up to align)",
-    (
-        "utils/ai_analyzer.py",
-        "f\"Risk Level: {risk_output.get('risk_level', 'UNKNOWN')}\",",
-    ): "a level default in prompt text, outside api.py, rpc/ and core/ (follow-up: verdicts.UNKNOWN)",
 }
 # Files whose every match is allowed, and why.
 ALLOWED_FILES = {}
