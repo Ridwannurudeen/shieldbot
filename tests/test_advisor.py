@@ -198,6 +198,7 @@ async def test_chat_saves_history(advisor, mock_db, mock_ai):
     result = await advisor.chat("user123", "How does ShieldBot work?")
 
     assert result["text"] == "This contract looks risky."
+    assert mock_ai.chat_with_usage.call_args.kwargs["max_tokens"] == 2000
     # Should save both user message and assistant response
     assert mock_db.insert_chat_message.await_count == 2
     calls = mock_db.insert_chat_message.call_args_list
@@ -396,6 +397,56 @@ async def test_chat_ai_exception_returns_error(advisor, mock_db, mock_ai):
 
 
 @pytest.mark.asyncio
+async def test_chat_refusal_has_a_specific_reply(advisor, mock_ai, caplog):
+    from utils import ai_analyzer
+
+    refused = getattr(ai_analyzer, "AIRefused", RuntimeError)
+    mock_ai.chat_with_usage = AsyncMock(side_effect=refused("do not expose this"))
+
+    result = await advisor.chat("user1", "Hello")
+
+    assert result["text"] == "The assistant declined to answer this request."
+    assert "AIRefused" in caplog.text
+    assert "do not expose this" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_type,status,expected",
+    [
+        ("AuthenticationError", 401, "no working language model configured"),
+        ("PermissionDeniedError", 403, "no working language model configured"),
+        ("NotFoundError", 404, "no working language model configured"),
+        ("BadRequestError", 400, "no working language model configured"),
+        ("RateLimitError", 429, "Please try again."),
+        ("APIStatusError", 503, "Please try again."),
+        ("APIConnectionError", None, "Please try again."),
+        ("AIEmptyResponse", None, "Please try again."),
+    ],
+)
+async def test_chat_maps_anthropic_errors(advisor, mock_ai, error_type, status, expected, caplog):
+    import anthropic
+    import httpx
+    from utils import ai_analyzer
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    if error_type == "APIConnectionError":
+        error = anthropic.APIConnectionError(message="provider secret", request=request)
+    elif error_type == "AIEmptyResponse":
+        error = ai_analyzer.AIEmptyResponse("provider secret")
+    else:
+        response = httpx.Response(status, request=request)
+        kind = getattr(anthropic, error_type)
+        error = kind("provider secret", response=response, body={"detail": "provider secret"})
+    mock_ai.chat_with_usage = AsyncMock(side_effect=error)
+
+    result = await advisor.chat("user1", "Hello")
+
+    assert expected in result["text"]
+    assert "provider secret" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_chat_scan_failure_attaches_unknown_scan_data(advisor, mock_tools, mock_db, mock_ai):
     """If scan_contract fails, scan_data marks the scan unknown so surfaces cannot show the text as safe."""
     mock_tools.scan_contract = AsyncMock(side_effect=RuntimeError("fail"))
@@ -440,7 +491,8 @@ async def test_analysis_prompts_use_scan_chain(method, args):
     analyzer.model = 'test-model'
     analyzer.client = MagicMock()
     response = MagicMock()
-    response.content = [MagicMock(text='{"risk_score": 20}')]
+    response.content = [MagicMock(type='text', text='{"risk_score": 20}')]
+    response.stop_reason = 'end_turn'
     analyzer.client.messages.create = AsyncMock(return_value=response)
     with patch('utils.ai_analyzer.get_chain_name', return_value='Robinhood Chain') as lookup:
         await getattr(analyzer, method)(*args)
@@ -473,7 +525,8 @@ async def test_missing_prompt_chain_is_unknown(method, args):
     analyzer.model = 'test-model'
     analyzer.client = MagicMock()
     response = MagicMock()
-    response.content = [MagicMock(text='{"risk_score": 20}')]
+    response.content = [MagicMock(type='text', text='{"classification": "SAFE"}')]
+    response.stop_reason = 'end_turn'
     analyzer.client.messages.create = AsyncMock(return_value=response)
     with patch('utils.ai_analyzer.get_chain_name', return_value='BSC') as lookup:
         await getattr(analyzer, method)(*args)
@@ -493,7 +546,8 @@ async def test_forensic_prompt_respects_actual_chain_lookup(chain_id, expected):
     analyzer.model = 'test-model'
     analyzer.client = MagicMock()
     response = MagicMock()
-    response.content = [MagicMock(text='report')]
+    response.content = [MagicMock(type='text', text='report')]
+    response.stop_reason = 'end_turn'
     analyzer.client.messages.create = AsyncMock(return_value=response)
     await analyzer.generate_forensic_report('0xABC', {'chain_id': chain_id}, 'token')
     content = analyzer.client.messages.create.call_args.kwargs['messages'][0]['content']

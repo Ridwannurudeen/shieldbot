@@ -1,18 +1,10 @@
-"""
-AI-Powered Contract Analysis using Claude API
-Provides structured risk scoring, source code analysis, and contextual recommendations
-"""
+"""Optional forensic explanations from the Claude API."""
 
 import os
 import json
 import logging
 import anthropic
 from typing import Dict, List, Optional, Tuple
-
-try:
-    import openai as _openai_mod
-except ImportError:
-    _openai_mod = None
 
 from core.telegram_formatter import CONTROL_CHARACTERS
 from utils.firewall_prompt import FIREWALL_SYSTEM_PROMPT
@@ -21,11 +13,24 @@ from core.risk_engine import database_matches, medium_matches
 
 logger = logging.getLogger(__name__)
 
-# Model mapping: Anthropic model -> OpenAI equivalent
-_OPENAI_FALLBACK_MODELS = {
-    "claude-3-haiku-20240307": "gpt-4o-mini",
-    "claude-sonnet-4-20250514": "gpt-4o",
-}
+class AIRefused(Exception):
+    """The model declined to answer the request."""
+
+
+class AIEmptyResponse(Exception):
+    """The model returned no text."""
+
+
+def _extract_text(response) -> str:
+    """Return joined text blocks, rejecting refusals and empty responses."""
+    if getattr(response, "stop_reason", None) == "refusal":
+        raise AIRefused("The model refused the request")
+    text = "".join(
+        block.text for block in response.content if getattr(block, "type", None) == "text"
+    ).strip()
+    if not text:
+        raise AIEmptyResponse("The model returned no text")
+    return text
 
 
 def _get_prompt_chain_name(chain_id: Optional[int]) -> str:
@@ -63,11 +68,7 @@ def _known(value, template: str = '{}') -> str:
 
 
 class AIAnalyzer:
-    """Claude AI-powered contract analysis with structured scoring.
-
-    Supports OpenAI as a fallback when ANTHROPIC_API_KEY is not set
-    but OPENAI_API_KEY is available.
-    """
+    """Claude-powered contract analysis for optional scan reports."""
 
     def __init__(self):
         self.api_key = os.getenv('ANTHROPIC_API_KEY')
@@ -79,18 +80,11 @@ class AIAnalyzer:
             # multi-minute wait after that caller has already degraded to the deterministic report.
             self.client = anthropic.AsyncAnthropic(api_key=self.api_key, timeout=30.0, max_retries=0)
 
-        # OpenAI fallback
-        self._openai_client = None
-        openai_key = os.getenv('OPENAI_API_KEY')
-        if openai_key and _openai_mod:
-            self._openai_client = _openai_mod.AsyncOpenAI(api_key=openai_key)
-            logger.info("OpenAI fallback enabled")
-
-        if not self.client and not self._openai_client:
-            logger.warning("No AI keys set - AI analysis fully disabled")
-
-        self.model = os.getenv('ANTHROPIC_MODEL', 'claude-3-haiku-20240307')
+        self.model = os.getenv('ANTHROPIC_MODEL', 'claude-haiku-4-5')
         logger.info(f"AI model: {self.model}")
+
+    async def _create_message(self, **kwargs):
+        return await self.client.messages.create(**kwargs)
 
     async def chat(
         self,
@@ -110,10 +104,10 @@ class AIAnalyzer:
         system: str = None,
         max_tokens: int = 500,
     ) -> Tuple[str, int]:
-        """Unified chat method — tries Anthropic first, falls back to OpenAI.
+        """Send a chat request to Claude and return its text and token usage.
 
         Args:
-            model: Anthropic model name (auto-mapped for OpenAI fallback).
+            model: Anthropic model name.
             messages: List of {role, content} dicts.
             system: Optional system prompt.
             max_tokens: Max response tokens.
@@ -124,29 +118,15 @@ class AIAnalyzer:
         Raises:
             RuntimeError: If no AI provider is available.
         """
-        # Try Anthropic first
-        if self.client:
-            kwargs = dict(model=model, max_tokens=max_tokens, messages=messages)
-            if system:
-                kwargs["system"] = system
-            response = await self.client.messages.create(**kwargs)
-            return response.content[0].text, response.usage.input_tokens + response.usage.output_tokens
-
-        # Fallback to OpenAI
-        if self._openai_client:
-            oai_model = _OPENAI_FALLBACK_MODELS.get(model, "gpt-4o-mini")
-            oai_messages = []
-            if system:
-                oai_messages.append({"role": "system", "content": system})
-            oai_messages.extend(messages)
-            response = await self._openai_client.chat.completions.create(
-                model=oai_model,
-                max_tokens=max_tokens,
-                messages=oai_messages,
-            )
-            return response.choices[0].message.content, response.usage.total_tokens
-
-        raise RuntimeError("No AI provider available")
+        if not self.client:
+            raise RuntimeError("No Anthropic API client available")
+        kwargs = dict(model=model, max_tokens=max_tokens, messages=messages)
+        if system:
+            kwargs["system"] = system
+        if not model.startswith("claude-haiku-4"):
+            kwargs["output_config"] = {"effort": "low"}
+        response = await self._create_message(**kwargs)
+        return _extract_text(response), response.usage.input_tokens + response.usage.output_tokens
 
     async def compute_ai_risk_score(self, address: str, scan_data: Dict) -> Optional[Dict]:
         """
@@ -255,7 +235,7 @@ RULES:
 
 Generate the ShieldAI forensic report now."""
 
-            message = await self.client.messages.create(
+            message = await self._create_message(
                 model=self.model,
                 max_tokens=1200,
                 messages=[
@@ -263,7 +243,7 @@ Generate the ShieldAI forensic report now."""
                 ]
             )
 
-            report = message.content[0].text.strip()
+            report = _extract_text(message)
             logger.info(f"Forensic report generated for {address}")
             return report
 
@@ -386,7 +366,7 @@ Risk Score: {risk_score}/100
 
 Return the explanation JSON now."""
 
-            message = await self.client.messages.create(
+            message = await self._create_message(
                 model=self.model,
                 max_tokens=800,
                 messages=[
@@ -394,7 +374,7 @@ Return the explanation JSON now."""
                 ]
             )
 
-            raw = message.content[0].text.strip()
+            raw = _extract_text(message)
             # Strip markdown code fences if present
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
@@ -492,5 +472,5 @@ Return the explanation JSON now."""
         return "\n".join(lines)
 
     def is_available(self) -> bool:
-        """Check if AI analysis is available (Anthropic or OpenAI)."""
-        return self.client is not None or self._openai_client is not None
+        """Check if the Anthropic client is configured."""
+        return self.client is not None

@@ -187,7 +187,9 @@ def _analyzer(reply):
     analyzer.model = "test-model"
     analyzer.client = MagicMock()
     analyzer.client.messages.create = AsyncMock(
-        return_value=SimpleNamespace(content=[SimpleNamespace(text=reply)])
+        return_value=SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=reply)], stop_reason="end_turn"
+        )
     )
     return analyzer
 

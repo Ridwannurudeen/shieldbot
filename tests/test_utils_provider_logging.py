@@ -57,7 +57,6 @@ async def test_ai_provider_failure_logs_class_only(caplog, method, args):
     analyzer.client.messages.create = AsyncMock(
         side_effect=RuntimeError(f"Invalid x-api-key: {TEST_KEY}")
     )
-    analyzer._openai_client = None
     analyzer.model = "test-model"
     caplog.set_level(logging.DEBUG, logger="utils.ai_analyzer")
     assert await getattr(analyzer, method)(*args) is None

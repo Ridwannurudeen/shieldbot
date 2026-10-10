@@ -11,8 +11,11 @@ import re
 import time
 from typing import Any, Dict, List, Tuple
 
+import anthropic
+
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError
+from utils.ai_analyzer import AIEmptyResponse, AIRefused
 
 from agent.prompts import ADVISOR_SYSTEM_PROMPT, EXPLAIN_SCAN_TEMPLATE, HAIKU_MODEL, SONNET_MODEL
 
@@ -186,7 +189,7 @@ class Advisor:
                             ADVISOR_SYSTEM_PROMPT
                             + f"\nCurrent chain: {chain_name} (chain_id={chain_id})."
                         ),
-                        max_tokens=500,
+                        max_tokens=2000,
                     ),
                     timeout=30.0,
                 )
@@ -197,22 +200,34 @@ class Advisor:
                 )
             except UnsupportedChainError:
                 raise
+            except AIRefused as e:
+                logger.error("Advisor chat failed: %s", type(e).__name__)
+                response_text = "The assistant declined to answer this request."
+            except (
+                anthropic.AuthenticationError,
+                anthropic.PermissionDeniedError,
+                anthropic.NotFoundError,
+                anthropic.BadRequestError,
+            ) as e:
+                logger.error("Advisor chat failed: %s", type(e).__name__)
+                response_text = (
+                    "The assistant is unavailable: this deployment has no working language model "
+                    "configured. Scanning, the transaction firewall and the on-chain guard do not use "
+                    "it and are unaffected."
+                )
+            except (anthropic.RateLimitError, anthropic.APIConnectionError, AIEmptyResponse) as e:
+                logger.error("Advisor chat failed: %s", type(e).__name__)
+                response_text = "I encountered an error processing your request. Please try again."
+            except anthropic.APIStatusError as e:
+                logger.error("Advisor chat failed: %s", type(e).__name__)
+                if e.status_code >= 500:
+                    response_text = "I encountered an error processing your request. Please try again."
+                else:
+                    response_text = "I encountered an error processing your request. Please try again."
             except Exception as e:
                 name = type(e).__name__
                 logger.error("Advisor chat failed: %s", name)
-                # A rejected credential or a retired model never succeeds on a retry, so say so
-                # rather than invite one, and say what still works.
-                if name in ("AuthenticationError", "PermissionDeniedError", "NotFoundError"):
-                    response_text = (
-                        "The assistant is unavailable: this deployment has no working language model "
-                        "configured. Scanning, the transaction firewall and the on-chain guard do not use "
-                        "it and are unaffected."
-                    )
-                else:
-                    response_text = (
-                        "I encountered an error processing your request. "
-                        "Please try again."
-                    )
+                response_text = "I encountered an error processing your request. Please try again."
             else:
                 try:
                     await self.db.add_ai_tokens_used(_utc_day(), tokens)

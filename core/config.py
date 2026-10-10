@@ -20,10 +20,10 @@ class Settings(BaseSettings):
 
     # AI
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-3-haiku-20240307"
+    anthropic_model: str = "claude-haiku-4-5"
     # Daily cap (UTC day) on the tokens advisor chat and scan explanations may use, input plus
     # output, shared by the API and the bot. A chat is about 3k input and 500 output tokens, so
-    # 1,000,000 is about 280 chats, roughly $5 a day at Sonnet list price ($3/M in, $15/M out).
+    # 1,000,000 is about 280 chats, roughly $5 a day at Sonnet 5.5 list price ($2/M in, $10/M out).
     # 0 pauses AI chat and explanations (a kill switch); a negative value stops startup.
     ai_daily_token_budget: int = Field(default=1_000_000, ge=0)
 
