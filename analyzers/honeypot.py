@@ -46,7 +46,8 @@ class HoneypotAnalyzer(Analyzer):
 
         data = await self._service.fetch_honeypot_data(ctx.address, chain_id=ctx.chain_id)
         data = dict(data)
-        if (data.get('simulation_failed') or data.get('rpc_failed')) and data.get('can_sell') is True:
+        if (data.get('simulation_failed') or data.get('rpc_failed') or data.get('undecided')) \
+                and data.get('can_sell') is True:
             data['can_sell'] = None
         if official is not None and (
             data.get('is_honeypot') is None or data.get('can_sell') is None
@@ -70,6 +71,9 @@ class HoneypotAnalyzer(Analyzer):
         if data.get('rpc_failed'):
             data['coverage']['can_sell'] = False
             data['reason'] = data.get('reason') or 'Honeypot simulation could not run (unresolved)'
+        if data.get('undecided'):
+            data['coverage']['can_sell'] = False
+            data['reason'] = data.get('reason') or 'Own simulation left sellability undecided (unresolved)'
         data['status'] = 'unknown' if data.get('status') == 'unknown' or not all(data['coverage'].values()) else 'ok'
         if data['status'] == 'unknown':
             data['reason'] = data.get('reason') or 'Incomplete honeypot provider data'

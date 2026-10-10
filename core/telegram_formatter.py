@@ -150,7 +150,7 @@ def format_full_report(
     scores = risk_output.get('category_scores', {})
     not_applicable = risk_output.get('not_applicable', {})
     incomplete = is_scan_incomplete(risk_output) or bool(
-        honeypot_data and honeypot_data.get('simulation_failed')
+        honeypot_data and (honeypot_data.get('simulation_failed') or honeypot_data.get('undecided'))
     )
     # An incomplete scan's level is not known either: the engine raises missing data to a MEDIUM floor,
     # and its band still sets the icon and the final verdict.
@@ -319,9 +319,13 @@ def format_full_report(
             honeypot_data.get('reason') or honeypot_data.get('honeypot_reason') or 'Provider data unavailable'
         )
         is_honeypot = honeypot_data.get('is_honeypot')
-        # A sell simulation that failed, or of ShieldBot's own that could not run, leaves a provider's
+        # A sell simulation that failed, could not run, or left sellability undecided leaves a provider's
         # "not a honeypot" (GoPlus's, after it) unresolved.
-        unresolved = honeypot_data.get('simulation_failed') or honeypot_data.get('rpc_failed')
+        unresolved = (
+            honeypot_data.get('simulation_failed')
+            or honeypot_data.get('rpc_failed')
+            or honeypot_data.get('undecided')
+        )
         if is_honeypot is None or (unresolved and is_honeypot is False):
             hp = f'Unknown ({reason})'
         else:

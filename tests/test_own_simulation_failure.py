@@ -39,7 +39,16 @@ from tests.test_arbitrum_simulation import (
 )
 from tests.test_arbitrum_simulation import fresh_addresses as arbitrum_addresses
 from tests.test_arbitrum_simulation import load as load_arbitrum
-from tests.test_robinhood_simulation import SECRET, TOKEN, adapter_with, outcome, replay, rpc_for, set_uint
+from tests.test_robinhood_simulation import (
+    SECRET,
+    TOKEN,
+    adapter_with,
+    failed_sell as robinhood_failed_sell,
+    outcome,
+    replay,
+    rpc_for,
+    set_uint,
+)
 from tests.test_robinhood_simulation import calls_by_label as robinhood_calls
 from tests.test_robinhood_simulation import FakeRpc as RobinhoodRpc
 from tests.test_robinhood_simulation import fresh_addresses as robinhood_addresses
@@ -83,6 +92,15 @@ async def scan(chain_id, adapter, token=TOKEN, goplus=CLEAN_GOPLUS):
     # missing weight alone would keep the verdict from LOW.
     risk = RiskEngine().compute_from_results([dataclasses.replace(analyzed, weight=1.0)])
     return data, analyzed, risk, format_extension_alert(risk)
+
+
+def revert_call(call, data):
+    call.update(
+        status="0x0",
+        logs=[],
+        returnData="0x",
+        error={"message": "execution reverted", "code": 3, "data": data},
+    )
 
 
 @pytest.mark.asyncio
@@ -130,6 +148,107 @@ async def test_a_4663_pool_the_rpc_could_not_simulate_stays_unknown_beside_a_com
     assert data["can_sell"] is None and data["rpc_failed"] is True
     assert "Honeypot simulation could not run (unresolved)" in data["reason"]
     assert analyzed.score == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+@pytest.mark.parametrize("failure", ["buy revert", "unattributed sell revert"])
+async def test_a_pool_our_simulation_ran_but_could_not_decide_cannot_let_goplus_settle_sellability(
+    chain_id, failure
+):
+    if chain_id == 42161:
+        fixture = copy.deepcopy(load_arbitrum("v3_arb"))
+        if failure == "buy revert":
+            revert_call(calls_by_label(fixture)["buy"], error_string("buy disabled"))
+        else:
+            fixture = failed_sell(fixture, error_string("sells paused"))
+        adapter = arbitrum_adapter(ArbitrumRpc(fixture))
+        addresses = arbitrum_addresses(fixture)
+    else:
+        fixture = copy.deepcopy(load_robinhood("v2_router02"))
+        if failure == "buy revert":
+            revert_call(robinhood_calls(fixture)["buy"], error_string("buy disabled"))
+        else:
+            fixture = robinhood_failed_sell(fixture, error_string("sells paused"))
+        adapter = adapter_with(rpc_for(fixture))
+        addresses = robinhood_addresses(fixture)
+
+    with addresses:
+        data, analyzed, risk, extension = await scan(chain_id, adapter, fixture["token"])
+
+    assert (data["can_sell"], data["field_providers"].get("can_sell")) == (None, None)
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    assert "can_sell" not in data["field_providers"]
+    assert data["undecided"] is True
+    assert data["simulation_failed"] is data["rpc_failed"] is False
+    assert data["simulation_block"] is not None
+    assert data["coverage"]["can_sell"] is False
+    assert analyzed.score == 0
+    assert not any("suspicious" in flag.lower() for flag in analyzed.flags)
+    assert "Own simulation left sellability undecided (unresolved)" in data["reason"]
+    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data, chain_id=chain_id)
+    assert "Not Honeypot" not in report
+    assert "Sellability: Unknown" in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+async def test_a_proven_trap_still_overrides_the_clean_goplus_answer_without_becoming_undecided(chain_id):
+    if chain_id == 42161:
+        clean = load_arbitrum("v3_arb")
+        fixture = failed_sell(clean, error_string("STF"))
+        adapter = arbitrum_adapter(_answering(fixture, fixture, as_confirmation(fixture)))
+        addresses = run_addresses(fixture, "run", "confirm")
+    else:
+        fixture = load_robinhood("v2_honeypot_sell_reverts")
+        adapter = adapter_with(rpc_for(fixture))
+        addresses = robinhood_addresses(fixture)
+
+    with addresses:
+        data, analyzed, risk, extension = await scan(chain_id, adapter, fixture["token"])
+
+    assert (data["is_honeypot"], data["can_sell"]) == (True, False)
+    assert data["undecided"] is False
+    assert "Honeypot detected" in analyzed.flags and "Cannot sell token" in analyzed.flags
+
+
+@pytest.mark.asyncio
+async def test_a_sellable_pool_keeps_sellability_decided_when_another_pool_is_undecided():
+    clean = load_arbitrum("v3_arb")
+    buy_reverted = copy.deepcopy(clean)
+    revert_call(calls_by_label(buy_reverted)["buy"], error_string("buy disabled"))
+    fixture, rpc = _pools_answering(clean, buy_reverted)
+
+    with run_addresses(fixture, "run", "run"):
+        data, analyzed, risk, extension = await scan(42161, arbitrum_adapter(rpc), fixture["token"])
+
+    assert data["can_sell"] is True
+    assert data["field_providers"]["can_sell"] == "eth_simulateV1"
+    assert data["undecided"] is False
+
+
+@pytest.mark.asyncio
+async def test_legacy_scanner_keeps_sellability_unknown_for_an_undecided_simulation():
+    web3 = MagicMock()
+    web3.supports_honeypot_simulation.return_value = True
+    web3.check_honeypot = AsyncMock(
+        return_value={
+            "is_honeypot": False,
+            "can_buy": True,
+            "can_sell": True,
+            "undecided": True,
+            "status": "ok",
+            "reason": "Own simulation left sellability undecided (unresolved)",
+        }
+    )
+    scanner = TokenScanner(web3)
+    result = {"checks": {"can_sell": True}, "risks": []}
+
+    await scanner._check_honeypot(TOKEN, result, chain_id=4663)
+
+    assert result["undecided"] is True
+    assert result["honeypot_status"] == "unknown"
+    assert result["checks"]["can_sell"] is None
 
 
 @pytest.mark.asyncio
@@ -349,7 +468,7 @@ async def test_a_honeypot_is_simulation_failure_stays_unknown_and_unscored():
     assert report.count("Sellability unknown") == 1
 
 
-@pytest.mark.parametrize("unresolved", ["simulation_failed", "rpc_failed"])
+@pytest.mark.parametrize("unresolved", ["simulation_failed", "rpc_failed", "undecided"])
 def test_an_unresolved_not_a_honeypot_earns_no_confidence(unresolved):
     # The engine refuses a provider's "not a honeypot" as sellability evidence after a simulation that
     # failed or could not run, so it does not count it as data either.
@@ -361,8 +480,16 @@ def test_an_unresolved_not_a_honeypot_earns_no_confidence(unresolved):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("can_sell", [True, False])
+@pytest.mark.parametrize(
+    "failure,reason",
+    [
+        ("simulation_failed", "Honeypot simulation failed (unresolved)"),
+        ("rpc_failed", "Honeypot simulation could not run (unresolved)"),
+        ("undecided", "Own simulation left sellability undecided (unresolved)"),
+    ],
+)
 async def test_the_analyzer_itself_keeps_sellability_uncovered_after_a_simulation_that_could_not_run(
-    can_sell,
+    can_sell, failure, reason,
 ):
     # The analyzer recomputes coverage from the fields, so it applies the guard itself rather than
     # trusting the service's status.
@@ -374,7 +501,7 @@ async def test_the_analyzer_itself_keeps_sellability_uncovered_after_a_simulatio
             "can_sell": can_sell,
             "buy_tax": 0.0,
             "sell_tax": 0.0,
-            "rpc_failed": True,
+            failure: True,
             "status": "ok",
             "reason": None,
         }
@@ -383,7 +510,7 @@ async def test_the_analyzer_itself_keeps_sellability_uncovered_after_a_simulatio
     assert result.data["can_sell"] is (None if can_sell else False)
     assert result.data["coverage"]["can_sell"] is False
     assert result.data["status"] == "unknown"
-    assert result.data["reason"] == "Honeypot simulation could not run (unresolved)"
+    assert result.data["reason"] == reason
     assert not any("treat as suspicious" in flag for flag in result.flags)
 
 

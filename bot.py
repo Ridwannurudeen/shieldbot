@@ -1601,8 +1601,8 @@ def format_token_result(result: dict, chain_id: int) -> str:
         else f"{result.get('risk_score', 'N/A')}/100"
     )
     honeypot = result.get('is_honeypot')
-    # A sell simulation that failed or could not run leaves its "not a honeypot" unresolved.
-    unresolved = result.get('simulation_failed') or result.get('rpc_failed')
+    # A failed, unavailable, or undecided sell simulation leaves its "not a honeypot" unresolved.
+    unresolved = result.get('simulation_failed') or result.get('rpc_failed') or result.get('undecided')
     if honeypot is None or (unresolved and honeypot is False):
         honeypot_display = 'Unknown (honeypot data incomplete)'
     else:
