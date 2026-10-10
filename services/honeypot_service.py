@@ -171,12 +171,17 @@ class HoneypotService:
                 data['field_providers'].pop('can_sell', None)
             reasons.append('Honeypot simulation could not run (unresolved)')
 
-        # Our simulation ran a pool but could not decide. GoPlus misses the honeypots it exists to catch,
-        # so its answer does not settle sellability; nothing about the token was observed, so it is not scored.
-        if ('simulation_block' in data and not data['simulation_failed'] and not data['rpc_failed']
-                and data['field_providers'].get('can_sell') == 'goplus'):
-            data['can_sell'] = None
-            data['field_providers'].pop('can_sell', None)
+        undecided = (
+            'simulation_block' in data
+            and not data['simulation_failed']
+            and not data['rpc_failed']
+            and data['field_providers'].get('can_sell') != 'eth_simulateV1'
+        )
+        if undecided:
+            # A provider's adverse answer stands; only its clean answer is refused.
+            if data['can_sell'] is True:
+                data['can_sell'] = None
+                data['field_providers'].pop('can_sell', None)
             data['undecided'] = True
             reasons.append('Own simulation left sellability undecided (unresolved)')
 

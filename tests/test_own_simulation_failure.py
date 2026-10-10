@@ -192,6 +192,69 @@ async def test_a_pool_our_simulation_ran_but_could_not_decide_cannot_let_goplus_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id,base_score", [(42161, 100), (4663, 100)])
+async def test_an_adverse_goplus_answer_stands_beside_an_undecided_pool(chain_id, base_score):
+    if chain_id == 42161:
+        fixture = copy.deepcopy(load_arbitrum("v3_arb"))
+        revert_call(calls_by_label(fixture)["buy"], error_string("buy disabled"))
+        adapter = arbitrum_adapter(ArbitrumRpc(fixture))
+        addresses = arbitrum_addresses(fixture)
+    else:
+        fixture = copy.deepcopy(load_robinhood("v2_router02"))
+        revert_call(robinhood_calls(fixture)["buy"], error_string("buy disabled"))
+        adapter = adapter_with(rpc_for(fixture))
+        addresses = robinhood_addresses(fixture)
+    goplus = {**CLEAN_GOPLUS, "data": {**CLEAN_GOPLUS["data"], "is_honeypot": "1"}}
+
+    with addresses:
+        data, analyzed, risk, extension = await scan(chain_id, adapter, fixture["token"], goplus)
+
+    assert data["is_honeypot"] is True
+    assert data["can_sell"] is False and data["field_providers"]["can_sell"] == "goplus"
+    assert data["coverage"]["can_sell"] is False
+    assert analyzed.score == base_score
+    assert data["undecided"] is True
+    assert data["status"] == "unknown"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+async def test_undecided_pool_overrides_a_clean_goplus_answer_without_sell_fields(chain_id):
+    if chain_id == 42161:
+        fixture = copy.deepcopy(load_arbitrum("v3_arb"))
+        revert_call(calls_by_label(fixture)["buy"], error_string("buy disabled"))
+        adapter = arbitrum_adapter(ArbitrumRpc(fixture))
+        addresses = arbitrum_addresses(fixture)
+    else:
+        fixture = copy.deepcopy(load_robinhood("v2_router02"))
+        revert_call(robinhood_calls(fixture)["buy"], error_string("buy disabled"))
+        adapter = adapter_with(rpc_for(fixture))
+        addresses = robinhood_addresses(fixture)
+    goplus = {"status": "ok", "reason": None, "observed_at": 0, "data": {"is_honeypot": "0"}}
+
+    with addresses:
+        data, analyzed, risk, extension = await scan(chain_id, adapter, fixture["token"], goplus)
+
+    assert data["undecided"] is True
+    assert data["can_sell"] is None
+    assert "can_sell" not in data["field_providers"]
+    assert RiskEngine()._compute_confidence({}, data, {}, {}) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+async def test_a_full_goplus_sell_tax_stays_adverse_beside_rpc_failure(chain_id):
+    request = AsyncMock(side_effect=SimulationUnavailable("RPC HTTP 503"))
+    adapter = arbitrum_adapter(request) if chain_id == 42161 else adapter_with(request)
+
+    data, analyzed, risk, extension = await scan(chain_id, adapter, goplus=goplus_selling_at("1"))
+
+    assert data["rpc_failed"] is True
+    assert data["can_sell"] is False and data["field_providers"]["can_sell"] == "goplus"
+    assert data["coverage"]["can_sell"] is False
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("chain_id", [42161, 4663])
 async def test_a_proven_trap_still_overrides_the_clean_goplus_answer_without_becoming_undecided(chain_id):
     if chain_id == 42161:
@@ -471,7 +534,7 @@ async def test_a_honeypot_is_simulation_failure_stays_unknown_and_unscored():
 @pytest.mark.parametrize("unresolved", ["simulation_failed", "rpc_failed", "undecided"])
 def test_an_unresolved_not_a_honeypot_earns_no_confidence(unresolved):
     # The engine refuses a provider's "not a honeypot" as sellability evidence after a simulation that
-    # failed or could not run, so it does not count it as data either.
+    # failed, could not run, or left sellability undecided, so it does not count it as data either.
     honeypot = {"is_honeypot": False, "can_sell": None, "sell_tax": 0.0}
     engine = RiskEngine()
     resolved = engine._compute_confidence({}, honeypot, {}, {})
@@ -488,7 +551,7 @@ def test_an_unresolved_not_a_honeypot_earns_no_confidence(unresolved):
         ("undecided", "Own simulation left sellability undecided (unresolved)"),
     ],
 )
-async def test_the_analyzer_itself_keeps_sellability_uncovered_after_a_simulation_that_could_not_run(
+async def test_the_analyzer_itself_keeps_sellability_uncovered_after_an_unresolved_simulation(
     can_sell, failure, reason,
 ):
     # The analyzer recomputes coverage from the fields, so it applies the guard itself rather than
