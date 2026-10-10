@@ -422,7 +422,7 @@ def _error_string(data: bytes) -> Optional[str]:
         return None
     try:
         return decode(["string"], data[4:])[0]
-    except DecodingError:
+    except (DecodingError, UnicodeDecodeError):
         return None
 
 

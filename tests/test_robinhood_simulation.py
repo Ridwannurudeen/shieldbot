@@ -21,6 +21,7 @@ from core.risk_engine import RiskEngine
 from core.unknown_ledger import UnknownLedger
 from services.honeypot_service import HoneypotService
 from services.robinhood_simulation import (
+    ERROR_STRING,
     HOOKLESS_V4_FEE_TICK_SPACINGS,
     LOG_WINDOW_BLOCKS,
     MAX_LOG_WINDOWS,
@@ -36,6 +37,7 @@ from services.robinhood_simulation import (
     build_simulation_request,
     call_labels,
     evaluate_simulation,
+    _error_string,
     tax_percent,
 )
 from utils.scam_db import ScamDatabase
@@ -256,6 +258,25 @@ def test_unattributed_sell_revert_on_a_hookless_usdg_pool_stays_undecided():
     assert outcome["can_sell"] is None
     assert outcome["is_honeypot"] is None
     assert "sell reverted with an unattributed error" in outcome["reason"]
+
+
+def test_error_string_with_invalid_utf8_is_unreadable():
+    data = ERROR_STRING + encode(["bytes"], [b"\xff\xfe\xfdbad"])
+    assert _error_string(data) is None
+
+
+def test_invalid_utf8_plain_transfer_revert_does_not_crash_sell_trap_attribution():
+    fixture = failed_sell(
+        load("v2_honeypot_sell_reverts"), error_string("TransferHelper: TRANSFER_FROM_FAILED")
+    )
+    invalid_utf8 = "0x" + (ERROR_STRING + encode(["bytes"], [b"\xff\xfe\xfdbad"])).hex()
+    make_revert(calls_by_label(fixture)["transfer"], invalid_utf8)
+
+    outcome = evaluate(fixture)
+
+    assert outcome["can_sell"] is False
+    assert outcome["is_honeypot"] is True
+    assert "plain transfer to a fresh address also reverted" in outcome["reason"]
 
 
 def test_every_route_has_a_token_refused_string():
