@@ -99,7 +99,6 @@ class ThreatGraphService:
             return {"cluster_id": cluster_id, "members": [], "size": 0}
 
         # Compute stats
-        addresses = [m["address"] for m in members]
         roles = defaultdict(int)
         for m in members:
             roles[m.get("role", "member")] += 1
@@ -119,9 +118,6 @@ class ThreatGraphService:
         self, min_connections: int = 5, min_flagged_ratio: float = 0.5
     ) -> List[Dict]:
         """Find addresses matching criteria (high connectivity)."""
-        stats = await self._db.get_graph_stats()
-        total_edges = stats.get("total_edges", 0)
-
         # Get all edges grouped by source to find highly-connected nodes
         cursor = await self._db._db.execute(
             "SELECT source_address, COUNT(*) as cnt "
