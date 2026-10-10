@@ -220,16 +220,22 @@ async def db():
     await database.close()
 
 
-def make_publisher(db, registry=REGISTRY):
-    return VerdictPublisher(db, rpc_url=RPC, registry_address=registry)
+def make_publisher(db, registry=REGISTRY, alert=None):
+    options = {} if alert is None else {"alert": alert}
+    return VerdictPublisher(db, rpc_url=RPC, registry_address=registry, **options)
 
 
-def sender(db, key=KEY):
+def sender(db, key=KEY, alert=None):
     """The API process's publisher: it holds the key and drains, but the loop is driven by the test."""
-    publisher = make_publisher(db)
+    publisher = make_publisher(db, alert=alert)
     publisher._account = Account.from_key(key)
     publisher.recorder = publisher._account.address
     return publisher
+
+
+async def settle_publisher_tasks(publisher):
+    while publisher._tasks:
+        await asyncio.gather(*list(publisher._tasks))
 
 
 async def drain_all(publisher):
@@ -922,6 +928,153 @@ async def test_failures_before_signing_return_the_row_to_the_queue(db, caplog, s
     )
     assert chain.sent == []
     assert reason in caplog.text
+
+
+def assert_safe_recorder_alert(text):
+    assert RECORDER in text
+    assert KEY not in text and KEY[2:] not in text
+    assert RPC not in text and RPC_SECRET not in text
+
+
+@pytest.mark.asyncio
+async def test_recorder_low_balance_alerts_once_and_records(db):
+    chain = FakeChain()
+    reservation = (chain.estimate * 6 // 5) * (chain.base_fee * 2)
+    chain.balance = 999 * reservation
+    alert = AsyncMock()
+    publisher = sender(db, alert=alert)
+    tokens = [TOKEN, SECOND_TOKEN]
+    for token in tokens:
+        await publisher.publish(4663, token, COMPLETE)
+
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "done"
+        assert await publisher.drain_once() == "done"
+    await settle_publisher_tasks(publisher)
+
+    alert.assert_awaited_once()
+    [message] = [call.args[0] for call in alert.await_args_list]
+    assert "*ShieldBot verdict recorder is running low* on chain 4663" in message
+    assert "about 999 records left at the current fee reservation" in message
+    expected_balance = f"{chain.balance // 10**18}.{chain.balance % 10**18 * 1_000_000 // 10**18:06d}"
+    assert f"{expected_balance} ETH" in message
+    assert_safe_recorder_alert(message)
+    assert [
+        (await db.get_latest_verdict_evidence(4663, token))["onchain_status"] for token in tokens
+    ] == ["confirmed", "confirmed"]
+
+
+@pytest.mark.asyncio
+async def test_recorder_low_balance_alert_rearms_only_after_two_times_threshold(db):
+    chain = FakeChain()
+    reservation = (chain.estimate * 6 // 5) * (chain.base_fee * 2)
+    alert = AsyncMock()
+    publisher = sender(db, alert=alert)
+    tokens = ["0x" + digit * 40 for digit in "34567"]
+    for token in tokens:
+        await publisher.publish(4663, token, COMPLETE)
+
+    with rpc_node(chain):
+        for units, expected_alerts in ((999, 1), (1500, 1), (999, 1), (2000, 1), (999, 2)):
+            chain.balance = units * reservation
+            assert await publisher.drain_once() == "done"
+            await settle_publisher_tasks(publisher)
+            assert alert.await_count == expected_alerts
+
+
+@pytest.mark.asyncio
+async def test_insufficient_funds_alerts_once_per_episode(db):
+    chain = FakeChain(balance=0)
+    alert = AsyncMock()
+    publisher = sender(db, alert=alert)
+    await publisher.publish(4663, TOKEN, COMPLETE)
+    await publisher.publish(4663, SECOND_TOKEN, COMPLETE)
+
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "retry"
+        assert await publisher.drain_once() == "retry"
+        await settle_publisher_tasks(publisher)
+        failure_messages = [
+            call.args[0] for call in alert.await_args_list
+            if "cannot record" in call.args[0]
+        ]
+        assert len(failure_messages) == 1
+
+        chain.balance = 10**18
+        assert await publisher.drain_once() == "done"
+        chain.balance = 0
+        assert await publisher.drain_once() == "retry"
+    await settle_publisher_tasks(publisher)
+
+    failure_messages = [
+        call.args[0] for call in alert.await_args_list
+        if "cannot record" in call.args[0]
+    ]
+    assert len(failure_messages) == 2
+    for call in alert.await_args_list:
+        assert_safe_recorder_alert(call.args[0])
+    for message in failure_messages:
+        assert "*ShieldBot verdict recorder cannot record* on chain 4663: InsufficientFunds" in message
+        assert "recording is paused" in message
+        assert (
+            "queued verdicts are retried and dropped once their observation is older than "
+            f"{vp.MAX_OBSERVATION_AGE_SECONDS // 60} minutes"
+        ) in message
+
+
+@pytest.mark.asyncio
+async def test_insufficient_funds_then_fee_cap_alert_once_per_episode(db):
+    chain = FakeChain(balance=0)
+    alert = AsyncMock()
+    publisher = sender(db, alert=alert)
+    await publisher.publish(4663, TOKEN, COMPLETE)
+
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "retry"
+        chain.base_fee = vp.MAX_FEE_PER_GAS_WEI + 1
+        assert await publisher.drain_once() == "retry"
+    await settle_publisher_tasks(publisher)
+
+    failure_messages = [
+        call.args[0] for call in alert.await_args_list
+        if "cannot record" in call.args[0]
+    ]
+    assert len(failure_messages) == 1
+    [message] = failure_messages
+    assert "*ShieldBot verdict recorder cannot record* on chain 4663: InsufficientFunds" in message
+    assert "FeeCapExceeded" not in message
+
+
+@pytest.mark.asyncio
+async def test_fee_cap_alert_names_the_cap_failure(db):
+    chain = FakeChain(base_fee=vp.MAX_FEE_PER_GAS_WEI + 1)
+    alert = AsyncMock()
+    publisher = sender(db, alert=alert)
+    await publisher.publish(4663, TOKEN, COMPLETE)
+
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "retry"
+    await settle_publisher_tasks(publisher)
+
+    alert.assert_awaited_once()
+    [message] = [call.args[0] for call in alert.await_args_list]
+    assert "*ShieldBot verdict recorder cannot record* on chain 4663: FeeCapExceeded" in message
+    assert "the base fee is above the configured cap" in message
+    assert "insufficient funds" not in message.lower()
+    assert_safe_recorder_alert(message)
+
+
+@pytest.mark.asyncio
+async def test_no_alert_callback_keeps_insufficient_funds_as_a_retry(db):
+    chain = FakeChain(balance=0)
+    publisher = sender(db)
+    await publisher.publish(4663, TOKEN, COMPLETE)
+
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "retry"
+
+    assert publisher._tasks == set()
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "pending"
 
 
 def test_gas_boundary_constants():
