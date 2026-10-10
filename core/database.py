@@ -3056,12 +3056,14 @@ class Database:
                 renewed_at REAL NOT NULL
             );
         """)
-        # Lowering the configured cap retires excess registrations deterministically.
+        # Lowering the configured cap retires excess registrations deterministically per chain.
         await self._db.execute("""
             UPDATE guard_subjects SET enabled = 0
-            WHERE enabled = 1 AND rowid NOT IN (
-                SELECT rowid FROM guard_subjects WHERE enabled = 1
-                ORDER BY rowid LIMIT ?
+            WHERE rowid IN (
+                SELECT rowid FROM (
+                    SELECT rowid, ROW_NUMBER() OVER (PARTITION BY chain_id ORDER BY rowid) AS n
+                    FROM guard_subjects WHERE enabled = 1
+                ) WHERE n > ?
             )
         """, (GUARD_WATCH_MAX_SUBJECTS,))
         await self._db.commit()
@@ -3149,7 +3151,7 @@ class Database:
         cursor = await connection.execute("""
             INSERT INTO guard_subjects (chain_id, subject, last_observed_at)
             SELECT ?, ?, ? WHERE ? > 0 AND (
-                (SELECT COUNT(*) FROM guard_subjects WHERE enabled = 1) < ?
+                (SELECT COUNT(*) FROM guard_subjects WHERE chain_id = ? AND enabled = 1) < ?
                 OR EXISTS (
                     SELECT 1 FROM guard_subjects WHERE chain_id = ? AND subject = ? AND enabled = 1
                 )
@@ -3163,13 +3165,13 @@ class Database:
                 END
             WHERE guard_subjects.enabled = 1 OR ?
         """, (
-            chain_id, subject.lower(), measured_at, GUARD_WATCH_MAX_SUBJECTS,
+            chain_id, subject.lower(), measured_at, GUARD_WATCH_MAX_SUBJECTS, chain_id,
             GUARD_WATCH_MAX_SUBJECTS, chain_id, subject.lower(), reenable,
         ))
         return cursor.rowcount == 1
 
     async def register_guard_subject(self, chain_id: int, subject: str, registry: Optional[str]) -> bool:
-        """Explicitly watch a subject confirmed on `registry`, or reenable one, within the shared cap."""
+        """Explicitly watch a subject confirmed on `registry`, or reenable one, within its chain's cap."""
         cursor = await self._db.execute("""
             SELECT chain_id, subject, canonical FROM verdict_evidence
             WHERE chain_id = ? AND chain_id = 4663 AND subject = ?
