@@ -21,7 +21,7 @@ ShieldBot follows a **3-tier architecture**. The delivery, intelligence and data
 │                      INTELLIGENCE ENGINE                         │
 ├─────────────────────────────────────────────────────────────────┤
 │  • RiskEngine: Composite weighted scoring (4 categories)         │
-│  • AI Analyzer: optional LLM prose over a decided verdict        │
+│  • AI Analyzer: optional Anthropic findings summary              │
 │  • Calldata Decoder: Function signature + router detection       │
 │  • Tenderly Simulator: Pre-execution transaction simulation      │
 └─────────────────────────────────────────────────────────────────┘
@@ -326,14 +326,14 @@ contract_data, honeypot_data, dex_data, ethos_data, token_info = await asyncio.g
 
 **File**: `utils/ai_analyzer.py`
 
-Uses an **LLM API** to put a decided verdict into prose. It never sets a verdict: the engine decides, and of the model's reply only the narrative is kept (`api.py:1634`). A failure is swallowed and costs prose alone.
+Uses the Anthropic Claude API to summarize scan findings. A working `ANTHROPIC_API_KEY` and an available configured model are required. The engine decides the score and verdict; the model is asked for key findings and one recommendation sentence, and its output never sets the verdict. A failure omits AI prose without changing the scan result.
 
-> **Status.** This layer is not running in the current deployment: its Anthropic credential is rejected (401), so no report on any surface has carried model prose. Every verdict, score, flag and coverage reason shown to a user is produced deterministically without it.
+> **Status.** This layer is optional. If the Anthropic key or configured model is missing or rejected, reports omit AI prose; scanning, firewall verdicts and guard checks continue without the model. `/api/ready` reports the AI status for information and does not use it to determine readiness.
 
 Shape of the call:
 
 ```python
-# Input: Composite risk data from all services
+# Input: scan data, including ShieldBot's final risk level and score
 scan_data = {
     'contract': contract_data,
     'honeypot': honeypot_data,
@@ -342,21 +342,12 @@ scan_data = {
     'risk': risk_output,
 }
 
-# Output: Human-readable forensic analysis
+# Output: findings and one recommendation, without a second verdict
 ai_analysis = """
-This contract exhibits a dangerous rug pull pattern:
-
-🚨 Critical Issues:
-- Mint function allows owner to create unlimited tokens
-- Proxy pattern enables owner to change logic at any time
-- Ownership NOT renounced (active owner can rug)
-- Only $2,300 liquidity (easy to drain)
-- Pair created <12 hours ago (pump-and-dump window)
-
-💡 Recommendation: DO NOT INTERACT
-This is a textbook rug pull setup. Owner can mint tokens to dilute holders,
-or upgrade the proxy to steal funds. The low liquidity + new pair indicates
-a coordinated scam launch.
+**Key Findings:**
+- The owner can mint additional tokens.
+- The proxy can change contract logic, and liquidity is low.
+Review the owner's controls and liquidity before interacting.
 """
 ```
 
@@ -380,7 +371,7 @@ The AI never sets a score or a verdict. The legacy scanners score from their heu
 | **Async HTTP** | aiohttp, httpx | Latest | Non-blocking API calls |
 | **Web3** | web3.py | 6.15+ | Blockchain interaction |
 | **Telegram** | python-telegram-bot | 20.7 | Bot framework |
-| **AI** | LLM API | Latest | Forensic analysis |
+| **AI** | Anthropic Claude API | SDK 0.79.0 | Optional findings summary |
 | **Simulation** | Tenderly API | V1 | Transaction simulation |
 | **Storage** | BNB Greenfield SDK | Latest | On-chain reports |
 | **Extension** | Chrome Manifest V3 | Latest | Browser integration |
