@@ -97,7 +97,7 @@ smoke test in section 3 has passed with them.
    shows screens the extension does not have, such as the light "Threat Dashboard" mock.
 7. Privacy practices tab: compare the listing with the 3.1.0 wording in
    `docs/CHROME_WEB_STORE_DISCLOSURE.md`.
-8. The listing serves 3.1.0, as checked on 8 October 2026 through Google's update service.
+8. The listing serves 3.1.0, as checked on 8 October 2026 through Google's update service. Still to confirm: the listing shows the new text, and an existing 3.0.1 install updates without a "Setup Required" message.
 
 ## 3. Fifteen-minute smoke test (MetaMask, then Rabby)
 

@@ -143,7 +143,7 @@ The registry publication path is wired to Robinhood Telegram scans and hunter sc
 |---|---|
 | REST | `POST /api/scan`: a quick contract check with no sell simulation, so a token it recognises reads Unknown there, never SAFE. `POST /api/firewall`: transaction analysis and the full token check. |
 | Agent API | `POST /api/agent/firewall`: policy decision; unknown coverage, or a native value with no USD estimate (any chain but BSC and opBNB), requires owner approval rather than automatic allowance. |
-| API keys | `POST /api/keys/free`: a free key can be requested when the server has an email provider configured (Resend); otherwise the operator issues keys. One free-tier key allows 60 requests a minute and 1,000 a day per email address. See [TECHNICAL.md](docs/TECHNICAL.md#api-demo). |
+| API keys | `POST /api/keys/free`: a free key can be requested when the server has an email provider configured (Resend); otherwise the operator issues keys. One free-tier key per email address; a key allows 60 requests a minute and 1,000 a day. See [TECHNICAL.md](docs/TECHNICAL.md#api-demo). |
 | Evidence | `GET /api/verdict/4663/{address}`: latest stored evidence and publication status. |
 | Launch feed | `GET /api/launches/4663`: discovered launches and available scan outcomes; not every token on the chain. |
 | MCP | [mcp_server/](mcp_server/): scan and launch tools; approval-risk and threat-graph stubs explicitly report unknown. |

@@ -8,9 +8,9 @@ ShieldBot's entry to the Colosseum Crypto World's Fair Robinhood Chain track. Th
 
 The project existed before the contest: the multichain scanner, browser extension and Telegram bot.
 
-The Robinhood Chain work began with 37 commits authored between 23:08 UTC on 13 September and 01:07 UTC on 14 September 2026, before the window opened at 13:00 UTC on 14 September. They were the first 37 of the pull request's 106 commits, with 31 nonmerge commits and 6 merge commits among those 37. The work landed on 17 September through pull request #10 as squash commit `a60fc45`.
+The Robinhood Chain work began with 37 commits authored between 23:08 UTC on 13 September and 01:07 UTC on 14 September 2026, before the window opened at 13:00 UTC on 14 September. They were the first 37 of the pull request's 106 commits, with 31 non-merge commits and 6 merge commits among those 37. The work landed on 17 September through pull request #10 as squash commit `a60fc45`.
 
-Their subjects cover Robinhood Chain registration and adapter routing that fails closed; unknown coverage propagation through analyzers, the API, the bot and SDK; Sourcify and Blockscout explorer enrichment; a resumable Robinhood Chain census collector with eligibility reports, provider probes and read-only reports; and chain ID validation across the API, RPC, MCP and bot entry points.
+Their subjects cover Robinhood Chain registration and adapter routing that fails closed; unknown coverage propagation through analyzers, the API, the bot and SDK; Sourcify and Blockscout explorer enrichment; a resumable Robinhood Chain census collector with eligibility reports, provider probes and an operator runbook; and chain ID validation across the API, RPC, MCP and bot entry points.
 
 Everything after that was built inside the window: the sell simulation, launch discovery, the impostor check, evidence publishing, and the registry, guard and transfer contracts deployed on 27 September 2026.
 
