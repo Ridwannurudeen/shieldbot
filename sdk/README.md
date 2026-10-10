@@ -41,7 +41,7 @@ Nothing was ever published, but code built from earlier copies of this repositor
 
 ## API key
 
-`check()` and `register()` need an API key and an `agentId`. Every other call works without a key under a per-IP rate limit; with a key, the key's quota applies instead. There is no self-serve signup yet: keys are issued by the ShieldBot operator.
+`check()` and `register()` need an API key and an `agentId`. Every other call works without a key under a per-IP rate limit; with a key, the key's quota applies instead. A free key can be requested with `POST /api/keys/free` when the server has an email provider configured; otherwise the ShieldBot operator issues keys. See the [main README](../README.md).
 
 ## Quick start
 

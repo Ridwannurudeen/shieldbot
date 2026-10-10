@@ -1,6 +1,6 @@
 """The extension manifest and its store-facing text.
 
-The Chrome Web Store already carries version 3.0.1, lists the languages found in _locales, and shows
+The Chrome Web Store already carries version 3.1.0, lists the languages found in _locales, and shows
 the manifest description to every visitor, so these must stay correct and honest.
 """
 

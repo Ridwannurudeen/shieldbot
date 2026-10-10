@@ -14,7 +14,7 @@ Measured on **2026-09-27** at commit `8dc2e1e`, the last code change before this
 | Robinhood simulation and USDG | `python -m pytest tests/test_robinhood_simulation.py tests/test_robinhood_simulation_usdg.py -q -p no:cacheprovider` | **199 passed**, 1 warning, 2.41 s |
 | Judge-guide proven honeypot | `python -m pytest tests/test_robinhood_simulation.py -q -p no:cacheprovider -k "test_live_honeypot_is_proven_unsellable or test_4663_proven_honeypot_is_flagged_through_the_analyzer"` | **2 passed**, 1 warning, 1.78 s |
 | Foundry full suite | From `contracts/base`: `forge test --offline` | **114 passed, 0 failed, 0 skipped**, 33.27 s |
-| Judge-guide transfer cases | Exact Foundry command in [the guide](JUDGE_GUIDE.md#on-chain-transfer-demonstration-offline) | **4 passed, 0 failed, 0 skipped** |
+| Judge-guide transfer cases | Exact Foundry command in [the guide](JUDGE_GUIDE.md#on-chain-transfer-demonstration) | **4 passed, 0 failed, 0 skipped** |
 | Contract size build | `forge build --offline --sizes` | **Exit 0**; guard runtime 1,048 B, transfer runtime 1,616 B |
 | Touched Solidity formatting | `forge fmt --check src/ShieldBotVerdictGuard.sol src/ShieldBotGuardedTransfer.sol test/ShieldBotVerdictGuard.t.sol test/ShieldBotGuardedTransfer.t.sol` | **Exit 0** |
 
@@ -70,4 +70,4 @@ The Paxos USDG exact-delivery observation was recorded earlier and was not re-pr
 
 The owner must verify deployment addresses, source revision, a confirmed publication and the served evidence document before presenting the online judge path. Live `GET /api/stats` figures require an owner-supplied snapshot and timestamp. Familiar token names or addresses are not fixed expected-safe test cases: provider coverage can change the result.
 
-The unreleased extension chain-identification repair has been tested with Rabby and still needs real MetaMask and wider EIP-6963 wallet tests, including chain switching and provider errors, followed by Chrome Web Store review. It is not part of the shipped-extension claim for this submission.
+The released 3.1.0 chain-identification change has been tested with a real Rabby installation. MetaMask and wider EIP-6963 wallet tests, including chain switching and provider errors, remain outstanding.

@@ -124,7 +124,7 @@ export default function HowItWorks() {
               </picture>
               <figcaption className="mt-4 text-[13px] leading-relaxed text-muted">
                 The extension's 3.1.0 overlay (listed on the Chrome Web Store as
-                ShieldAI Transaction Firewall; the 3.1.0 update is not yet released), fed
+                ShieldAI Transaction Firewall), fed
                 the API's reply for this request on 26 September 2026. It
                 recommends blocking an unlimited USDC approval to the wallet
                 behind the 2021 BadgerDAO front-end attack, which GoPlus flags for

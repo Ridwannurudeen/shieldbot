@@ -33,7 +33,7 @@ Nothing was ever published, but code built from earlier copies of this repositor
 
 ## Before you call check()
 
-- **API key.** `check()` needs an API key (`X-API-Key`). There is no self-serve signup yet; keys are issued by the ShieldBot operator.
+- **API key.** `check()` needs an API key (`X-API-Key`). A free key can be requested with `POST /api/keys/free` when the server has an email provider configured; otherwise the ShieldBot operator issues keys. See the [main README](../../README.md).
 - **Registered agent.** The API answers 404 for an agent that is not registered. Register it once with `POST /api/agent/register` using the same API key (or the TypeScript SDK's `register()`); a different key gets 403.
 
 ## Usage

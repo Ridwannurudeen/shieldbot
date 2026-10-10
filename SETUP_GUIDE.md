@@ -8,7 +8,7 @@ The browser extension is in [`extension/`](extension/), version 3.1.0. It needs 
 2. Choose Load unpacked and select the `extension/` directory of this checkout.
 3. The card reads **ShieldAI Transaction Firewall 3.1.0**. Chrome warns that it cannot verify where an unpacked extension comes from; that applies to any unpacked extension.
 
-The Chrome Web Store listing serves 3.0.1, which predates the chain-identification fix in 3.1.0. Version 3.1.0 was submitted for Chrome Web Store review on 2026-10-05; until it is approved, evaluate the unpacked build.
+The Chrome Web Store listing for ShieldAI Transaction Firewall serves version 3.1.0, the same version as `extension/` in this checkout.
 
 ## What you see
 

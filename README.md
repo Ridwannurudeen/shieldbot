@@ -16,11 +16,13 @@ The core scan path refuses to call incomplete data safe and flags dangers suppor
 
 **Arbitrum Open House submission:** the version submitted on HackQuest is the [`open-house-submission`](https://github.com/Ridwannurudeen/shieldbot/tree/open-house-submission) tag, commit `a580654` (4 October 2026, 14:37 UTC). Commits to `main` after the 4 October 15:59 UTC deadline are post-deadline work, and the live API has since been updated with some of them ([judge guide](docs/JUDGE_GUIDE.md) records the deployed revision).
 
+**Colosseum Crypto World's Fair entry:** [Robinhood Chain track notes](docs/COLOSSEUM.md).
+
 ## Try it
 
 1. **Replay the evidence offline.** With the Python dependencies from the [judge guide's preparation](docs/JUDGE_GUIDE.md#preparation) installed, the [local evidence path](#run-the-local-evidence-path) replays the recorded honeypot and the other simulations with no network connection or API key.
 2. **Load the browser extension.** [`extension/`](extension/) is version 3.1.0 and loads unpacked: open `chrome://extensions`, turn on Developer mode, choose Load unpacked and select `extension/`, or the unzipped folder from the [`extension-v3.1.0` release](https://github.com/Ridwannurudeen/shieldbot/releases/tag/extension-v3.1.0), which holds the same build as a zip. The extension itself needs no API key or account, and [SETUP_GUIDE.md](SETUP_GUIDE.md) says what each surface shows. The [demo page](https://shieldbotsecurity.online/try/) sends one Robinhood Chain transaction per firewall outcome; it needs a wallet extension installed alongside, connected and switched to Robinhood Chain (4663), preferably with a fresh test account. 3.1.0 has been tested with Rabby; it has not been tested with MetaMask.
-3. **The Web Store build is older.** The [Chrome Web Store listing](https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk) serves 3.0.1, which predates the chain-identification fix. Version 3.1.0 was submitted for Chrome Web Store review on 2026-10-05 and is not yet approved. Until it is, evaluate the unpacked build.
+3. **Chrome Web Store version.** The [ShieldAI Transaction Firewall listing](https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk) serves version 3.1.0, the same version as [extension/](extension/).
 4. **Check a live record.** [Section 3 of the judge guide](docs/JUDGE_GUIDE.md#3-verify-a-verdict-without-trusting-the-api) hashes a served evidence document and matches it to its event in the verdict registry `0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`, deployed on Robinhood Chain on 2026-09-27.
 
 Live: [shieldbotsecurity.online](https://shieldbotsecurity.online) · [threat dashboard](https://api.shieldbotsecurity.online/dashboard)
@@ -31,14 +33,35 @@ Live: [shieldbotsecurity.online](https://shieldbotsecurity.online) · [threat da
 
 The guard answers one of seven reason codes, from `ALLOWED` (0) to `FUTURE_TIMESTAMP` (6). A high-risk or honeypot record keeps its adverse reason even when expired, and a zero `maxAge` always denies. The [reason table and its precedence](docs/JUDGE_GUIDE.md#what-the-on-chain-guard-enforces) are in the judge guide.
 
-The worked consumer is [`ShieldBotGuardedTransfer`](contracts/base/GUARDED_TRANSFER.md): it pins the guard, subject, USDG token and recipient, asks the guard before `safeTransferFrom` runs, and reverts with `ShortDelivery(requested, delivered)` unless the recipient's balance rises by exactly `amount`. A Robinhood Chain simulation transferred 500,000 units of Paxos USDG and credited the recipient exactly 500,000 units. What exact credit catches, what it does not, and the recipient constraint are in the [judge guide](docs/JUDGE_GUIDE.md#on-chain-transfer-demonstration-offline).
+The worked consumer is [`ShieldBotGuardedTransfer`](contracts/base/GUARDED_TRANSFER.md): it pins the guard, subject, USDG token and recipient, asks the guard before `safeTransferFrom` runs, and reverts with `ShortDelivery(requested, delivered)` unless the recipient's balance rises by exactly `amount`. A Robinhood Chain simulation transferred 500,000 units of Paxos USDG and credited the recipient exactly 500,000 units. What exact credit catches, what it does not, and the recipient constraint are in the [judge guide](docs/JUDGE_GUIDE.md#on-chain-transfer-demonstration).
 
-[Run the local allowed/honeypot/unknown/expired demonstration](docs/JUDGE_GUIDE.md#on-chain-transfer-demonstration-offline). It uses the real registry, guard and transfer in the Foundry test VM with a mock ERC-20; it does not establish a live deployment.
+[Run the local allowed/honeypot/unknown/expired demonstration](docs/JUDGE_GUIDE.md#on-chain-transfer-demonstration). It uses the real registry, guard and transfer in the Foundry test VM with a mock ERC-20; it does not establish a live deployment.
+
+A consumer can apply the same verdict check in Solidity:
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+interface IShieldBotVerdictGuard {
+    function check(address subject, uint64 maxAge) external view returns (bool allowed, uint8 reason);
+    function requireAllowed(address subject, uint64 maxAge) external view;
+}
+
+contract GuardedRouter {
+    IShieldBotVerdictGuard constant GUARD = IShieldBotVerdictGuard(0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e);
+
+    function route(address token) external view {
+        // Reverts with NotAllowed(subject, reason) unless a LOW or MEDIUM verdict was published within 900 seconds.
+        GUARD.requireAllowed(token, 900);
+    }
+}
+```
 
 ## Scope before the demo
 
-- **Repository versus release:** the browser extension's provider-bound chain-identification fix is on `main` and was submitted to the Chrome Web Store as 3.1.0 on 2026-10-05, but remains unreleased until review approves it. The shipped extension still has an omitted-chain identification limitation. Source tests do not establish released Robinhood coverage; 3.1.0 has been tested with Rabby, while real MetaMask and wider EIP-6963 wallet testing and the outcome of Chrome Web Store review remain outstanding.
-- **Simulation is route-bounded:** Robinhood support covers the implemented native/WETH/USDG v4 routes, Doppler-hooked v4 routes, and WETH-quoted V2 pairs. Hookless USDG pools are found by direct lookup at standard fee and tick-spacing pairs. The V2 adapter discovers WETH pairs, not USDG pairs. No V2 USDG route is covered. Whether any V2 USDG pairs exist has not been rechecked.
+- **Repository versus release:** the [ShieldAI Transaction Firewall listing](https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk) serves version 3.1.0, the same version as [extension/](extension/). Version 3.1.0 asks the wallet which chain it is on. Source tests do not establish released Robinhood coverage; it has been tested with a real Rabby installation, while MetaMask and wider EIP-6963 wallet testing remain outstanding.
+- **Simulation is route-bounded:** Robinhood support covers the implemented native/WETH/USDG v4 routes, Doppler-hooked v4 routes, and WETH-quoted V2 pairs. Hookless USDG pools are found by direct lookup at standard fee and tick-spacing pairs and simulated. The V2 adapter discovers WETH pairs, not USDG pairs. No V2 USDG route is covered. Whether any V2 USDG pairs exist has not been rechecked.
 - **Unknown is an outcome:** RPC failure, unsupported routes, insufficient liquidity, unattributed reverts or unmeasurable fields must not be read as a clean bill of health. A successful simulated round-trip describes that amount, route and recorded state, not future sellability.
 - **Coverage is partial across surfaces:** scan metadata reaches the REST, MCP, Telegram and SDK paths, but auxiliary MCP tools, phishing checks, signature heuristics and dashboard summaries do not all have equivalent coverage semantics. The dashboard's Robinhood Chain panel links each blocked launch to its stored evidence document at `/api/verdict`; its other tiles are summaries. See [the detailed limitations](docs/TECHNICAL.md).
 - **On-chain publication covers a bounded set:** the registry is live on Robinhood Chain ([DEPLOYMENTS.md](docs/DEPLOYMENTS.md)). Production records Telegram scans, guard rescans, and launches or rechecks that are blocked or guard-watched; other launch verdicts are stored with `onchain_status: off`, which is not on-chain evidence.
@@ -120,13 +143,13 @@ The registry publication path is wired to Robinhood Telegram scans and hunter sc
 |---|---|
 | REST | `POST /api/scan`: a quick contract check with no sell simulation, so a token it recognises reads Unknown there, never SAFE. `POST /api/firewall`: transaction analysis and the full token check. |
 | Agent API | `POST /api/agent/firewall`: policy decision; unknown coverage, or a native value with no USD estimate (any chain but BSC and opBNB), requires owner approval rather than automatic allowance. |
-| API keys | `POST /api/keys/free`: one free-tier key (60 requests a minute, 1,000 a day) per email address, created from a single-use emailed link that expires after 30 minutes. Off, with a 503, unless the server has a Resend API key. See [TECHNICAL.md](docs/TECHNICAL.md#api-demo). |
+| API keys | `POST /api/keys/free`: a free key can be requested when the server has an email provider configured (Resend); otherwise the operator issues keys. One free-tier key per email address; a key allows 60 requests a minute and 1,000 a day. See [TECHNICAL.md](docs/TECHNICAL.md#api-demo). |
 | Evidence | `GET /api/verdict/4663/{address}`: latest stored evidence and publication status. |
 | Launch feed | `GET /api/launches/4663`: discovered launches and available scan outcomes; not every token on the chain. |
 | MCP | [mcp_server/](mcp_server/): scan and launch tools; approval-risk and threat-graph stubs explicitly report unknown. |
 | SDKs | [Python](sdk/python/) and [TypeScript](sdk/): retain coverage metadata. Explicit fail-open configuration can allow unavailable analysis. |
 | Telegram | [bot.py](bot.py): 12 registered commands, including `/launchalerts` and `/stopalerts`; advisory output does not stop wallet transactions. |
-| Browser / RPC proxy | [extension/](extension/) has the shipped-chain limitation above. The [proxy](rpc/proxy.py) sees only requests routed through it, forwards contract creation without analysis, and receives raw transactions after signing. |
+| Browser / RPC proxy | [extension/](extension/) is version 3.1.0; MetaMask and wider EIP-6963 wallet testing remain outstanding. The [proxy](rpc/proxy.py) sees only requests routed through it, forwards contract creation without analysis, and receives raw transactions after signing. |
 
 ### Configured scan chains, not equal coverage
 
