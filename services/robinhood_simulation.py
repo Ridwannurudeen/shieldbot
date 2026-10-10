@@ -551,7 +551,16 @@ def _traces_native_transfers(call: dict) -> bool:
     )
 
 
-def _outcome(pool: Pool, reason: str, block: Optional[int] = None, simulation_failed: bool = False) -> dict:
+def _outcome(
+    pool: Pool,
+    reason: str,
+    block: Optional[int] = None,
+    simulation_failed: bool = False,
+    rpc_failed: bool = False,
+) -> dict:
+    """simulation_failed: the simulation ran and the token's trade came back uninterpretable, which leaves
+    the sell unknown and scores nothing. rpc_failed: the RPC gave no usable answer, which says nothing
+    about the token."""
     return {
         "retry_sell_amount": None,
         "route": pool.route,
@@ -563,6 +572,7 @@ def _outcome(pool: Pool, reason: str, block: Optional[int] = None, simulation_fa
         "buy_tax": None,
         "sell_tax": None,
         "simulation_failed": simulation_failed,
+        "rpc_failed": rpc_failed,
         "reason": reason,
     }
 
@@ -582,7 +592,7 @@ def evaluate_simulation(
         or not all(isinstance(call, dict) for call in calls)
         or number is None
     ):
-        return _outcome(pool, "Malformed eth_simulateV1 result", simulation_failed=True)
+        return _outcome(pool, "Malformed eth_simulateV1 result", rpc_failed=True)
     call = dict(zip(labels, calls))
     outcome = _outcome(pool, "", number)
     for label in ("fund", "fund_approve", "fund_permit"):
@@ -659,8 +669,9 @@ def evaluate_simulation(
         return outcome
     if not _pays_token(pool) and not _traces_native_transfers(call["buy"]):
         # The sell output of a native pool is only visible as a traceTransfers log, so without that
-        # evidence a sell returning nothing is indistinguishable from an untraced transfer.
-        outcome["simulation_failed"] = True
+        # evidence a sell returning nothing is indistinguishable from an untraced transfer. The RPC ignored
+        # traceTransfers, which says nothing about the token.
+        outcome["rpc_failed"] = True
         outcome["reason"] = "native transfer tracing unavailable; the sell output cannot be measured"
         return outcome
     output = _sell_output(pool, call["sell"].get("logs"), buyer)
@@ -710,21 +721,28 @@ def evaluate_simulation(
             + ("" if sell_tax is not None else "; sell tax unmeasurable")
         ),
     )
-    if sell_tax is None:
-        outcome["simulation_failed"] = True
     return outcome
 
 
 def aggregate_outcomes(outcomes: list, notes: list) -> dict:
-    """Combine per-pool outcomes worst-case: a proven trap is never masked by a sellable pool."""
+    """Combine per-pool outcomes worst-case: a proven trap is never masked by a sellable pool, and a pool
+    the RPC could not simulate may be the one that traps, so beside it only a trap is decided."""
 
     simulation_failed = any(outcome.get("simulation_failed") is True for outcome in outcomes)
+    rpc_failed = any(outcome.get("rpc_failed") is True for outcome in outcomes)
 
     def worst(field):
         values = [outcome[field] for outcome in outcomes if outcome[field] is not None]
         value = max(values) if values else None
+        # A pool left without the field, by a failure or a sell whose tax could not be measured, may
+        # hold more than another pool's zero.
         incomplete = any(
-            outcome.get("simulation_failed") is True and outcome[field] is None
+            outcome[field] is None
+            and (
+                outcome.get("simulation_failed") is True
+                or outcome.get("rpc_failed") is True
+                or (field == "sell_tax" and outcome["can_sell"] is True)
+            )
             for outcome in outcomes
         )
         return None if incomplete and value == 0 else value
@@ -737,6 +755,9 @@ def aggregate_outcomes(outcomes: list, notes: list) -> dict:
 
     can_sell = verdict("can_sell", False)
     is_honeypot = verdict("is_honeypot", True)
+    if rpc_failed:
+        can_sell = None if can_sell is True else can_sell
+        is_honeypot = None if is_honeypot is False else is_honeypot
     parts = list(notes)
     for outcome in outcomes:
         where = f" at block {outcome['block']}" if outcome["block"] is not None else ""
@@ -749,6 +770,7 @@ def aggregate_outcomes(outcomes: list, notes: list) -> dict:
         "buy_tax": worst("buy_tax"),
         "sell_tax": worst("sell_tax"),
         **({"simulation_failed": True} if simulation_failed else {}),
+        **({"rpc_failed": True} if rpc_failed else {}),
         "simulation_block": max(blocks) if blocks else None,
         "reason": "; ".join(parts) or "No simulation result",
     }
@@ -826,9 +848,14 @@ class RobinhoodSimulator:
             result["rpc_failed"] = True
             unknown_ledger.record(SIMULATION_PROVIDER, 4663, "failed")
         else:
-            # It ran; a pool that could not be simulated, or no supported pool, leaves the sell unknown.
+            # It ran. Undecided, it failed when the RPC could not simulate a pool, and is unknown when a
+            # pool could not be decided or no supported pool was found.
             decided = result["is_honeypot"] is not None and not result.get("simulation_failed")
-            unknown_ledger.record(SIMULATION_PROVIDER, 4663, "answered" if decided else "unknown")
+            unknown_ledger.record(
+                SIMULATION_PROVIDER,
+                4663,
+                "answered" if decided else "failed" if result.get("rpc_failed") else "unknown",
+            )
         finally:
             self._inflight.pop(flight_key, None)
         result["observed_at"] = observed_at
@@ -852,8 +879,9 @@ class RobinhoodSimulator:
                     # A follow-up that could not run leaves the first attempt's buy verdict standing.
                     if sized["can_buy"] is not None:
                         outcome = sized
-                    elif sized["simulation_failed"]:
-                        outcome["simulation_failed"] = True
+                    elif sized["simulation_failed"] or sized["rpc_failed"]:
+                        outcome["simulation_failed"] = sized["simulation_failed"]
+                        outcome["rpc_failed"] = sized["rpc_failed"]
                         outcome["reason"] += f"; sized follow-up: {sized['reason']}"
                 outcomes.append(outcome)
         return aggregate_outcomes(outcomes, notes)
@@ -918,12 +946,10 @@ class RobinhoodSimulator:
             outcome["block"] = source_block
             return outcome
         except SimulationUnavailable as e:
-            return _outcome(pool, e.reason, simulation_failed=True)
+            return _outcome(pool, e.reason, rpc_failed=True)
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.warning("Robinhood simulation request failed: %s", type(e).__name__)
-            return _outcome(
-                pool, f"Simulation RPC request failed ({type(e).__name__})", simulation_failed=True
-            )
+            return _outcome(pool, f"Simulation RPC request failed ({type(e).__name__})", rpc_failed=True)
 
     async def _request(self, session, calls: list) -> list:
         """POST one JSON-RPC request or batch. A row the node answered with an error of its own (a timeout
@@ -931,8 +957,15 @@ class RobinhoodSimulator:
         one transient error does not leave the scan unknown and every row still comes from one answer. A
         revert is the call's own answer and is not asked again."""
         rows = await self._post(session, calls)
-        if any(row.get("error") is not None and not _reverted(row["error"]) for row in rows):
-            logger.warning("Robinhood simulation RPC answered an error; asking once more")
+        errors = [
+            _node_error(row) for row in rows if row.get("error") is not None and not _reverted(row["error"])
+        ]
+        if errors:
+            # The code only: a node's error message can carry the RPC URL, and with it an API key.
+            logger.warning(
+                "Robinhood simulation RPC answered an error (%s); asking once more",
+                ", ".join(dict.fromkeys(errors)),
+            )
             await asyncio.sleep(RPC_BACKOFF_SECONDS)
             rows = await self._post(session, calls)
         return rows

@@ -2,6 +2,7 @@
 
 import logging
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from services.honeypot_service import SELL_TAX_EXTREME, SELL_TAX_HIGH
 from services.robinhood_assets import official_asset_reason
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,12 @@ class HoneypotAnalyzer(Analyzer):
                 score=0, flags=[], data={'skipped': True, 'reason': reason, 'notes': [reason]},
             )
         fields = ('is_honeypot', 'buy_tax', 'sell_tax', 'can_buy', 'can_sell')
+        # A sell tax the service left uncovered (GoPlus's, for a sell ShieldBot's own simulation made at a
+        # tax it could not measure) is scored below, but does not complete the answer.
+        tax_uncovered = (data.get('coverage') or {}).get('sell_tax') is False
         data['coverage'] = {field: data.get(field) is not None for field in fields}
+        if tax_uncovered:
+            data['coverage']['sell_tax'] = False
         if data.get('simulation_failed'):
             data['coverage']['can_sell'] = False
             data['reason'] = data.get('reason') or 'Honeypot simulation failed (unresolved)'
@@ -100,10 +106,10 @@ class HoneypotAnalyzer(Analyzer):
             flags.append(f"Honeypot coverage unknown: {d.get('reason') or 'incomplete provider data'}")
         sell_tax = d.get('sell_tax')
         buy_tax = d.get('buy_tax')
-        if sell_tax is not None and sell_tax > 50:
+        if sell_tax is not None and sell_tax > SELL_TAX_EXTREME:
             score += 40
             flags.append(f'Extreme sell tax: {sell_tax}%')
-        elif sell_tax is not None and sell_tax > 20:
+        elif sell_tax is not None and sell_tax > SELL_TAX_HIGH:
             score += 20
         if buy_tax is not None and buy_tax > 20:
             score += 10

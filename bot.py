@@ -1590,11 +1590,20 @@ def format_token_result(result: dict, chain_id: int) -> str:
         'unknown': '⚪'
     }
 
-    safety_level = 'unknown' if incomplete else result.get('safety_level', 'unknown')
+    # A proven honeypot is dangerous whatever else the scan left open, as the scanner's safety level says (its
+    # sell reverted before a sell tax could be measured). Its heuristic score only adds findings, so what is
+    # missing can leave the score lower but never higher: it is at least its two critical findings' 80.
+    proven = result.get('is_honeypot') is True
+    safety_level = 'danger' if proven else 'unknown' if incomplete else result.get('safety_level', 'unknown')
     emoji = safety_emoji.get(safety_level, '⚪')
-    score = 'Unknown (incomplete provider coverage)' if incomplete else f"{result.get('risk_score', 'N/A')}/100"
+    score = (
+        'Unknown (incomplete provider coverage)' if incomplete and not proven
+        else f"{result.get('risk_score', 'N/A')}/100"
+    )
     honeypot = result.get('is_honeypot')
-    if honeypot is None or (result.get('simulation_failed') and honeypot is False):
+    # A sell simulation that failed or could not run leaves its "not a honeypot" unresolved.
+    unresolved = result.get('simulation_failed') or result.get('rpc_failed')
+    if honeypot is None or (unresolved and honeypot is False):
         honeypot_display = 'Unknown (honeypot data incomplete)'
     else:
         honeypot_display = '🔴 HONEYPOT DETECTED' if honeypot else '✅ Not a honeypot'
@@ -1618,7 +1627,8 @@ def format_token_result(result: dict, chain_id: int) -> str:
     for key, label in (('can_buy', 'Can Buy'), ('can_sell', 'Can Sell'),
                        ('ownership_renounced', 'Ownership Renounced'), ('liquidity_locked', 'Liquidity Locked')):
         value = checks.get(key)
-        if key == 'can_sell' and result.get('simulation_failed'):
+        # An unsettled simulation never says the token sells; a failed sell it proved still shows.
+        if key == 'can_sell' and unresolved and value is True:
             value = None
         status_icon = 'Unknown' if value is None else ('✅' if value else '❌')
         response += f"{status_icon} {label}\n"
