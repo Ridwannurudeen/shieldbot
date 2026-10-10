@@ -57,9 +57,12 @@ SCAN_INTERVAL_SECONDS = 2.0
 # budget before the scan starts. Structural lookups send up to 10: get_code twice, the creation
 # transaction and its block, and owner() plus its raw re-read, each eth_call preceded by eth_chainId
 # from web3's validation middleware (once on web3 6.15.1 per its source, twice on web3 7 as measured
-# live). The buy/sell simulation sends up to 12: the pool lookup batch, V2 reserves, a block number
-# and three Initialize log windows, then up to three pools simulated twice each. The impostor check
-# (services.robinhood_assets) reads the token's symbol and name in one batch.
+# live). The buy/sell simulation sends up to 12 HTTP requests: one pool lookup request carrying 33
+# JSON-RPC calls (three lookups plus slot0 and liquidity for fifteen hookless keys), V2 reserves, a
+# block number and three Initialize log windows, then up to three pools simulated twice each. The
+# impostor check (services.robinhood_assets) reads the token's symbol and name in one batch.
+# This reservation counts HTTP requests while services/rpc_guard.py counts each call in a batch, so
+# a scan's calls exceed its reservation.
 SCAN_REQUEST_COST = 23
 # Four guard subjects at five minutes cost 4 * 23 / 300 = 0.307 requests/s of the
 # shared 1 rps budget; after discovery's ~0.27 rps, ~0.42 rps remains for launches.
