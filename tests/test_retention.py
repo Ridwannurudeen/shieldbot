@@ -13,6 +13,8 @@ from core.database import (
     SCAN_EVIDENCE_RETENTION_DAYS,
     USAGE_RETENTION_DAYS,
     VERDICT_EVIDENCE_RETENTION_DAYS,
+    _PRUNE_LAUNCHES_SQL,
+    _PRUNE_VERDICT_EVIDENCE_SQL,
     Database,
 )
 
@@ -25,8 +27,8 @@ async def db(tmp_path):
     await database.close()
 
 
-async def rows(db, sql):
-    cursor = await db._db.execute(sql)
+async def rows(db, sql, parameters=()):
+    cursor = await db._db.execute(sql, parameters)
     return await cursor.fetchall()
 
 
@@ -105,23 +107,14 @@ async def test_the_usage_prune_searches_an_index_rather_than_scanning_the_table(
     assert any("USING INDEX idx_scan_evidence_created_at" in row[-1] for row in plan), plan
     plan = await rows(
         db,
-        """
-        EXPLAIN QUERY PLAN DELETE FROM verdict_evidence
-        WHERE created_at < 0
-          AND tx_hash IS NULL
-          AND (onchain_status IN ('off', 'deduplicated')
-               OR (onchain_status = 'dropped' AND tx_hash IS NULL))
-          AND id < (
-              SELECT MAX(id) FROM verdict_evidence AS newer
-              WHERE newer.chain_id = verdict_evidence.chain_id
-                AND newer.subject = verdict_evidence.subject
-          )
-        """,
+        "EXPLAIN QUERY PLAN " + _PRUNE_VERDICT_EVIDENCE_SQL,
+        (0,),
     )
     assert any("USING INDEX idx_verdict_evidence_created_at" in row[-1] for row in plan), plan
     plan = await rows(
         db,
-        "EXPLAIN QUERY PLAN DELETE FROM discovered_launches WHERE scanned_at IS NULL AND block_timestamp < 0",
+        "EXPLAIN QUERY PLAN " + _PRUNE_LAUNCHES_SQL,
+        (0,),
     )
     assert any("USING INDEX idx_discovered_launches_retention" in row[-1] for row in plan), plan
 
@@ -139,7 +132,7 @@ async def test_prune_deletes_only_rows_past_their_retention(db):
         "free_key_requests": 1,
         "scan_evidence": 1,
         "verdict_evidence": 1,
-        "discovered_launches": 1,
+        "discovered_launches": 0,
     }
     assert len(await rows(db, "SELECT id FROM api_usage")) == 2
     assert await rows(db, "SELECT utc_day FROM api_daily_usage ORDER BY utc_day") == [
@@ -155,6 +148,7 @@ async def test_prune_deletes_only_rows_past_their_retention(db):
         ("kept",),
         ("new",),
     ]
+    assert await rows(db, "SELECT chain_id, block_number FROM discovered_launches") == [(4663, 1)]
     assert await db.prune_retention() == {
         "api_usage": 0,
         "api_daily_usage": 0,
@@ -191,6 +185,14 @@ async def test_prune_keeps_onchain_and_newest_verdict_evidence(db):
         ("young-subject", "off", newer_young, None),
         ("off-hash-subject", "off", old, "tx-off"),
         ("off-hash-subject", "off", old, None),
+        ("sending-subject", "sending", old, None),
+        ("sending-subject", "off", old + 1, None),
+        ("submitted-subject", "submitted", old, None),
+        ("submitted-subject", "off", old + 1, None),
+        ("unconfirmed-subject", "unconfirmed", old, None),
+        ("unconfirmed-subject", "off", old + 1, None),
+        ("failed-subject", "failed", old, None),
+        ("failed-subject", "off", old + 1, None),
     ]
     ids = [
         await insert_verdict_evidence(db, subject, status, created_at, tx_hash)
@@ -202,7 +204,7 @@ async def test_prune_keeps_onchain_and_newest_verdict_evidence(db):
 
     assert [row[0] for row in await rows(db, "SELECT id FROM verdict_evidence ORDER BY id")] == [
         ids[1], ids[3], ids[5], ids[6], ids[7], ids[8], ids[9], ids[10], ids[11], ids[12],
-        ids[13], ids[14], ids[15], ids[16], ids[17],
+        ids[13], ids[14], ids[15], ids[16], ids[17], *ids[18:26],
     ]
 
 
@@ -212,29 +214,34 @@ async def test_prune_deletes_only_old_never_scanned_launches(db):
     old = int(now) - (LAUNCH_RETENTION_DAYS + 1) * 86400
     young = int(now) - (LAUNCH_RETENTION_DAYS - 1) * 86400
     launches = (
-        ("old-unscanned", old, None),
-        ("young-unscanned", young, None),
-        ("old-scanned", old, now - (LAUNCH_RETENTION_DAYS + 1) * 86400),
+        (4663, "old-unscanned", old, None, 1),
+        (4663, "young-unscanned", young, None, 2),
+        (4663, "old-scanned", old, now - (LAUNCH_RETENTION_DAYS + 1) * 86400, 3),
+        (4664, "only-old-unscanned", old, None, 1),
     )
-    for token, block_timestamp, scanned_at in launches:
+    for chain_id, token, block_timestamp, scanned_at, block_number in launches:
         await db._db.execute(
             """
             INSERT INTO discovered_launches
                 (chain_id, token_address, source, launchpad, source_rank, block_number, tx_hash,
                  block_timestamp, discovered_at, scanned_at)
-            VALUES (4663, ?, 'seed', 'seed', 1, 1, 'tx-launch', ?, ?, ?)
+            VALUES (?, ?, 'seed', 'seed', 1, ?, 'tx-launch', ?, ?, ?)
             """,
-            (token, block_timestamp, now, scanned_at),
+            (chain_id, token, block_number, block_timestamp, now, scanned_at),
         )
     await db._db.commit()
 
     deleted = await db.prune_retention()
 
     assert deleted["discovered_launches"] == 1
-    assert await rows(db, "SELECT token_address FROM discovered_launches ORDER BY token_address") == [
-        ("old-scanned",),
-        ("young-unscanned",),
+    assert await rows(
+        db, "SELECT chain_id, token_address FROM discovered_launches ORDER BY chain_id, token_address"
+    ) == [
+        (4663, "old-scanned"),
+        (4663, "young-unscanned"),
+        (4664, "only-old-unscanned"),
     ]
+    assert (await db.get_launch_discovery_status(4664))["last_discovered_block"] == 1
 
 
 @pytest.mark.asyncio

@@ -113,7 +113,8 @@ RATE_WINDOW_SECONDS = 3600
 SETTLED_STATUSES = ("pending", "sending", "confirmed")
 # About 18x the 0.056 gwei base fee of a recorded 4663 block. Arbitrum chains ignore priority fees.
 MAX_FEE_PER_GAS_WEI = 10**9
-# gas * max_fee reserves about 2.4x a record's real cost: 1,000 reservations cover roughly 2,400 records, about nine days at the 2026-10-09 rate.
+# gas * max_fee reserves about 2.4x a record's real cost: 1,000 reservations cover roughly 2,400 records,
+# about nine days at the 2026-10-09 rate.
 LOW_BALANCE_RECORDS = 1000
 # Arbitrum Nitro's eth_estimateGas includes the L1 data fee as gas, so leave room above the ~140k execution cost.
 MAX_GAS_LIMIT = 1_000_000
@@ -214,7 +215,7 @@ class VerdictPublisher:
         self._lease_lost = False
         self._waits = 0
         self._low_funds_alerted = False
-        self._failure_alerted = set()
+        self._failure_alerted = False
         # Per row, the bytes last broadcast again and how often in a row: {evidence_id: (tx_hash, count)}.
         self._resends = {}
         if not registry:
@@ -668,8 +669,8 @@ class VerdictPublisher:
                     reason = e.reason if isinstance(e, RecordFailed) else type(e).__name__
                     await self._db.release_verdict_claim(evidence_id)
                     self._note_wait(reason)
-                    if reason in ("InsufficientFunds", "FeeCapExceeded") and reason not in self._failure_alerted:
-                        self._failure_alerted.add(reason)
+                    if reason in ("InsufficientFunds", "FeeCapExceeded") and not self._failure_alerted:
+                        self._failure_alerted = True
                         detail = (
                             "the base fee is above the configured cap"
                             if reason == "FeeCapExceeded"
@@ -678,12 +679,13 @@ class VerdictPublisher:
                         self._alert(
                             f"*ShieldBot verdict recorder cannot record* on chain {CHAIN_ID}: {reason}\n"
                             f"`{self.recorder}`\n"
-                            f"{detail}; verdicts are being dropped until this is fixed"
+                            f"{detail}; recording is paused; queued verdicts are retried and dropped "
+                            f"once their observation is older than {MAX_OBSERVATION_AGE_SECONDS // 60} minutes"
                         )
                     logger.warning("Verdict record deferred: %s", reason)
                     return "retry"
                 self._waits = 0
-                self._failure_alerted.clear()
+                self._failure_alerted = False
                 if prepared[0] == "mined":
                     # One of the row's earlier transactions was mined after all; nothing is sent.
                     _, status, tx_hash = prepared
@@ -875,7 +877,8 @@ class VerdictPublisher:
             self._alert(
                 f"*ShieldBot verdict recorder is running low* on chain {CHAIN_ID}\n"
                 f"`{self.recorder}`\n"
-                f"Balance: {balance_eth} ETH; about {balance // reservation} records left at the current fee reservation"
+                f"Balance: {balance_eth} ETH; about {balance // reservation} records left "
+                f"at the current fee reservation"
             )
         elif balance >= 2 * LOW_BALANCE_RECORDS * reservation:
             self._low_funds_alerted = False

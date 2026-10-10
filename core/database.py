@@ -43,6 +43,27 @@ SCAN_EVIDENCE_RETENTION_DAYS = 90
 VERDICT_EVIDENCE_RETENTION_DAYS = 30
 # Days a launch can remain unscanned before it is removed from discovery history.
 LAUNCH_RETENTION_DAYS = 30
+_PRUNE_VERDICT_EVIDENCE_SQL = """
+    DELETE FROM verdict_evidence
+    WHERE created_at < ?
+      AND tx_hash IS NULL
+      AND (onchain_status IN ('off', 'deduplicated')
+           OR (onchain_status = 'dropped' AND tx_hash IS NULL))
+      AND id < (
+          SELECT MAX(id) FROM verdict_evidence AS newer
+          WHERE newer.chain_id = verdict_evidence.chain_id
+            AND newer.subject = verdict_evidence.subject
+      )
+"""
+_PRUNE_LAUNCHES_SQL = """
+    DELETE FROM discovered_launches
+    WHERE scanned_at IS NULL
+      AND block_timestamp < ?
+      AND block_number < (
+          SELECT MAX(block_number) FROM discovered_launches AS newer
+          WHERE newer.chain_id = discovered_launches.chain_id
+      )
+"""
 
 # One row per discovered launch with its latest outcome. A recheck records blocked or cleared on
 # the launch's tracked pair (keyed by the token), and a newer one supersedes the launch scan. A
@@ -1521,23 +1542,12 @@ class Database:
             ),
             (
                 "verdict_evidence",
-                """
-                DELETE FROM verdict_evidence
-                WHERE created_at < ?
-                  AND tx_hash IS NULL
-                  AND (onchain_status IN ('off', 'deduplicated')
-                       OR (onchain_status = 'dropped' AND tx_hash IS NULL))
-                  AND id < (
-                      SELECT MAX(id) FROM verdict_evidence AS newer
-                      WHERE newer.chain_id = verdict_evidence.chain_id
-                        AND newer.subject = verdict_evidence.subject
-                  )
-                """,
+                _PRUNE_VERDICT_EVIDENCE_SQL,
                 (verdict_cutoff,),
             ),
             (
                 "discovered_launches",
-                "DELETE FROM discovered_launches WHERE scanned_at IS NULL AND block_timestamp < ?",
+                _PRUNE_LAUNCHES_SQL,
                 (launch_cutoff,),
             ),
         ):

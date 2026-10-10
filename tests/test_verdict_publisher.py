@@ -998,7 +998,34 @@ async def test_insufficient_funds_alerts_once_per_episode(db):
         assert_safe_recorder_alert(call.args[0])
     for message in failure_messages:
         assert "*ShieldBot verdict recorder cannot record* on chain 4663: InsufficientFunds" in message
-        assert "verdicts are being dropped until this is fixed" in message
+        assert "recording is paused" in message
+        assert (
+            "queued verdicts are retried and dropped once their observation is older than "
+            f"{vp.MAX_OBSERVATION_AGE_SECONDS // 60} minutes"
+        ) in message
+
+
+@pytest.mark.asyncio
+async def test_insufficient_funds_then_fee_cap_alert_once_per_episode(db):
+    chain = FakeChain(balance=0)
+    alert = AsyncMock()
+    publisher = sender(db, alert=alert)
+    await publisher.publish(4663, TOKEN, COMPLETE)
+
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "retry"
+        chain.base_fee = vp.MAX_FEE_PER_GAS_WEI + 1
+        assert await publisher.drain_once() == "retry"
+    await settle_publisher_tasks(publisher)
+
+    failure_messages = [
+        call.args[0] for call in alert.await_args_list
+        if "cannot record" in call.args[0]
+    ]
+    assert len(failure_messages) == 1
+    [message] = failure_messages
+    assert "*ShieldBot verdict recorder cannot record* on chain 4663: InsufficientFunds" in message
+    assert "FeeCapExceeded" not in message
 
 
 @pytest.mark.asyncio
