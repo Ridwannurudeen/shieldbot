@@ -184,6 +184,60 @@ async def test_canonical_tokens_and_unresolved_official_stocks_keep_the_skip_not
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["rpc_failed", "simulation_failed"])
+async def test_a_failed_official_stock_simulation_is_unknown_not_skipped(failure):
+    honeypot = MagicMock(
+        fetch_honeypot_data=AsyncMock(
+            return_value={
+                "is_honeypot": None,
+                "can_buy": True,
+                "can_sell": None,
+                "buy_tax": 0,
+                "sell_tax": None,
+                "status": "unknown",
+                "reason": HONEYPOT_UNKNOWN,
+                failure: True,
+            }
+        )
+    )
+
+    result = await HoneypotAnalyzer(honeypot, assets()).analyze(
+        AnalysisContext(address=Web3.to_checksum_address(NVDA), chain_id=CHAIN)
+    )
+
+    assert not result.data.get("skipped")
+    assert result.data["status"] == "unknown"
+    assert result.data["coverage"]["can_sell"] is False
+    assert result.score == 0
+    assert not any("suspicious" in flag.lower() for flag in result.flags)
+
+
+@pytest.mark.asyncio
+async def test_an_undecided_official_stock_simulation_keeps_the_skip_note():
+    honeypot = MagicMock(
+        fetch_honeypot_data=AsyncMock(
+            return_value={
+                "is_honeypot": None,
+                "can_buy": True,
+                "can_sell": None,
+                "buy_tax": 0,
+                "sell_tax": None,
+                "status": "unknown",
+                "reason": HONEYPOT_UNKNOWN,
+                "undecided": True,
+            }
+        )
+    )
+
+    result = await HoneypotAnalyzer(honeypot, assets()).analyze(
+        AnalysisContext(address=Web3.to_checksum_address(NVDA), chain_id=CHAIN)
+    )
+
+    sell_note = note("NVDA", "sell simulation does not apply", canonical=False)
+    assert result.data == {"skipped": True, "reason": sell_note, "notes": [sell_note]}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "is_honeypot, can_sell, expected_score",
     [(False, True, 0), (True, False, 100)],
@@ -243,6 +297,29 @@ async def test_an_official_address_is_not_a_clean_bill_of_health():
     output = RiskEngine().compute_from_results(results)
 
     assert (output["status"], output["risk_level"], output["rug_probability"]) == ("ok", HIGH, 90)
+
+
+@pytest.mark.asyncio
+async def test_an_official_stock_rpc_failure_is_unknown_in_the_risk_engine():
+    honeypot = honeypot_service()
+    honeypot.fetch_honeypot_data.return_value = {
+        "is_honeypot": None,
+        "can_buy": True,
+        "can_sell": None,
+        "buy_tax": 0,
+        "sell_tax": None,
+        "status": "unknown",
+        "reason": HONEYPOT_UNKNOWN,
+        "rpc_failed": True,
+    }
+    results = await registry(assets(), honeypot=honeypot).run_all(
+        AnalysisContext(address=Web3.to_checksum_address(NVDA), chain_id=CHAIN)
+    )
+
+    output = RiskEngine().compute_from_results(results)
+
+    assert output["status"] == "unknown"
+    assert output["risk_level"] != LOW
 
 
 @pytest.mark.asyncio
