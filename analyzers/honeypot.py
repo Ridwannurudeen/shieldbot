@@ -49,7 +49,8 @@ class HoneypotAnalyzer(Analyzer):
         if (data.get('simulation_failed') or data.get('rpc_failed') or data.get('undecided')) \
                 and data.get('can_sell') is True:
             data['can_sell'] = None
-        if official is not None and (
+        # A failed run is missing evidence, so an official stock's sell check remains uncovered.
+        if official is not None and not (data.get('rpc_failed') or data.get('simulation_failed')) and (
             data.get('is_honeypot') is None or data.get('can_sell') is None
         ):
             reason = official_asset_reason(official, 'sell simulation does not apply')
