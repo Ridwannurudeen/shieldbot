@@ -909,6 +909,7 @@ class VerdictPublisher:
             if (
                 len(rows) != len(body)
                 or not all(isinstance(row, dict) for row in rows)
+                or not all(type(row.get("id")) is int for row in rows)
                 or {row.get("id") for row in rows} != set(range(len(body)))
             ):
                 raise RecordFailed("MalformedRPCResponse")

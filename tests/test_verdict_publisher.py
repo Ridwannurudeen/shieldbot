@@ -849,6 +849,23 @@ async def test_json_rpc_rate_limit_errors_are_retried(db):
 
 
 @pytest.mark.asyncio
+async def test_batch_response_with_a_boolean_id_is_malformed(db):
+    publisher = make_publisher(db)
+    session = MagicMock()
+    session.post.return_value = FakeResponse(
+        200,
+        [
+            {"jsonrpc": "2.0", "id": 0, "result": "0x0"},
+            {"jsonrpc": "2.0", "id": True, "result": "0x1"},
+            {"jsonrpc": "2.0", "id": 2, "result": "0x2"},
+        ],
+    )
+
+    with pytest.raises(vp.RecordFailed, match="MalformedRPCResponse"):
+        await publisher._rpc(session, [("eth_blockNumber", [])] * 3)
+
+
+@pytest.mark.asyncio
 async def test_persistent_429_returns_the_row_to_the_queue(db):
     chain = FakeChain()
     chain.http_statuses = [429] * vp.RPC_ATTEMPTS

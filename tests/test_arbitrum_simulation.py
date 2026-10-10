@@ -6,7 +6,7 @@ import dataclasses
 import json
 import logging
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from eth_abi import encode
@@ -491,6 +491,27 @@ def simulator_for(rpc):
     simulator = ArbitrumSimulator("https://rpc.invalid")
     simulator._request = rpc
     return simulator
+
+
+@pytest.mark.asyncio
+async def test_batch_response_with_a_boolean_id_is_malformed():
+    simulator = ArbitrumSimulator("https://rpc.invalid")
+    response = MagicMock(status=200)
+    response.json = AsyncMock(
+        return_value=[
+            {"jsonrpc": "2.0", "id": 0, "result": "0x0"},
+            {"jsonrpc": "2.0", "id": True, "result": "0x1"},
+            {"jsonrpc": "2.0", "id": 2, "result": "0x2"},
+        ]
+    )
+    request = MagicMock()
+    request.__aenter__ = AsyncMock(return_value=response)
+    request.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.post.return_value = request
+
+    with pytest.raises(arbitrum_simulation.SimulationUnavailable, match="Malformed RPC response"):
+        await simulator._post(session, [("eth_blockNumber", [])] * 3)
 
 
 def fresh_addresses(fixture):

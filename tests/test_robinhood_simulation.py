@@ -1085,6 +1085,21 @@ async def test_malformed_rpc_envelope_is_unavailable(payload):
 
 
 @pytest.mark.asyncio
+async def test_batch_response_with_a_boolean_id_is_malformed():
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    rows = [
+        {"jsonrpc": "2.0", "id": 0, "result": "0x0"},
+        {"jsonrpc": "2.0", "id": True, "result": "0x1"},
+        {"jsonrpc": "2.0", "id": 2, "result": "0x2"},
+    ]
+    with pytest.raises(SimulationUnavailable, match="Malformed RPC response"):
+        await simulator._request(
+            http_session(http_response(200, rows)),
+            [("eth_blockNumber", []), ("eth_chainId", []), ("eth_getBalance", [])],
+        )
+
+
+@pytest.mark.asyncio
 async def test_http_error_status_is_unavailable_without_retry():
     simulator = RobinhoodSimulator("https://rpc.invalid")
     session = http_session(http_response(503))
