@@ -1,7 +1,7 @@
 """Integration tests for the FastAPI endpoints (/api/health, /api/firewall fallback)."""
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock
 from types import SimpleNamespace
 
 

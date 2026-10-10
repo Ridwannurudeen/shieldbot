@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from utils.web3_client import UnsupportedChainError, Web3Client
-from adapters.bsc import BscAdapter
 from adapters.eth import EthAdapter
 from adapters.base_chain import BaseChainAdapter
 

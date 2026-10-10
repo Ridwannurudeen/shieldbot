@@ -12,7 +12,6 @@ from services.robinhood_simulation import (
     aggregate_outcomes,
 )
 from tests.test_robinhood_simulation import (
-    FakeRpc,
     evaluate,
     fresh_addresses,
     load,

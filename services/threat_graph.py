@@ -1,9 +1,8 @@
 """Cross-chain threat intelligence graph with BFS/DFS traversal and cluster analysis."""
 
-import json
 import time
 import logging
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Set
 from collections import defaultdict, deque
 
 logger = logging.getLogger(__name__)

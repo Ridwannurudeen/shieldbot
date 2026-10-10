@@ -23,12 +23,12 @@ from core.auth import AuthManager
 async def cmd_create(args, db):
     auth = AuthManager(db)
     result = await auth.create_key(owner=args.owner, tier=args.tier)
-    print(f"API key created:")
+    print("API key created:")
     print(f"  Key:   {result['key']}")
     print(f"  ID:    {result['key_id']}")
     print(f"  Owner: {result['owner']}")
     print(f"  Tier:  {result['tier']}")
-    print(f"\nStore this key securely — it cannot be recovered.")
+    print("\nStore this key securely — it cannot be recovered.")
 
 
 async def cmd_deactivate(args, db):

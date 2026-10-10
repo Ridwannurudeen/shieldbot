@@ -1,6 +1,6 @@
 """Tests for Base chain adapter."""
 
-from adapters.base_chain import BaseChainAdapter, WHITELISTED_ROUTERS
+from adapters.base_chain import BaseChainAdapter
 
 
 def test_base_adapter_chain_id():

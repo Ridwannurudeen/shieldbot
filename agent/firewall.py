@@ -5,7 +5,7 @@ import re
 import time
 import logging
 import traceback
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel, ConfigDict, Field

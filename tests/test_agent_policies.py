@@ -2,7 +2,6 @@
 
 import pytest
 import pytest_asyncio
-import json
 from argparse import Namespace
 from unittest.mock import AsyncMock, MagicMock
 

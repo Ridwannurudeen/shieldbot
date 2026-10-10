@@ -1,8 +1,7 @@
 """Tests for tri-state ownership propagation (None = unknown, True, False)."""
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from core.risk_engine import RiskEngine
 
 

@@ -5,7 +5,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict
 from adapters.robinhood import SIMULATION_PROVIDER
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError

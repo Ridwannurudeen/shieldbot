@@ -5,7 +5,6 @@ Pre-transaction scanning and token safety checks on every supported chain
 Features: AI risk scoring, caching, progress indicators
 """
 
-import os
 import sys
 import time
 import asyncio
@@ -508,7 +507,7 @@ async def _scan_approvals(update: Update, address: str, chain_id: int):
         lower_risk = total - high - medium
         incomplete = is_scan_incomplete(result)
 
-        response = f"🚨 **Rescue Mode — Approval Scan**\n\n"
+        response = "🚨 **Rescue Mode — Approval Scan**\n\n"
         response += f"**Wallet:** `{address}`\n"
         response += f"**Chain:** {chain_name} ({chain_id})\n"
         response += f"**Total Approvals:** {total}\n"
@@ -552,7 +551,7 @@ async def _scan_approvals(update: Update, address: str, chain_id: int):
         # Revoke instructions
         revoke_txs = result.get('revoke_txs', [])
         if revoke_txs:
-            response += f"\n**Revoke Instructions:**\n"
+            response += "\n**Revoke Instructions:**\n"
             response += f"Found {len(revoke_txs)} approval(s) flagged for revocation review.\n"
             response += (
                 "This bot has not revoked any approvals or submitted transactions. "
@@ -1554,7 +1553,7 @@ def format_scan_result(result: dict, chain_id: int) -> str:
     # AI structured risk score
     ai_risk = result.get('ai_risk_score')
     if ai_risk and not incomplete:
-        response += f"\n🤖 **AI Risk Assessment:**\n"
+        response += "\n🤖 **AI Risk Assessment:**\n"
         response += (
             f"Score: {escape_untrusted(ai_risk.get('risk_score', 'N/A'))}/100 | "
             f"Level: {escape_untrusted(ai_risk.get('risk_level', 'N/A'))}\n"
@@ -1638,7 +1637,7 @@ def format_token_result(result: dict, chain_id: int) -> str:
     # AI structured risk score
     ai_risk = result.get('ai_risk_score')
     if ai_risk and not incomplete:
-        response += f"\n🤖 **AI Risk Assessment:**\n"
+        response += "\n🤖 **AI Risk Assessment:**\n"
         response += (
             f"Score: {escape_untrusted(ai_risk.get('risk_score', 'N/A'))}/100 | "
             f"Level: {escape_untrusted(ai_risk.get('risk_level', 'N/A'))}\n"

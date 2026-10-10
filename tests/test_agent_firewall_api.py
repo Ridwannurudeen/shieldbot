@@ -1,9 +1,8 @@
 """Tests for the agent firewall API endpoints."""
 
 import pytest
-import json
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
 

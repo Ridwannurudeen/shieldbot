@@ -5,7 +5,7 @@ Integrates risk_scorer for numeric scoring and AI analysis
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List
 from core.verdicts import level_from_score
 from services.contract_service import push4_operands
 from core.risk_engine import database_matches, medium_matches, scam_match_floor

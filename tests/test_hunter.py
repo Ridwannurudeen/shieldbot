@@ -1,6 +1,5 @@
 """Tests for agent.hunter — scheduled threat sweep loop."""
 
-import asyncio
 import logging
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
