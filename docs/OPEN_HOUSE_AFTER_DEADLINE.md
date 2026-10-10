@@ -71,7 +71,7 @@ The `services/robinhood_assets.py` change in `c7a90cb` is a docstring edit. Its 
 
 ## Browser extension
 
-The Chrome Web Store listing, titled ShieldAI Transaction Firewall, serves version 3.1.0. Google's update service returned 3.1.0 on 8 October 2026, and the listing was updated around 7 October. The repository's 3.1.0 release is the `extension-v3.1.0` tag at `12a5d63`. The uploaded store package has not been compared byte for byte with that tag. Compared with the submitted tag, `12a5d63` includes two post-deadline code fixes: `21e2869` reports a stopped request as EIP-1193 4001 and says incomplete once; `e23ac00` explains an unsupported network in plain words. The extension log also shows `3bbf0dc`, a documentation commit whose only change under `extension/` is to `extension/README.md`. Someone who installs 3.1.0 from the store therefore most likely runs those two fixes.
+The Chrome Web Store listing, titled ShieldAI Transaction Firewall, serves version 3.1.0. Google's update service returned 3.1.0 on 8 and 10 October 2026, and the listing shows it was updated on 7 October 2026. The repository's 3.1.0 release is the `extension-v3.1.0` tag at `12a5d63`. The uploaded store package has not been compared byte for byte with that tag. Compared with the submitted tag, `12a5d63` includes two post-deadline code fixes: `21e2869` reports a stopped request as EIP-1193 4001 and says incomplete once; `e23ac00` explains an unsupported network in plain words. The extension log also shows `3bbf0dc`, a documentation commit whose only change under `extension/` is to `extension/README.md`. Someone who installs 3.1.0 from the store therefore most likely runs those two fixes.
 
 ## Check it yourself
 
@@ -80,7 +80,7 @@ Run in a clone of the repository with `TZ=UTC`. For each SHA from the first comm
 ```bash
 export TZ=UTC
 git log --first-parent --reverse --format='%cd %h %s' --date=format-local:'%Y-%m-%d %H:%M' open-house-submission..origin/main
-git log -1 --format='2315085 author %ai, committed %ci' 2315085
+git log -1 --format='2315085 author %ad, committed %cd' --date=format-local:'%Y-%m-%d %H:%M:%S UTC' 2315085
 for sha in $(git rev-list --first-parent --reverse open-house-submission..origin/main); do
   if git merge-base --is-ancestor "$sha" 302eb66; then
     printf '%s live in production\n' "$(git rev-parse --short "$sha")"
