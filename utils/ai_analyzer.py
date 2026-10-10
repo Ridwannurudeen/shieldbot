@@ -1,5 +1,6 @@
 """Optional forensic explanations from the Claude API."""
 
+import asyncio
 import os
 import json
 import logging
@@ -13,12 +14,24 @@ from core.risk_engine import database_matches, medium_matches
 
 logger = logging.getLogger(__name__)
 
+
+MODEL_PROBE_TIMEOUT_SECONDS = 10
+
+
 class AIRefused(Exception):
     """The model declined to answer the request."""
 
 
 class AIEmptyResponse(Exception):
     """The model returned no text."""
+
+
+_REJECTED_ERRORS = (
+    anthropic.AuthenticationError,
+    anthropic.PermissionDeniedError,
+    anthropic.NotFoundError,
+    anthropic.BadRequestError,
+)
 
 
 def _extract_text(response) -> str:
@@ -72,6 +85,8 @@ class AIAnalyzer:
 
     def __init__(self):
         self.api_key = os.getenv('ANTHROPIC_API_KEY')
+        self.status = "unconfigured" if not self.api_key else "unverified"
+        self._probe_complete = False
         if not self.api_key:
             logger.warning("ANTHROPIC_API_KEY not set - Anthropic AI disabled")
             self.client = None
@@ -83,8 +98,44 @@ class AIAnalyzer:
         self.model = os.getenv('ANTHROPIC_MODEL', 'claude-haiku-4-5')
         logger.info(f"AI model: {self.model}")
 
+    async def probe(self) -> str:
+        """Check each configured Claude model without spending tokens."""
+        from agent.prompts import HAIKU_MODEL, SONNET_MODEL
+
+        model_ids = tuple(dict.fromkeys((self.model, HAIKU_MODEL, SONNET_MODEL)))
+        if self._probe_complete:
+            return self.status
+        if not self.client:
+            self.status = "unconfigured"
+        else:
+            try:
+                await self._retrieve_models(model_ids)
+            except asyncio.CancelledError:
+                self.status = "unverified"
+                self._probe_complete = True
+                logger.info("AI model probe %s; model ids: %s", self.status, ", ".join(model_ids))
+                raise
+            except (anthropic.APIConnectionError, asyncio.TimeoutError):
+                self.status = "unverified"
+            except Exception as error:
+                self.status = f"rejected: {type(error).__name__}"
+            else:
+                self.status = "ok"
+        self._probe_complete = True
+        logger.info("AI model probe %s; model ids: %s", self.status, ", ".join(model_ids))
+        return self.status
+
+    async def _retrieve_models(self, model_ids: Tuple[str, ...]):
+        for model_id in model_ids:
+            await self.client.models.retrieve(model_id)
+
     async def _create_message(self, **kwargs):
-        return await self.client.messages.create(**kwargs)
+        try:
+            return await self.client.messages.create(**kwargs)
+        except _REJECTED_ERRORS as error:
+            self.status = f"rejected: {type(error).__name__}"
+            self._probe_complete = True
+            raise
 
     async def chat(
         self,
@@ -159,7 +210,7 @@ Return ONLY a JSON object (no markdown, no explanation) with this exact schema:
 
 Base your score on: verification status, contract age, scam DB matches, bytecode patterns, source code issues, ownership, and taxes."""
 
-            message = await self.client.messages.create(
+            message = await self._create_message(
                 model=self.model,
                 max_tokens=400,
                 messages=[{"role": "user", "content": prompt}]
@@ -472,5 +523,7 @@ Return the explanation JSON now."""
         return "\n".join(lines)
 
     def is_available(self) -> bool:
-        """Check if the Anthropic client is configured."""
-        return self.client is not None
+        """Whether Claude can be used based on the key and last probe result."""
+        if not self._probe_complete:
+            return self.client is not None
+        return self.status in ("ok", "unverified")

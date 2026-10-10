@@ -810,7 +810,10 @@ async def _check_within_timeout(check) -> bool:
 
 async def _readiness() -> Dict:
     if not container:
-        return {"ready": False, "checks": {"database": "failed", "rpc": "failed"}}
+        return {
+            "ready": False,
+            "checks": {"database": "failed", "rpc": "failed", "ai": "unconfigured"},
+        }
     database, rpc = await asyncio.gather(
         _check_within_timeout(_database_answers), _check_within_timeout(_any_rpc_answers),
     )
@@ -818,6 +821,7 @@ async def _readiness() -> Dict:
         "database": "ok" if database else "failed",
         "rpc": "ok" if rpc else "failed",
         "robinhood_rpc": "ok" if container.robinhood_rpc_guard.state == rpc_guard.CLOSED else "open",
+        "ai": container.ai_analyzer.status,
     }
     for name, state in provider_breakers.states().items():
         checks[name] = "ok" if state == CLOSED else "open"
@@ -829,9 +833,10 @@ async def ready():
     """Readiness: 200 when this process can serve scans, 503 when it cannot.
 
     Ready means the database answers SELECT 1 and at least one chain's RPC answers eth_blockNumber,
-    each within READY_TIMEOUT_SECONDS; `checks` has each as "ok" or "failed". The RPCs are asked
-    at once and the first answer is enough, so one that hangs cannot hold the check up; Robinhood
-    Chain's is not asked, as its requests go through the shared RPC guard. It also lists the
+    each within READY_TIMEOUT_SECONDS. The database and RPC checks determine readiness; `ai` is
+    informational and reports the assistant's model state. The RPCs are asked at once and the first
+    answer is enough, so one that hangs cannot hold the check up; Robinhood Chain's is not asked,
+    as its requests go through the shared RPC guard. It also lists the
     Robinhood Chain RPC guard (`robinhood_rpc`) and every provider circuit breaker used so far
     (core.circuit_breaker, named provider or provider:chain_id) as "ok" or "open". An open breaker
     does not make the process unready: that provider's lookups come back Unknown, never clean.

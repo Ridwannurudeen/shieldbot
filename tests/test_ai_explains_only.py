@@ -186,6 +186,8 @@ def _analyzer(reply):
     analyzer = AIAnalyzer.__new__(AIAnalyzer)
     analyzer.model = "test-model"
     analyzer.client = MagicMock()
+    analyzer.status = "unverified"
+    analyzer._probe_complete = False
     analyzer.client.messages.create = AsyncMock(
         return_value=SimpleNamespace(
             content=[SimpleNamespace(type="text", text=reply)], stop_reason="end_turn"

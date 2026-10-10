@@ -1,5 +1,6 @@
 """Tests for core.container.ServiceContainer."""
 
+import asyncio
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from core.config import Settings
@@ -8,8 +9,8 @@ from core.config import Settings
 class TestServiceContainer:
     def test_container_creates_all_services(self):
         """Container initializes all expected service attributes."""
-        with patch("core.container.Web3Client") as MockWeb3, \
-             patch("core.container.AIAnalyzer") as MockAI, \
+        with patch("core.container.Web3Client"), \
+             patch("core.container.AIAnalyzer"), \
              patch("core.container.ScamDatabase"), \
              patch("core.container.CalldataDecoder"), \
              patch("core.container.TransactionScanner"), \
@@ -59,6 +60,7 @@ class TestServiceContainer:
              patch("core.container.RiskEngine"):
 
             MockAI.return_value.is_available.return_value = False
+            MockAI.return_value.probe = AsyncMock(side_effect=asyncio.TimeoutError)
             MockScamDB.return_value.load_blacklist = AsyncMock()
             MockGF.return_value.is_enabled.return_value = False
             MockGF.return_value.async_init = AsyncMock()
@@ -71,6 +73,7 @@ class TestServiceContainer:
             c = ServiceContainer(s)
 
             await c.startup()
+            c.ai_analyzer.probe.assert_awaited_once()
             c.greenfield_service.async_init.assert_awaited_once()
             c.scam_db.load_blacklist.assert_awaited_once_with()
 
@@ -91,8 +94,10 @@ async def test_startup_keeps_the_indexer_and_leaves_the_mempool_monitor_to_the_a
     container.greenfield_service.async_init = AsyncMock()
     container.cache.connect = AsyncMock()
     container.mempool_monitor.start = AsyncMock()
+    container.ai_analyzer.probe = AsyncMock(return_value="ok")
 
     await ServiceContainer.startup(container)
 
+    container.ai_analyzer.probe.assert_awaited_once()
     container.indexer.start.assert_awaited_once_with()
     container.mempool_monitor.start.assert_not_called()

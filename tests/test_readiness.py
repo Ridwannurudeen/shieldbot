@@ -1,4 +1,4 @@
-"""GET /api/ready: 200 only while the database and at least one chain's RPC answer."""
+"""GET /api/ready: AI status is informational; database and RPC determine readiness."""
 
 import asyncio
 import json
@@ -73,7 +73,7 @@ def released():
 def serve(monkeypatch):
     monkeypatch.setattr(api, "_ready_cache", {"body": None, "expires_at": 0.0})
 
-    def configure(db, web3_client, guard=None):
+    def configure(db, web3_client, guard=None, ai_status="ok"):
         monkeypatch.setattr(
             api,
             "container",
@@ -81,6 +81,7 @@ def serve(monkeypatch):
                 db=db,
                 web3_client=web3_client,
                 robinhood_rpc_guard=guard or RpcGuard("Robinhood Chain"),
+                ai_analyzer=SimpleNamespace(status=ai_status),
             ),
         )
         return TestClient(api.app)
@@ -95,7 +96,7 @@ def test_ready_when_the_database_and_one_chain_answer(serve):
     assert response.status_code == 200
     assert response.json() == {
         "ready": True,
-        "checks": {"database": "ok", "rpc": "ok", "robinhood_rpc": "ok"},
+        "checks": {"database": "ok", "rpc": "ok", "robinhood_rpc": "ok", "ai": "ok"},
     }
     assert queries == ["SELECT 1"]
     assert 1 in asked or 8453 in asked
@@ -158,7 +159,9 @@ def test_not_ready_when_no_chain_answers(serve):
     client = serve(database(), chains({56: False, 1: False, 4663: True}, asked))
     response = client.get("/api/ready")
     assert response.status_code == 503
-    assert response.json()["checks"] == {"database": "ok", "rpc": "failed", "robinhood_rpc": "ok"}
+    assert response.json()["checks"] == {
+        "database": "ok", "rpc": "failed", "robinhood_rpc": "ok", "ai": "ok",
+    }
     assert sorted(asked) == [1, 56]
 
 
@@ -220,6 +223,7 @@ def test_open_breakers_are_reported_but_the_process_stays_ready(serve):
         "database": "ok",
         "rpc": "ok",
         "robinhood_rpc": "open",
+        "ai": "ok",
         "dexscreener": "open",
         "goplus_token:56": "ok",
     }
@@ -230,7 +234,20 @@ def test_without_a_container_it_is_not_ready(monkeypatch):
     monkeypatch.setattr(api, "container", None)
     response = TestClient(api.app).get("/api/ready")
     assert response.status_code == 503
-    assert response.json() == {"ready": False, "checks": {"database": "failed", "rpc": "failed"}}
+    assert response.json() == {
+        "ready": False,
+        "checks": {"database": "failed", "rpc": "failed", "ai": "unconfigured"},
+    }
+
+
+def test_rejected_ai_does_not_make_the_process_unready(serve):
+    client = serve(database(), chains({56: True}, []), ai_status="rejected: NotFoundError")
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    assert response.json()["ready"] is True
+    assert response.json()["checks"]["ai"] == "rejected: NotFoundError"
 
 
 def test_polling_it_is_never_rate_limited(serve):
