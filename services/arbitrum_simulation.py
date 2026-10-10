@@ -665,9 +665,18 @@ class ArbitrumSimulator:
                 if code == -32601 or "does not exist" in str(error).lower():
                     raise SimulationUnavailable("eth_simulateV1 unsupported by the RPC")
                 raise SimulationUnavailable(f"eth_simulateV1 failed (JSON-RPC error {code})")
-            outcome = evaluate_simulation(
-                pool, token, amount, buyer, rows[0].get("result"), sell_amount, confirm
-            )
+            try:
+                outcome = evaluate_simulation(
+                    pool, token, amount, buyer, rows[0].get("result"), sell_amount, confirm
+                )
+            except Exception as e:
+                logger.error("Arbitrum simulation result could not be evaluated: %s", type(e).__name__)
+                return _outcome(
+                    pool,
+                    f"Simulation result could not be evaluated ({type(e).__name__})",
+                    block=source_block,
+                    simulation_failed=True,
+                )
             # eth_simulateV1 returns synthetic blocks after the real source header.
             outcome["block"] = source_block
             return outcome

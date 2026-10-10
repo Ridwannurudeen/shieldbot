@@ -19,6 +19,7 @@ from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert
 from core.risk_engine import RiskEngine
 from core.unknown_ledger import UnknownLedger
+import services.robinhood_simulation as robinhood_simulation
 from services.honeypot_service import HoneypotService
 from services.robinhood_simulation import (
     ERROR_STRING,
@@ -1533,6 +1534,55 @@ async def test_every_found_pool_is_simulated_and_a_trap_pool_wins():
     assert result["can_buy"] is True
     assert "TransferHelper: TRANSFER_FROM_FAILED" in result["reason"]
     assert "buy and sell succeeded" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_pool_evaluation_error_keeps_another_pools_trap(monkeypatch, caplog):
+    native = load("v4_native_liquidity_launcher")
+    v2 = load("v2_router02")
+    token = native["token"]
+    v2 = json.loads(json.dumps(v2).replace(v2["token"][2:], token[2:]))
+    v2["amount"] = native["amount"]
+    pair_swap_topic = "0x" + keccak(text="Swap(address,uint256,uint256,uint256,uint256,address)").hex()
+    set_uint(calls_by_label(v2)["delivered"], native["amount"])
+    (pair_swap,) = [
+        log for log in calls_by_label(v2)["buy"]["logs"] if log["topics"][0] == pair_swap_topic
+    ]
+    words = [pair_swap["data"][2 + 64 * index : 2 + 64 * (index + 1)] for index in range(4)]
+    words[3] = encode(["uint256"], [native["amount"]]).hex()
+    pair_swap["data"] = "0x" + "".join(words)
+    trap = failed_sell(v2, error_string("TransferHelper: TRANSFER_FROM_FAILED"))
+    rpc = FakeRpc(
+        token,
+        native["amount"] * 1_000_000,
+        pair=trap["pair"],
+        reserves=(10**20, 10**27),
+        slot0=1 << 100,
+        simulations=[replay(native), replay(trap)],
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    evaluate_pool = robinhood_simulation.evaluate_simulation
+
+    def evaluate_one(pool, *args, **kwargs):
+        if pool.route == "v4-native":
+            raise KeyError("details are not logged")
+        return evaluate_pool(pool, *args, **kwargs)
+
+    monkeypatch.setattr(robinhood_simulation, "evaluate_simulation", evaluate_one)
+    caplog.set_level(logging.ERROR, logger="services.robinhood_simulation")
+
+    with fresh_addresses(native, trap):
+        result = await simulator.simulate(token)
+
+    assert (result["is_honeypot"], result["can_sell"]) == (True, False)
+    assert result["simulation_failed"] is True
+    assert "rpc_failed" not in result
+    assert "Simulation result could not be evaluated (KeyError)" in result["reason"]
+    assert "details are not logged" not in caplog.text
+    assert [record.getMessage() for record in caplog.records] == [
+        "Robinhood simulation result could not be evaluated: KeyError"
+    ]
 
 
 @pytest.mark.asyncio

@@ -918,9 +918,18 @@ class RobinhoodSimulator:
                         raise SimulationUnavailable(f"eth_simulateV1 failed (JSON-RPC error {code})")
                     if "result" not in row or row.get("result") is None:
                         raise SimulationUnavailable("Malformed RPC response")
-                    outcome = evaluate_simulation(
-                        pool, token, amount, buyer, row.get("result"), sell_amount
-                    )
+                    try:
+                        outcome = evaluate_simulation(
+                            pool, token, amount, buyer, row.get("result"), sell_amount
+                        )
+                    except Exception as e:
+                        logger.error("Robinhood simulation result could not be evaluated: %s", type(e).__name__)
+                        return _outcome(
+                            pool,
+                            f"Simulation result could not be evaluated ({type(e).__name__})",
+                            block=source_block,
+                            simulation_failed=True,
+                        )
                     # eth_simulateV1 returns synthetic blocks after the real source header.
                     outcome["block"] = source_block
                     return outcome
@@ -939,9 +948,18 @@ class RobinhoodSimulator:
                 if code == -32601 or "does not exist" in str(error).lower():
                     raise SimulationUnavailable("eth_simulateV1 unsupported by the RPC")
                 raise SimulationUnavailable(f"eth_simulateV1 failed (JSON-RPC error {code})")
-            outcome = evaluate_simulation(
-                pool, token, amount, buyer, rows[0].get("result"), sell_amount
-            )
+            try:
+                outcome = evaluate_simulation(
+                    pool, token, amount, buyer, rows[0].get("result"), sell_amount
+                )
+            except Exception as e:
+                logger.error("Robinhood simulation result could not be evaluated: %s", type(e).__name__)
+                return _outcome(
+                    pool,
+                    f"Simulation result could not be evaluated ({type(e).__name__})",
+                    block=source_block,
+                    simulation_failed=True,
+                )
             # eth_simulateV1 returns synthetic blocks after the real source header.
             outcome["block"] = source_block
             return outcome

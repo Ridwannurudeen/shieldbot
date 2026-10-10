@@ -4,6 +4,7 @@ unattributable sell failures, RPC failures, pool discovery and the adapter's int
 import copy
 import dataclasses
 import json
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -30,6 +31,7 @@ from services.arbitrum_simulation import (
     call_labels,
     evaluate_simulation,
 )
+import services.arbitrum_simulation as arbitrum_simulation
 from services.honeypot_service import HoneypotService
 from utils.scam_db import ScamDatabase
 from utils.web3_client import Web3Client
@@ -842,6 +844,33 @@ async def test_a_pool_the_rpc_could_not_simulate_leaves_the_token_unknown_beside
     }
     assert "simulation_failed" not in result
     assert "eth_simulateV1 failed (JSON-RPC error -32603)" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_pool_evaluation_error_keeps_another_pools_trap(monkeypatch, caplog):
+    trapped = failed_sell(load("v3_arb"), error_string("STF"))
+    fixture, rpc = _pools_answering(trapped, trapped, as_confirmation(trapped))
+    evaluate_pool = arbitrum_simulation.evaluate_simulation
+
+    def evaluate_one(pool, *args, **kwargs):
+        if pool.fee == 500:
+            raise KeyError("details are not logged")
+        return evaluate_pool(pool, *args, **kwargs)
+
+    monkeypatch.setattr(arbitrum_simulation, "evaluate_simulation", evaluate_one)
+    caplog.set_level(logging.ERROR, logger="services.arbitrum_simulation")
+
+    with run_addresses(fixture, "run", "run", "confirm"):
+        result = await simulator_for(rpc).simulate(fixture["token"])
+
+    assert (result["is_honeypot"], result["can_sell"]) == (True, False)
+    assert result["simulation_failed"] is True
+    assert "rpc_failed" not in result
+    assert "Simulation result could not be evaluated (KeyError)" in result["reason"]
+    assert "details are not logged" not in caplog.text
+    assert [record.getMessage() for record in caplog.records] == [
+        "Arbitrum simulation result could not be evaluated: KeyError"
+    ]
 
 
 def _sell_taxed(fixture, percent):
