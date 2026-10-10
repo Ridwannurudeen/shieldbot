@@ -14,7 +14,7 @@ The core scan path refuses to call incomplete data safe and flags dangers suppor
 
 **Start with the [ten-minute judge guide](docs/JUDGE_GUIDE.md).** Its recorded honeypot and three-outcome examples run locally without a network connection or API key once Python dependencies are installed.
 
-**Arbitrum Open House submission:** the version submitted on HackQuest is the [`open-house-submission`](https://github.com/Ridwannurudeen/shieldbot/tree/open-house-submission) tag, commit `a580654` (4 October 2026, 14:37 UTC). Commits to `main` after the 4 October 15:59 UTC deadline are post-deadline work, and the live API has since been updated with some of them ([judge guide](docs/JUDGE_GUIDE.md) records the deployed revision).
+**Arbitrum Open House submission:** the version submitted on HackQuest is the [`open-house-submission`](https://github.com/Ridwannurudeen/shieldbot/tree/open-house-submission) tag, commit `a580654` (4 October 2026, 14:37 UTC). Commits to `main` after the 4 October 15:59 UTC deadline are post-deadline work, and the live API has since been updated with some of them ([judge guide](docs/JUDGE_GUIDE.md) records the deployed revision). Every change after the deadline, and which of them are live, is listed in [docs/OPEN_HOUSE_AFTER_DEADLINE.md](docs/OPEN_HOUSE_AFTER_DEADLINE.md).
 
 **Colosseum Crypto World's Fair entry:** [Robinhood Chain track notes](docs/COLOSSEUM.md).
 
