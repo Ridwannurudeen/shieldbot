@@ -12,11 +12,12 @@ registry stay in the watch on purpose: their rescans publish to the new registry
 again as soon as a rescan is confirmed there. A confirmation that arrives late for a transaction sent to
 the old registry never admits a new subject.
 
-`GUARD_WATCH_MAX_SUBJECTS` in `core/database.py` defaults to **4**, overridden by the environment
-variable of the same name. Zero disables the set. Lowering it and restarting disables excess
-members; increasing it does not silently reenable them. `GUARD_RESCAN_INTERVAL_SECONDS` in
+`GUARD_WATCH_MAX_SUBJECTS` in `core/database.py` defaults to **4 subjects per chain**, overridden by the environment
+variable of the same name. Zero disables each chain's set. Lowering it and restarting disables excess
+members per chain; increasing it does not silently reenable them. Admission is currently limited to chain 4663, so
+the live cap remains four. `GUARD_RESCAN_INTERVAL_SECONDS` in
 `agent/hunter.py` imports the publisher's `VERDICT_REFRESH_SECONDS` as its **300-second** interval,
-so the rescan and unchanged-verdict refresh thresholds cannot drift independently. Four subjects require 48 scans/hour: at 23 requests/scan,
+so the rescan and unchanged-verdict refresh thresholds cannot drift independently. Four subjects per chain require 48 scans/hour: at 23 requests/scan,
 that is 0.307 rps. From the shared 1 rps budget, discovery consumes approximately 0.15 rps,
 leaving approximately 0.543 rps for launch scans and general rechecks. Raising the cap spends
 that remaining capacity and can make the refresh target unattainable.
@@ -46,7 +47,7 @@ Administrative operations use the existing `X-Admin-Secret` authentication:
 
 Use **`maxAge = 600` seconds for the demo only with `GUARD_WATCH_MAX_SUBJECTS=1`**. The
 `ShieldBotGuardedTransfer.subject` address is immutable; the demo watches exactly that one subject.
-Use **900 seconds as the production minimum at the default four watched subjects**. Neither window
+Use **900 seconds as the production minimum at the default four watched subjects per chain**. Neither window
 guarantees uninterrupted permission or bounds observation age; the guard measures publication age.
 
 These figures are calculations, not on-chain observations. They use

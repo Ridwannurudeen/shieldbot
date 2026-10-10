@@ -102,7 +102,7 @@ That comparison proves document integrity against a recorder's on-chain commitme
 
 The [verdict guard](contracts/base/VERDICT_GUARD.md) enforces **publication freshness**, not observation freshness. The registry sets `Record.timestamp = block.timestamp` when the recording transaction executes. The publisher's observation-age cutoff gates broadcast only; an already broadcast transaction can land arbitrarily later, so observation age is not bounded on-chain.
 
-Use **`maxAge = 600` seconds for the demo only with `GUARD_WATCH_MAX_SUBJECTS=1`**, and **900 seconds as the production minimum at the default four watched subjects**. Both are calculations, not on-chain observations, and neither guarantees uninterrupted permission. Recurring publication covers only the bounded [watched set](docs/guard-rescans.md); the derivation and the denial windows are in the [judge guide](docs/JUDGE_GUIDE.md#freshness-operating-conditions).
+Use **`maxAge = 600` seconds for the demo only with `GUARD_WATCH_MAX_SUBJECTS=1`**, and **900 seconds as the production minimum at the default four watched subjects per chain**. Both are calculations, not on-chain observations, and neither guarantees uninterrupted permission. Recurring publication covers only the bounded [watched set](docs/guard-rescans.md); the derivation and the denial windows are in the [judge guide](docs/JUDGE_GUIDE.md#freshness-operating-conditions).
 
 ### Seven recorded request/response pairs
 
