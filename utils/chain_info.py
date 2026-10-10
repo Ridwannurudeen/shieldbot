@@ -1,55 +1,118 @@
 """Chain info — centralized chain metadata for multichain support."""
 
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-CHAIN_INFO: Dict[int, Dict[str, str]] = {
+# The facts the code reads about each chain. Besides the display fields:
+#   explorer_backend: where verification and contract creation are read (adapters/evm_base.py).
+#     'etherscan': verification and creation from Etherscan, with Sourcify's deployment record
+#     dating a contract when Etherscan does not answer (its free tier refuses getcontractcreation
+#     on BNB Chain, which no public Blockscout serves). 'etherscan_blockscout': verification from
+#     Etherscan, creation from Blockscout, because Etherscan's free tier refuses
+#     getcontractcreation on Base and Optimism.
+#   blockscout_instance: a public Blockscout that answers without an API key, or None to use the
+#     keyed PRO gateway (services/explorer_service.py).
+#   pending_transactions: the RPC serves a public mempool through txpool_content
+#     (services/mempool_service.py).
+#   token_sniffer: Token Sniffer scores the chain's tokens (services/token_sniffer_service.py).
+#   public_log_window_blocks: the block window rescue reads a public RPC in, or None for the
+#     default window (services/rescue_service.py).
+#   picker_order: the chain's place in the Telegram chain picker (bot.py).
+CHAIN_INFO: Dict[int, Dict[str, Any]] = {
     56: {
         'name': 'BSC',
         'explorer_url': 'https://bscscan.com',
         'dexscreener_slug': 'bsc',
         'native_symbol': 'BNB',
+        'explorer_backend': 'etherscan',
+        'blockscout_instance': None,
+        'pending_transactions': True,
+        'token_sniffer': True,
+        'public_log_window_blocks': None,
+        'picker_order': 1,
     },
     204: {
         'name': 'opBNB',
         'explorer_url': 'https://opbnbscan.com',
         'dexscreener_slug': 'opbnb',
         'native_symbol': 'BNB',
+        'explorer_backend': 'etherscan',
+        'blockscout_instance': None,
+        'pending_transactions': True,
+        'token_sniffer': True,
+        'public_log_window_blocks': None,
+        'picker_order': 2,
     },
     1: {
         'name': 'Ethereum',
         'explorer_url': 'https://etherscan.io',
         'dexscreener_slug': 'ethereum',
         'native_symbol': 'ETH',
+        'explorer_backend': 'etherscan',
+        'blockscout_instance': None,
+        'pending_transactions': True,
+        'token_sniffer': True,
+        'public_log_window_blocks': None,
+        'picker_order': 0,
     },
     8453: {
         'name': 'Base',
         'explorer_url': 'https://basescan.org',
         'dexscreener_slug': 'base',
         'native_symbol': 'ETH',
+        'explorer_backend': 'etherscan_blockscout',
+        'blockscout_instance': 'https://base.blockscout.com',
+        'pending_transactions': False,
+        'token_sniffer': True,
+        'public_log_window_blocks': 2_000,
+        'picker_order': 3,
     },
     42161: {
         'name': 'Arbitrum',
         'explorer_url': 'https://arbiscan.io',
         'dexscreener_slug': 'arbitrum',
         'native_symbol': 'ETH',
+        'explorer_backend': 'etherscan',
+        'blockscout_instance': None,
+        'pending_transactions': False,
+        'token_sniffer': True,
+        'public_log_window_blocks': 500_000,
+        'picker_order': 4,
     },
     137: {
         'name': 'Polygon',
         'explorer_url': 'https://polygonscan.com',
         'dexscreener_slug': 'polygon',
         'native_symbol': 'POL',
+        'explorer_backend': 'etherscan',
+        'blockscout_instance': None,
+        'pending_transactions': True,
+        'token_sniffer': True,
+        'public_log_window_blocks': None,
+        'picker_order': 5,
     },
     4663: {
         'name': 'Robinhood Chain',
         'explorer_url': 'https://robinhoodchain.blockscout.com',
         'dexscreener_slug': 'robinhood',
         'native_symbol': 'ETH',
+        'explorer_backend': 'sourcify_blockscout',
+        'blockscout_instance': None,
+        'pending_transactions': False,
+        'token_sniffer': False,
+        'public_log_window_blocks': None,
+        'picker_order': 7,
     },
     10: {
         'name': 'Optimism',
         'explorer_url': 'https://optimistic.etherscan.io',
         'dexscreener_slug': 'optimism',
         'native_symbol': 'ETH',
+        'explorer_backend': 'etherscan_blockscout',
+        'blockscout_instance': 'https://explorer.optimism.io',
+        'pending_transactions': False,
+        'token_sniffer': True,
+        'public_log_window_blocks': None,
+        'picker_order': 6,
     },
 }
 

@@ -12,14 +12,16 @@ from cachetools import TLRUCache
 
 from core.circuit_breaker import CircuitOpenError, provider_breakers
 from core.unknown_ledger import unknown_ledger
+from utils.chain_info import CHAIN_INFO
 
 
 # Public Blockscout instances that answer without an API key; other chains go through the keyed
 # PRO gateway. optimism.blockscout.com redirects here, and requests do not follow redirects, so the
 # map names the final host. scripts/check_blockscout_instances.py notices when an instance moves.
 BLOCKSCOUT_INSTANCES = {
-    8453: "https://base.blockscout.com",
-    10: "https://explorer.optimism.io",
+    chain_id: info["blockscout_instance"]
+    for chain_id, info in CHAIN_INFO.items()
+    if info["blockscout_instance"] is not None
 }
 
 
