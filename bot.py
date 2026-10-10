@@ -43,7 +43,7 @@ from services.mempool_service import supports_pending_transactions
 from utils.web3_client import UnsupportedChainError
 from utils.scam_db import BLACKLIST_RELOAD_SECONDS
 from utils.chain_info import (
-    get_chain_name, get_explorer_url, get_dexscreener_slug,
+    CHAIN_INFO, get_chain_name, get_explorer_url, get_dexscreener_slug,
     parse_chain_prefix,
 )
 
@@ -113,7 +113,7 @@ _COLLISION_LAUNCH_HEADER = '⚠️ NOT OFFICIAL: shares a ticker or name with an
 _launch_alert_task = None
 _blacklist_reload_task = None
 # The chain picker lists chains in the product's order; any other supported chain, such as a demo chain, follows.
-PICKER_CHAIN_ORDER = (1, 56, 204, 8453, 42161, 137, 10, 4663)
+PICKER_CHAIN_ORDER = tuple(sorted(CHAIN_INFO, key=lambda chain_id: CHAIN_INFO[chain_id]['picker_order']))
 # A reply names the chain it used and the two ways to choose one, since the choice may be several messages up.
 _RESCUE_CHAIN_HINT = (
     "To check another chain, add a prefix such as `/rescue eth:0x...`, or leave the prefix out to be asked."

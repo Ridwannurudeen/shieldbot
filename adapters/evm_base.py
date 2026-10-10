@@ -47,21 +47,14 @@ BURN_ADDRESSES = {
     '0x000000000000000000000000000000000000dead',
 }
 
-# 'etherscan': verification and creation from Etherscan, with Sourcify's deployment record dating a
-# contract when Etherscan does not answer (its free tier refuses getcontractcreation on BNB Chain,
-# which no public Blockscout serves). 'etherscan_blockscout': verification from Etherscan, creation
-# from Blockscout, because Etherscan's free tier refuses getcontractcreation on Base and Optimism.
-EXPLORER_BACKENDS = {
-    1: 'etherscan', 56: 'etherscan', 8453: 'etherscan_blockscout',
-    42161: 'etherscan', 137: 'etherscan', 10: 'etherscan_blockscout', 204: 'etherscan',
-    4663: 'sourcify_blockscout',
-}
-
 
 def _get_explorer_backend(chain_id: int) -> str:
-    if chain_id not in EXPLORER_BACKENDS:
+    # Imported here: the utils package imports the chain adapters, which import this module.
+    from utils.chain_info import CHAIN_INFO
+
+    if chain_id not in CHAIN_INFO:
         raise ValueError(f"Unsupported explorer chain: {chain_id}")
-    return EXPLORER_BACKENDS[chain_id]
+    return CHAIN_INFO[chain_id]['explorer_backend']
 
 
 def _decimal(value) -> Optional[int]:

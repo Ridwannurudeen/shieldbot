@@ -15,7 +15,7 @@ from cachetools import TTLCache
 from eth_utils import keccak
 from web3 import Web3
 
-from utils.chain_info import get_dexscreener_slug
+from utils.chain_info import CHAIN_INFO, get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,11 @@ RECENT_LOG_WINDOW_BLOCKS = 10_000
 # 10,000,000 blocks in 1 to 3 s, so it is read in windows of 500,000 blocks (12,000,000 blocks,
 # about 35 days). It refuses a window matching more than 10,000 logs, which only a wallet
 # approving thousands of times a day reaches, and the scan then stops there as for any window.
-PUBLIC_LOG_WINDOW_BLOCKS = {8453: 2_000, 42161: 500_000}
+PUBLIC_LOG_WINDOW_BLOCKS = {
+    chain_id: info["public_log_window_blocks"]
+    for chain_id, info in CHAIN_INFO.items()
+    if info["public_log_window_blocks"] is not None
+}
 RECENT_LOG_WINDOWS = 24
 PUBLIC_RPC_CONCURRENCY = 4
 PUBLIC_RPC_ATTEMPTS = 3
