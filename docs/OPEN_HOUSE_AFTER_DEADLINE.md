@@ -14,7 +14,7 @@ The HackQuest submission is the [`open-house-submission`](https://github.com/Rid
 | `dd47f2f` | 2026-10-04 | Prints rescue alert hints one per line and removes an unavailable revoke hint; the other merged pull request changes documentation. |
 | `3dea0aa` | 2026-10-04 | Reverts three simulator changes after a measured Robinhood RPC rate limit regression. |
 | `f1c2af7` | 2026-10-05 | Restores hookless USDG simulation without pool batching, including official stock tokens when a pool resolves. |
-| `302eb66` | 2026-10-05 | Adds a five second timeout for optional second node simulations, then falls back to the official node. |
+| `302eb66` | 2026-10-05 | Sends simulations to an optional faster node with a five second timeout, falling back to the official node (commits `0ad9c17` and `302eb66`). |
 
 Production has run `302eb66` since 5 October 2026 and has not been redeployed. The next deployment will follow the Open House result on 12 October 2026. Deployment notes are in [SUBMISSION.md](SUBMISSION.md).
 
@@ -34,7 +34,7 @@ The first-parent history of `origin/main` contains 33 commits after the submissi
 | 2026-10-04 17:54 | `2fc0392` | backend, tests | fix(telegram): show skipped categories as not applicable |
 | 2026-10-04 18:23 | `2e160d1` | tests | test(4663): pin simulator outcomes before batching |
 | 2026-10-04 18:36 | `c3554ac` | backend, tests | perf(4663): simulate a token's pools in one RPC batch |
-| 2026-10-04 19:07 | `fb5c3d3` | docs, extension | Merge pull request #16 from Ridwannurudeen/docs/judge-navigation |
+| 2026-10-04 19:07 | `fb5c3d3` | docs | Merge pull request #16 from Ridwannurudeen/docs/judge-navigation |
 | 2026-10-04 19:07 | `dd47f2f` | backend, tests | Merge pull request #15 from Ridwannurudeen/fix/rescue-hint-list |
 | 2026-10-04 19:25 | `d9b923c` | docs | docs: production runs dd47f2f, with the c3554ac deployment noted |
 | 2026-10-04 19:32 | `79746b3` | backend, tests | Revert "perf(4663): simulate a token's pools in one RPC batch" |
@@ -46,6 +46,8 @@ The first-parent history of `origin/main` contains 33 commits after the submissi
 | 2026-10-05 07:06 | `03720cf` | docs | docs: production runs f1c2af7, hookless USDG pools back without the batched simulation |
 | 2026-10-05 12:50 | `0ad9c17` | backend, tests, deploy | feat(4663): send simulations to an optional faster node, falling back to the official one |
 | 2026-10-05 12:52 | `302eb66` | backend, tests | fix(4663): give the simulation node a 5 s timeout so a hang falls back fast |
+
+`fb5c3d3` (pull request #16) changes documentation only: its one path under `extension/` is `extension/README.md`, and it removes unused Chrome Web Store image files.
 
 ### On main only, not deployed (13)
 
@@ -73,7 +75,7 @@ The Chrome Web Store has served version 3.1.0 since about 7 October 2026, built 
 
 ## Check it yourself
 
-Run with `TZ=UTC` in the worktree. For each SHA from the first command, the ancestry check identifies whether it is included in production. The path diff shows the files used to assign areas.
+Run in a clone of the repository with `TZ=UTC`. For each SHA from the first command, the ancestry check identifies whether it is included in production. The path diff shows the files used to assign areas.
 
 ```bash
 export TZ=UTC
