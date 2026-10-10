@@ -167,6 +167,37 @@ async def test_direct_usdg_lookup_skips_an_initialized_empty_pool():
     assert f"hookless v4-usdg pool 0x{empty_id} initialized but empty" in notes
 
 
+@pytest.mark.asyncio
+async def test_a_live_usdg_pool_is_the_only_pool_simulated_when_another_is_empty():
+    fixture = load("v4_hookless_usdg_nvda")
+    live_key = tuple(fixture["key"])
+    empty_key = (USDG, fixture["token"], 500, 10, ZERO)
+    slots = storage_values(live_key, 1)
+    slots.update(storage_values(empty_key, 0))
+    rpc = rpc_for(fixture, pool_slots=slots)
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(fixture["token"])
+
+    live_request = build_simulation_request(
+        Pool("v4-usdg", USDG, key=live_key),
+        fixture["token"],
+        fixture["amount"],
+        fixture["buyer"],
+        fixture["receiver"],
+    )
+    simulation_calls = [
+        params for calls in rpc.requests for method, params in calls if method == "eth_simulateV1"
+    ]
+    empty_id = keccak(
+        encode(["address", "address", "uint24", "int24", "address"], list(empty_key))
+    ).hex()
+    assert simulation_calls == [[live_request, hex(rpc.head)]]
+    assert f"hookless v4-usdg pool 0x{empty_id} initialized but empty" in result["reason"]
+
+
 def test_hookless_usdg_initialize_is_supported_and_another_quote_is_not():
     pool, note = _pool_from_initialize(initialize_log(USDG, TOKEN, 3000, 60, ZERO, 1), TOKEN)
     assert pool == Pool("v4-usdg", USDG, key=(USDG, TOKEN, 3000, 60, ZERO))

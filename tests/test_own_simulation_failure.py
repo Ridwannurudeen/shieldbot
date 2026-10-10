@@ -44,6 +44,7 @@ from tests.test_robinhood_simulation import (
     TOKEN,
     adapter_with,
     failed_sell as robinhood_failed_sell,
+    hookless_pool_slots as robinhood_hookless_pool_slots,
     outcome,
     replay,
     rpc_for,
@@ -148,6 +149,28 @@ async def test_a_4663_pool_the_rpc_could_not_simulate_stays_unknown_beside_a_com
     assert data["can_sell"] is None and data["rpc_failed"] is True
     assert "Honeypot simulation could not run (unresolved)" in data["reason"]
     assert analyzed.score == 0
+
+
+@pytest.mark.asyncio
+async def test_an_empty_4663_pool_stays_unknown_beside_a_complete_clean_goplus_answer():
+    fixture = copy.deepcopy(load_robinhood("v4_native_liquidity_launcher"))
+    revert_call(robinhood_calls(fixture)["buy"], error_string("InsufficientBalance"))
+    rpc = rpc_for(
+        fixture,
+        pool_slots=robinhood_hookless_pool_slots(tuple(fixture["key"]), 0),
+    )
+    with robinhood_addresses(fixture):
+        data, analyzed, risk, extension = await scan(
+            4663, adapter_with(rpc), fixture["token"], CLEAN_GOPLUS
+        )
+
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    assert data["undecided"] is True
+    assert data["can_sell"] is None
+    assert data["simulation_block"] is not None
+    assert data["status"] == "unknown"
+    assert risk["risk_level"] != "LOW"
+    assert build_evidence(4663, fixture["token"], risk, analyzed.data)["verdict"] == "UNKNOWN"
 
 
 @pytest.mark.asyncio

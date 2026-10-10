@@ -1188,6 +1188,7 @@ class RobinhoodSimulator:
 
         empty_pool_ids = {route: [] for route in ("v4-native", "v4-weth", "v4-usdg")}
         empty_pool_keys = set()
+        empty_pools = []
         lookup_failed_routes = set()
         for index, (route, numeraire, key) in enumerate(hookless_pools):
             state = _call_result(
@@ -1209,6 +1210,7 @@ class RobinhoodSimulator:
                 else:
                     empty_pool_ids[route].append(_pool_id(key).hex())
                     empty_pool_keys.add(key)
+                    empty_pools.append((route, numeraire, key))
 
         for route, pool_ids in empty_pool_ids.items():
             if pool_ids:
@@ -1223,6 +1225,12 @@ class RobinhoodSimulator:
         if not pools:
             pools = await self._scan_initialize_logs(session, token, notes)
             pools = [pool for pool in pools if pool.key not in empty_pool_keys]
+        if not pools and empty_pools:
+            route, numeraire, key = min(
+                empty_pools,
+                key=lambda pool: (ROUTES.index(pool[0]), hookless_pools.index(pool)),
+            )
+            pools = [Pool(route, numeraire, key=key)]
         if not pools:
             notes.append("No supported pool found")
         pools.sort(key=lambda pool: (ROUTES.index(pool.route), -pool_depths.get(pool.key, 0)))

@@ -1425,28 +1425,25 @@ async def test_direct_hookless_weth_pool_is_found_without_log_scan():
 
 
 @pytest.mark.asyncio
-async def test_initialized_empty_native_pool_is_skipped():
+async def test_initialized_empty_native_pool_is_simulated_when_no_other_pool_is_found():
     fixture = load("v4_native_liquidity_launcher")
     token = fixture["token"]
-    key = (ZERO, token, 2500, 25, ZERO)
-    head = 65_540_000
-    rpc = FakeRpc(
-        token,
-        fixture["amount"] * 1_000_000,
-        head=head,
-        logs={(head - LOG_WINDOW_BLOCKS + 1, head): [initialize_log(*key, head)]},
-        pool_slots=hookless_pool_slots(key, 0),
-    )
+    key = tuple(fixture["key"])
+    rpc = rpc_for(fixture, pool_slots=hookless_pool_slots(key, 0))
     simulator = RobinhoodSimulator("https://rpc.invalid")
     simulator._request = rpc
 
-    result = await simulator.simulate(token)
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(token)
 
     pool_id = keccak(encode(["address", "address", "uint24", "int24", "address"], list(key)))
-    methods = [method for calls in rpc.requests for method, _ in calls]
+    simulation_calls = [
+        params for calls in rpc.requests for method, params in calls if method == "eth_simulateV1"
+    ]
+    expected_request = replay(fixture)[0][0]
     assert f"hookless v4-native pool 0x{pool_id.hex()} initialized but empty" in result["reason"]
-    assert "No supported pool found" in result["reason"]
-    assert "eth_simulateV1" not in methods
+    assert "No supported pool found" not in result["reason"]
+    assert simulation_calls == [[expected_request, hex(rpc.head)]]
 
 
 @pytest.mark.asyncio
