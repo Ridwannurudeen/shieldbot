@@ -24,6 +24,8 @@ from services.robinhood_simulation import (
     MAX_LOG_WINDOWS,
     MAX_POOLS,
     MIN_TRAP_COST_WEI,
+    ROUTES,
+    TOKEN_REFUSED,
     USDG,
     Pool,
     RobinhoodSimulator,
@@ -232,6 +234,7 @@ def test_live_honeypot_is_proven_unsellable():
         ("v4_native_liquidity_launcher", "TRANSFER_FROM_FAILED"),
         ("v4_doppler_weth", "TRANSFER_FROM_FAILED"),
         ("v4_weth_hookless", "TRANSFER_FROM_FAILED"),
+        ("v4_hookless_usdg_nvda", "TRANSFER_FROM_FAILED"),
         ("v2_router02", "TransferHelper: TRANSFER_FROM_FAILED"),
     ],
 )
@@ -243,6 +246,18 @@ def test_token_refusing_the_sell_is_a_honeypot(name, message):
     assert outcome["buy_tax"] == 0.0
     assert outcome["sell_tax"] is None
     assert message in outcome["reason"]
+
+
+def test_unattributed_sell_revert_on_a_hookless_usdg_pool_stays_undecided():
+    outcome = evaluate(failed_sell(load("v4_hookless_usdg_nvda"), error_string("sells paused")))
+    assert outcome["can_buy"] is True
+    assert outcome["can_sell"] is None
+    assert outcome["is_honeypot"] is None
+    assert "sell reverted with an unattributed error" in outcome["reason"]
+
+
+def test_every_route_has_a_token_refused_string():
+    assert set(TOKEN_REFUSED) == set(ROUTES)
 
 
 def test_hook_reverting_the_sell_is_a_honeypot():
