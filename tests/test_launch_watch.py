@@ -677,3 +677,25 @@ def test_the_poll_interval_keeps_discovery_within_two_minutes_of_a_launch():
     from services.rpc_guard import RPC_BUDGET_RPS
 
     assert CONFIRMATIONS * 0.1 + POLL_INTERVAL_SECONDS + SCAN_REQUEST_COST / RPC_BUDGET_RPS <= 120
+
+
+@pytest.mark.asyncio
+async def test_the_watch_loop_marks_its_lookups_as_background(db):
+    from services.explorer_service import BACKGROUND
+
+    seen = []
+    watch = make_watch(db)
+
+    async def cycle():
+        seen.append(BACKGROUND.get())
+
+    watch.cycle = cycle
+    with patch("agent.launch_watch.POLL_INTERVAL_SECONDS", 3600):
+        await watch.start()
+        for _ in range(50):
+            if seen:
+                break
+            await _real_sleep(0.01)
+        await watch.stop()
+    assert seen == [True]
+    assert BACKGROUND.get() is False

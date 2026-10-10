@@ -356,16 +356,44 @@ class EvmAdapter(ChainAdapter):
         if cached is not None:
             return dict(cached)
         flight_key = (asyncio.get_running_loop(), key)
-        if flight_key not in self._creation_inflight:
-            self._creation_inflight[flight_key] = asyncio.create_task(
-                self._lookup_creation_info(address, key, flight_key)
+        flight = self._creation_inflight.get(flight_key)
+        if flight is None:
+            promoted = asyncio.Event()
+            task = asyncio.create_task(
+                self._lookup_creation_info(address, key, flight_key, promoted)
             )
-        info = await asyncio.shield(self._creation_inflight[flight_key])
+            flight = (task, promoted)
+            self._creation_inflight[flight_key] = flight
+        else:
+            from services.explorer_service import BACKGROUND
+
+            task, promoted = flight
+            if not BACKGROUND.get():
+                promoted.set()
+                if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
+                    self._explorer_service.promote_contract_creation_lookup(
+                        address, self._chain_id
+                    )
+        info = await asyncio.shield(flight[0])
         return dict(info) if info else info
 
-    async def _lookup_creation_info(self, address: str, key: tuple, flight_key: tuple) -> Optional[Dict]:
+    async def _lookup_creation_info(
+        self, address: str, key: tuple, flight_key: tuple, promoted: asyncio.Event
+    ) -> Optional[Dict]:
         try:
-            info = await self._fetch_creation_info(address)
+            from services.explorer_service import BACKGROUND
+
+            token = (
+                BACKGROUND.set(False)
+                if promoted.is_set()
+                and self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout')
+                else None
+            )
+            try:
+                info = await self._fetch_creation_info(address)
+            finally:
+                if token is not None:
+                    BACKGROUND.reset(token)
         finally:
             self._creation_inflight.pop(flight_key, None)
         if info and info.get('age_days') is not None:
@@ -379,7 +407,9 @@ class EvmAdapter(ChainAdapter):
         """
         try:
             if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
-                result = await self._explorer_service.get_contract_creation_info(address, self._chain_id)
+                result = await self._explorer_service.get_contract_creation_info(
+                    address, self._chain_id
+                )
                 if result.status == 'unknown':
                     logger.warning("[%s] Creation unknown: %s", self._chain_name, result.reason)
                     return None

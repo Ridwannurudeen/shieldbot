@@ -1,5 +1,6 @@
 """Tests for agent.hunter — scheduled threat sweep loop."""
 
+import asyncio
 import logging
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -736,3 +737,23 @@ async def test_a_reused_pair_address_moves_to_its_new_chain(tools, ai, sentinel,
     hunter = Hunter(tools=tools, db=real_db, ai_analyzer=ai, sentinel=sentinel)
 
     assert await sweep_scans(hunter, tools) == [(ROBINHOOD_TOKEN, 4663)]
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_loop_marks_its_lookups_as_background(hunter):
+    from services.explorer_service import BACKGROUND
+
+    seen = []
+
+    async def sweep():
+        seen.append(BACKGROUND.get())
+
+    hunter.sweep = sweep
+    await hunter.start(interval_seconds=3600)
+    for _ in range(50):
+        if seen:
+            break
+        await asyncio.sleep(0.01)
+    await hunter.stop()
+    assert seen == [True]
+    assert BACKGROUND.get() is False
