@@ -140,8 +140,31 @@ async def test_direct_usdg_lookup_returns_deepest_active_pool_first():
     assert amount == 10**21
     assert pools[0] == Pool("v4-usdg", USDG, key=keys[1])
     assert [pool.key for pool in pools] == [keys[1], keys[2], keys[0]]
-    assert "2 more pools not simulated (cap of 3 pools)" in notes
+    assert "1 more pool not simulated (cap of 3 pools)" in notes
+    assert "hookless v4-usdg pool 0x" in notes[0]
+    assert "initialized but empty" in notes[0]
     assert not any("unsupported route" in note for note in notes)
+
+
+@pytest.mark.asyncio
+async def test_direct_usdg_lookup_skips_an_initialized_empty_pool():
+    token = "0x" + "d2" * 20
+    live_key = (USDG, token, 500, 10, ZERO)
+    empty_key = (USDG, token, 3000, 60, ZERO)
+    slots = storage_values(live_key, 500)
+    slots.update(storage_values(empty_key, 0))
+    rpc = FakeRpc(token, 10**27, pool_slots=slots)
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+
+    amount, pools, notes = await simulator._discover(None, token)
+
+    empty_id = keccak(
+        encode(["address", "address", "uint24", "int24", "address"], list(empty_key))
+    ).hex()
+    assert amount == 10**21
+    assert pools == [Pool("v4-usdg", USDG, key=live_key)]
+    assert f"hookless v4-usdg pool 0x{empty_id} initialized but empty" in notes
 
 
 def test_hookless_usdg_initialize_is_supported_and_another_quote_is_not():

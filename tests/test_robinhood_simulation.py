@@ -1164,6 +1164,11 @@ def pool_state_slot(key):
     return "0x" + keccak(pool_id + (6).to_bytes(32, "big")).hex()
 
 
+def hookless_pool_slots(key, liquidity):
+    slot = pool_state_slot(key)
+    return {slot[2:]: 1 << 100, f"{(int(slot, 16) + 3):064x}": liquidity}
+
+
 class FakeRpc:
     """Answers the simulator's JSON-RPC calls from explicit tables; records every request."""
 
@@ -1274,6 +1279,8 @@ def rpc_for(fixture, **overrides):
     }
     if fixture["route"] == "v4-native":
         options["slot0"] = 1 << 100
+        state_slot = pool_state_slot(tuple(fixture["key"]))
+        options["pool_slots"] = {f"{(int(state_slot, 16) + 3):064x}": 1}
     elif fixture["route"] == "v4-doppler":
         options["state"] = doppler_state(tuple(fixture["key"]), fixture["numeraire"], status=2)
     elif fixture["route"] == "v4-usdg":
@@ -1322,15 +1329,173 @@ async def test_liquidity_launcher_lookup_reads_the_derived_pool_slot():
         if method == "eth_call"
         and params[0]["data"].startswith("0x" + selector("extsload(bytes32)").hex())
     ]
-    assert extsload[0] == (
-        "0x" + selector("extsload(bytes32)").hex() + pool_state_slot(tuple(fixture["key"]))[2:]
-    )
-    assert extsload[1:] == [
-        "0x" + selector("extsload(bytes32)").hex()
-        + f"{(int(pool_state_slot((USDG, fixture['token'], fee, spacing, ZERO)), 16) + offset):064x}"
+    keys = [
+        (ZERO, fixture["token"], fee, spacing, ZERO)
         for fee, spacing in HOOKLESS_V4_FEE_TICK_SPACINGS
+    ]
+    keys += [
+        (*sorted((fixture["token"], robinhood_simulation.WETH)), fee, spacing, ZERO)
+        for fee, spacing in HOOKLESS_V4_FEE_TICK_SPACINGS
+    ]
+    keys += [
+        (*sorted((fixture["token"], USDG)), fee, spacing, ZERO)
+        for fee, spacing in HOOKLESS_V4_FEE_TICK_SPACINGS
+    ]
+    assert extsload == [
+        "0x" + selector("extsload(bytes32)").hex()
+        + f"{(int(pool_state_slot(key), 16) + offset):064x}"
+        for key in keys
         for offset in (0, 3)
     ]
+    assert len(rpc.requests[0]) == 33
+
+
+@pytest.mark.asyncio
+async def test_direct_hookless_native_pool_is_found_without_log_scan():
+    fixture = load("v4_native_liquidity_launcher")
+    token = fixture["token"]
+    key = (ZERO, token, 3000, 60, ZERO)
+    pool = Pool("v4-native", ZERO, key=key)
+    request = build_simulation_request(
+        pool, token, fixture["amount"], fixture["buyer"], fixture["receiver"]
+    )
+    rpc = FakeRpc(
+        token,
+        fixture["amount"] * 1_000_000,
+        pool_slots=hookless_pool_slots(key, 100),
+        simulations=[([request, "latest"], {"error": {"code": -32000, "message": "rejected"}})],
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(token)
+
+    pool_id = keccak(encode(["address", "address", "uint24", "int24", "address"], list(key)))
+    methods = [method for calls in rpc.requests for method, _ in calls]
+    assert f"v4-native pool 0x{pool_id.hex()}" in result["reason"]
+    assert methods.count("eth_simulateV1") == 1
+    assert "eth_getLogs" not in methods
+    assert rpc.simulations == []
+
+
+@pytest.mark.asyncio
+async def test_direct_hookless_weth_pool_is_found_without_log_scan():
+    fixture = load("v4_weth_hookless")
+    token = fixture["token"]
+    weth = robinhood_simulation.WETH
+    key = (*sorted((token, weth)), 2500, 25, ZERO)
+    pool = Pool("v4-weth", weth, key=key)
+    request = build_simulation_request(
+        pool, token, fixture["amount"], fixture["buyer"], fixture["receiver"]
+    )
+    rpc = FakeRpc(
+        token,
+        fixture["amount"] * 1_000_000,
+        pool_slots=hookless_pool_slots(key, 100),
+        simulations=[([request, "latest"], {"error": {"code": -32000, "message": "rejected"}})],
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(token)
+
+    pool_id = keccak(encode(["address", "address", "uint24", "int24", "address"], list(key)))
+    methods = [method for calls in rpc.requests for method, _ in calls]
+    assert f"v4-weth pool 0x{pool_id.hex()}" in result["reason"]
+    assert methods.count("eth_simulateV1") == 1
+    assert "eth_getLogs" not in methods
+    assert rpc.simulations == []
+
+
+@pytest.mark.asyncio
+async def test_initialized_empty_native_pool_is_skipped():
+    fixture = load("v4_native_liquidity_launcher")
+    token = fixture["token"]
+    key = (ZERO, token, 2500, 25, ZERO)
+    head = 65_540_000
+    rpc = FakeRpc(
+        token,
+        fixture["amount"] * 1_000_000,
+        head=head,
+        logs={(head - LOG_WINDOW_BLOCKS + 1, head): [initialize_log(*key, head)]},
+        pool_slots=hookless_pool_slots(key, 0),
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+
+    result = await simulator.simulate(token)
+
+    pool_id = keccak(encode(["address", "address", "uint24", "int24", "address"], list(key)))
+    methods = [method for calls in rpc.requests for method, _ in calls]
+    assert f"hookless v4-native pool 0x{pool_id.hex()} initialized but empty" in result["reason"]
+    assert "No supported pool found" in result["reason"]
+    assert "eth_simulateV1" not in methods
+
+
+@pytest.mark.asyncio
+async def test_pool_cap_keeps_route_diversity_before_a_second_native_pool():
+    fixture = load("v4_native_liquidity_launcher")
+    token, amount = fixture["token"], fixture["amount"]
+    tiers = ((100, 1, 100), (500, 10, 500), (2500, 25, 300))
+    slots = {}
+    for fee, spacing, liquidity in tiers:
+        key = (ZERO, token, fee, spacing, ZERO)
+        slots.update(hookless_pool_slots(key, liquidity))
+    pair = "0x" + "55" * 20
+    selected = [
+        Pool("v4-native", ZERO, key=(ZERO, token, 500, 10, ZERO)),
+        Pool("v2", ZERO, pair=pair),
+        Pool("v4-native", ZERO, key=(ZERO, token, 2500, 25, ZERO)),
+    ]
+    simulations = [
+        (
+            [
+                build_simulation_request(
+                    pool, token, amount, fixture["buyer"], fixture["receiver"]
+                ),
+                "latest",
+            ],
+            {"error": {"code": -32000, "message": "rejected"}},
+        )
+        for pool in selected
+    ]
+    rpc = FakeRpc(
+        token,
+        amount * 1_000_000,
+        pair=pair,
+        reserves=(1, 1),
+        pool_slots=slots,
+        simulations=simulations,
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+
+    with fresh_addresses(fixture, fixture, fixture):
+        result = await simulator.simulate(token)
+
+    native_ids = [
+        keccak(
+            encode(
+                ["address", "address", "uint24", "int24", "address"],
+                list(pool.key),
+            )
+        ).hex()
+        for pool in (selected[0], selected[2])
+    ]
+    labels = [
+        f"v4-native pool 0x{native_ids[0]}",
+        f"v2 pool {pair}",
+        f"v4-native pool 0x{native_ids[1]}",
+    ]
+    methods = [method for calls in rpc.requests for method, _ in calls]
+    positions = [result["reason"].index(label) for label in labels]
+    assert positions == sorted(positions)
+    assert "1 more pool not simulated (cap of 3 pools)" in result["reason"]
+    assert methods.count("eth_simulateV1") == 3
+    assert "eth_getLogs" not in methods
+    assert rpc.simulations == []
 
 
 @pytest.mark.asyncio
@@ -1519,6 +1684,7 @@ async def test_every_found_pool_is_simulated_and_a_trap_pool_wins():
         native["amount"] * 1_000_000,
         pair=v2["pair"],
         reserves=(10**20, 10**27),
+        pool_slots=hookless_pool_slots(tuple(native["key"]), 1),
         slot0=1 << 100,
         simulations=[replay(native), replay(trap)],
     )
@@ -1557,6 +1723,7 @@ async def test_an_unexpected_pool_evaluation_error_keeps_another_pools_trap(monk
         native["amount"] * 1_000_000,
         pair=trap["pair"],
         reserves=(10**20, 10**27),
+        pool_slots=hookless_pool_slots(tuple(native["key"]), 1),
         slot0=1 << 100,
         simulations=[replay(native), replay(trap)],
     )
