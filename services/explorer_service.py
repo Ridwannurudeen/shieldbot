@@ -80,26 +80,45 @@ class _Lane:
         self._held = False
         self._users: deque = deque()
         self._background: deque = deque()
+        self._waiting = {}
         self._user_turns = 0
 
     @asynccontextmanager
-    async def hold(self, background: bool):
+    async def hold(self, background: bool, key=None):
         if self._held:
             turn = asyncio.get_running_loop().create_future()
-            (self._background if background else self._users).append(turn)
+            queue = self._background if background else self._users
+            queue.append(turn)
+            self._waiting[turn] = key
             try:
                 await turn
             except asyncio.CancelledError:
+                for queue in (self._users, self._background):
+                    try:
+                        queue.remove(turn)
+                    except ValueError:
+                        continue
+                    break
+                self._waiting.pop(turn, None)
                 # Handed the lane as it was cancelled: pass it on.
                 if turn.done() and not turn.cancelled():
                     self._release()
                 raise
+            else:
+                self._waiting.pop(turn, None)
         else:
             self._held = True
         try:
             yield
         finally:
             self._release()
+
+    def promote(self, key):
+        for turn in self._background:
+            if self._waiting.get(turn) == key and not turn.done():
+                self._background.remove(turn)
+                self._users.append(turn)
+                return
 
     def _release(self):
         queues = (self._users, self._background)
@@ -210,7 +229,7 @@ class ExplorerService:
                 lane = self._blockscout_lanes.get(host)
                 if lane is None:
                     lane = self._blockscout_lanes[host] = _Lane()
-                async with lane.hold(BACKGROUND.get()):
+                async with lane.hold(BACKGROUND.get(), cache_key):
                     cached = self._cache.get(cache_key)
                     if cached is not None:
                         return cached
@@ -275,6 +294,20 @@ class ExplorerService:
             {**(params or {}), "apikey": os.getenv("BLOCKSCOUT_API_KEY")},
             chain_id,
         )
+
+    def promote_contract_creation_lookup(self, address: str, chain_id: int) -> None:
+        if not _is_address(address):
+            return
+        address = address.lower()
+        instance = BLOCKSCOUT_INSTANCES.get(chain_id)
+        url = (
+            f"{instance}/api/v2/addresses/{address}"
+            if instance
+            else f"https://api.blockscout.com/{chain_id}/api/v2/addresses/{address}"
+        )
+        lane = self._blockscout_lanes.get(urlsplit(url).hostname)
+        if lane is not None:
+            lane.promote((url, ()))
 
     async def get_sourcify_verification(
         self, address: str, chain_id: int

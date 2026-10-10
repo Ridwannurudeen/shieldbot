@@ -378,6 +378,60 @@ async def _lookup(service, address, background):
     return await service.get_contract_creation_info(address, 4663)
 
 
+def _held_adapter_blockscout(http, count):
+    gates, started = [], []
+    for _ in range(count):
+        gate = asyncio.Event()
+        request_started = asyncio.Event()
+        response = http[0](BLOCKSCOUT_ADDRESS)
+
+        async def reply(gate=gate, request_started=request_started):
+            request_started.set()
+            await gate.wait()
+            return BLOCKSCOUT_ADDRESS
+
+        response.json.side_effect = reply
+        gates.append(gate)
+        started.append(request_started)
+    return gates, started
+
+
+async def _adapter_lookup(adapter, address, background):
+    from services.explorer_service import BACKGROUND
+
+    token = BACKGROUND.set(background)
+    try:
+        return await adapter.get_contract_creation_info(address)
+    finally:
+        BACKGROUND.reset(token)
+
+
+def _tracked_adapter(service, foreground_address, fetch_addresses):
+    adapter = EvmAdapter(4663, "Robinhood Chain", "https://rpc.invalid")
+    adapter._explorer_service = service
+    fetch_started = {address: asyncio.Event() for address in fetch_addresses}
+    original_fetch = adapter._fetch_creation_info
+
+    async def track_fetch(address, promoted):
+        if address in fetch_started:
+            fetch_started[address].set()
+        return await original_fetch(address, promoted)
+
+    adapter._fetch_creation_info = track_fetch
+    original_lookup = adapter.get_contract_creation_info
+    foreground_joined = asyncio.Event()
+
+    async def track_lookup(address):
+        from services.explorer_service import BACKGROUND
+
+        if address == foreground_address and not BACKGROUND.get():
+            foreground_joined.set()
+        return await original_lookup(address)
+
+    adapter.get_contract_creation_info = track_lookup
+    return adapter, fetch_started, foreground_joined
+
+
 @pytest.mark.asyncio
 async def test_a_waiting_user_lookup_goes_before_waiting_background_ones(http):
     # One Blockscout request at a time, as before; when it frees, the lookup a user is waiting on
@@ -399,6 +453,123 @@ async def test_a_waiting_user_lookup_goes_before_waiting_background_ones(http):
     assert http[1].get.call_count == 4
     assert [call.args[0].rsplit("/", 1)[1] for call in http[1].get.call_args_list] == [
         "0x" + f"{i:040x}" for i in (0, 3, 1, 2)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_foreground_adapter_join_promotes_queued_background_creation(http):
+    addresses = ["0x" + f"{i:040x}" for i in (1, 2, 3)]
+    blocker, target, other = addresses
+    gates, started = _held_adapter_blockscout(http, 3)
+    service = ExplorerService()
+    adapter, fetch_started, foreground_joined = _tracked_adapter(
+        service, target, (target, other)
+    )
+    tasks = []
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        try:
+            tasks.append(asyncio.create_task(_adapter_lookup(adapter, blocker, False)))
+            await started[0].wait()
+            # B is ahead of A so only the foreground join can move A ahead of background work.
+            tasks.append(asyncio.create_task(_adapter_lookup(adapter, other, True)))
+            await fetch_started[other].wait()
+            tasks.append(asyncio.create_task(_adapter_lookup(adapter, target, True)))
+            await fetch_started[target].wait()
+            tasks.append(asyncio.create_task(_adapter_lookup(adapter, target, False)))
+            await foreground_joined.wait()
+            gates[0].set()
+            await started[1].wait()
+            gates[1].set()
+            await started[2].wait()
+            gates[2].set()
+            await asyncio.gather(*tasks)
+        finally:
+            for gate in gates:
+                gate.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
+    assert [call.args[0].rsplit("/", 1)[1] for call in http[1].get.call_args_list] == [
+        blocker,
+        target,
+        other,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_foreground_adapter_join_leaves_running_lookup_order_unchanged(http):
+    target, other = ["0x" + f"{i:040x}" for i in (1, 2)]
+    gates, started = _held_adapter_blockscout(http, 2)
+    service = ExplorerService()
+    adapter, fetch_started, foreground_joined = _tracked_adapter(
+        service, target, (other,)
+    )
+    tasks = []
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        try:
+            tasks.append(asyncio.create_task(_adapter_lookup(adapter, target, True)))
+            await started[0].wait()
+            tasks.append(asyncio.create_task(_adapter_lookup(adapter, other, True)))
+            await fetch_started[other].wait()
+            tasks.append(asyncio.create_task(_adapter_lookup(adapter, target, False)))
+            await foreground_joined.wait()
+            gates[0].set()
+            await started[1].wait()
+            gates[1].set()
+            await asyncio.gather(*tasks)
+        finally:
+            for gate in gates:
+                gate.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
+    assert [call.args[0].rsplit("/", 1)[1] for call in http[1].get.call_args_list] == [
+        target,
+        other,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_promoted_adapter_lookup_leaves_lane_consistent(http):
+    blocker, target, other = ["0x" + f"{i:040x}" for i in (1, 2, 3)]
+    gates, started = _held_adapter_blockscout(http, 3)
+    service = ExplorerService()
+    adapter, fetch_started, foreground_joined = _tracked_adapter(
+        service, target, (target, other)
+    )
+    tasks = []
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        try:
+            blocker_task = asyncio.create_task(_adapter_lookup(adapter, blocker, False))
+            tasks.append(blocker_task)
+            await started[0].wait()
+            other_task = asyncio.create_task(_adapter_lookup(adapter, other, True))
+            tasks.append(other_task)
+            await fetch_started[other].wait()
+            target_task = asyncio.create_task(_adapter_lookup(adapter, target, True))
+            tasks.append(target_task)
+            await fetch_started[target].wait()
+            foreground_task = asyncio.create_task(
+                _adapter_lookup(adapter, target, False)
+            )
+            tasks.append(foreground_task)
+            await foreground_joined.wait()
+            flight_key = (asyncio.get_running_loop(), (4663, target))
+            shared_task = adapter._creation_inflight[flight_key][0]
+            foreground_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await foreground_task
+            assert not shared_task.cancelled()
+            shared_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await target_task
+            gates[0].set()
+            await started[1].wait()
+            gates[1].set()
+            await asyncio.gather(blocker_task, other_task)
+        finally:
+            for gate in gates:
+                gate.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
+    assert [call.args[0].rsplit("/", 1)[1] for call in http[1].get.call_args_list] == [
+        blocker,
+        other,
     ]
 
 
