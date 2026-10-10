@@ -7,7 +7,6 @@ Usage:
     python3 scripts/snapshot_metrics.py
 """
 
-import json
 import os
 import sys
 from urllib.parse import urlparse
@@ -66,8 +65,8 @@ def format_snapshot(data: dict, timestamp: str) -> str:
         f"## {timestamp}",
         "",
         "### All-Time",
-        f"| Metric | Value |",
-        f"|--------|-------|",
+        "| Metric | Value |",
+        "|--------|-------|",
         f"| Unique contracts scanned | {at.get('unique_contracts_scanned', 0):,} |",
         f"| Total scan events | {at.get('total_scan_events', 0):,} |",
         f"| Threats detected (score ≥ 71) | {at.get('threats_detected', 0):,} |",
@@ -90,8 +89,8 @@ def format_snapshot(data: dict, timestamp: str) -> str:
         chain_rows,
         "",
         "### Mempool",
-        f"| Metric | Value |",
-        f"|--------|-------|",
+        "| Metric | Value |",
+        "|--------|-------|",
         f"| Transactions monitored | {mp.get('total_pending_seen', 0):,} |",
         f"| Sandwiches detected | {mp.get('sandwiches_detected', 0):,} |",
         f"| Suspicious approvals | {mp.get('suspicious_approvals', 0):,} |",

@@ -72,7 +72,7 @@ class RPCProxy:
                 tx_fields = self._decode_raw_tx(raw_hex)
                 if tx_fields is None:
                     # Decode failed — block transaction (fail-closed)
-                    logger.warning(f"RPC Proxy: failed to decode raw tx, blocking (fail-closed)")
+                    logger.warning("RPC Proxy: failed to decode raw tx, blocking (fail-closed)")
                     return self._error_response(
                         rpc_id, -32003,
                         "Transaction blocked: unable to decode for security analysis",

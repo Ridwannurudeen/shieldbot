@@ -255,10 +255,11 @@ async def test_bsc_honeypot_data_is_byte_identical_to_the_base_commit(honeypot, 
         if service_class is HoneypotService:
             # The legacy GoPlus fixture has no provenance, which must stay unknown.
             assert data.pop("observed_at") == (0 if goplus else 1000)
-            # Added after the base commit, as defaults: none of these shapes carries the doubt, and
-            # only ShieldBot's own simulations report one that could not run.
+            # Added after the base commit, as defaults: none of these shapes carries the doubt, and only
+            # ShieldBot's own simulations report one that could not run or left a pool undecided.
             assert data.pop("likely_false_positive") is False
             assert data.pop("rpc_failed") is False
+            assert data.pop("undecided") is False
         outputs.append(json.dumps(data))
     assert outputs[0] == outputs[1]
     assert "simulation_block" not in outputs[1]

@@ -1,7 +1,6 @@
 """Tests for the ShieldBot Python SDK client."""
 
 import pytest
-import json
 import httpx
 from enum import IntEnum
 from unittest.mock import AsyncMock, patch, MagicMock

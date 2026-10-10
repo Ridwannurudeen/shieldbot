@@ -1,7 +1,6 @@
 """Tests for dynamic weight normalization in AnalyzerRegistry."""
 
 import pytest
-from unittest.mock import AsyncMock, PropertyMock
 
 from core.analyzer import AnalysisContext, AnalyzerResult, Analyzer
 from core.registry import AnalyzerRegistry

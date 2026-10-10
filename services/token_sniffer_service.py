@@ -3,13 +3,14 @@ import logging
 import aiohttp
 
 from core.circuit_breaker import provider_breakers
+from utils.chain_info import CHAIN_INFO
 
 logger = logging.getLogger(__name__)
 
 CACHE_TTL = 3600  # 1 hour
 
 # Token Sniffer uses numeric chain IDs matching EVM standard
-SUPPORTED_CHAIN_IDS = {56, 1, 137, 42161, 8453, 10, 204}
+SUPPORTED_CHAIN_IDS = {chain_id for chain_id, info in CHAIN_INFO.items() if info["token_sniffer"]}
 
 
 class TokenSnifferService:

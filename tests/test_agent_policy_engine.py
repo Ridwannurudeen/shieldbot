@@ -1,7 +1,7 @@
 """Tests for the agent threshold-based policy engine."""
 
 import pytest
-from agent.policy_engine import AgentPolicyEngine, PolicyVerdict
+from agent.policy_engine import AgentPolicyEngine
 
 
 @pytest.fixture

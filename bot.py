@@ -5,7 +5,6 @@ Pre-transaction scanning and token safety checks on every supported chain
 Features: AI risk scoring, caching, progress indicators
 """
 
-import os
 import sys
 import time
 import asyncio
@@ -44,7 +43,7 @@ from services.mempool_service import supports_pending_transactions
 from utils.web3_client import UnsupportedChainError
 from utils.scam_db import BLACKLIST_RELOAD_SECONDS
 from utils.chain_info import (
-    get_chain_name, get_explorer_url, get_dexscreener_slug,
+    CHAIN_INFO, get_chain_name, get_explorer_url, get_dexscreener_slug,
     parse_chain_prefix,
 )
 
@@ -114,7 +113,7 @@ _COLLISION_LAUNCH_HEADER = '⚠️ NOT OFFICIAL: shares a ticker or name with an
 _launch_alert_task = None
 _blacklist_reload_task = None
 # The chain picker lists chains in the product's order; any other supported chain, such as a demo chain, follows.
-PICKER_CHAIN_ORDER = (1, 56, 204, 8453, 42161, 137, 10, 4663)
+PICKER_CHAIN_ORDER = tuple(sorted(CHAIN_INFO, key=lambda chain_id: CHAIN_INFO[chain_id]['picker_order']))
 # A reply names the chain it used and the two ways to choose one, since the choice may be several messages up.
 _RESCUE_CHAIN_HINT = (
     "To check another chain, add a prefix such as `/rescue eth:0x...`, or leave the prefix out to be asked."
@@ -508,7 +507,7 @@ async def _scan_approvals(update: Update, address: str, chain_id: int):
         lower_risk = total - high - medium
         incomplete = is_scan_incomplete(result)
 
-        response = f"🚨 **Rescue Mode — Approval Scan**\n\n"
+        response = "🚨 **Rescue Mode — Approval Scan**\n\n"
         response += f"**Wallet:** `{address}`\n"
         response += f"**Chain:** {chain_name} ({chain_id})\n"
         response += f"**Total Approvals:** {total}\n"
@@ -552,7 +551,7 @@ async def _scan_approvals(update: Update, address: str, chain_id: int):
         # Revoke instructions
         revoke_txs = result.get('revoke_txs', [])
         if revoke_txs:
-            response += f"\n**Revoke Instructions:**\n"
+            response += "\n**Revoke Instructions:**\n"
             response += f"Found {len(revoke_txs)} approval(s) flagged for revocation review.\n"
             response += (
                 "This bot has not revoked any approvals or submitted transactions. "
@@ -1554,7 +1553,7 @@ def format_scan_result(result: dict, chain_id: int) -> str:
     # AI structured risk score
     ai_risk = result.get('ai_risk_score')
     if ai_risk and not incomplete:
-        response += f"\n🤖 **AI Risk Assessment:**\n"
+        response += "\n🤖 **AI Risk Assessment:**\n"
         response += (
             f"Score: {escape_untrusted(ai_risk.get('risk_score', 'N/A'))}/100 | "
             f"Level: {escape_untrusted(ai_risk.get('risk_level', 'N/A'))}\n"
@@ -1591,11 +1590,20 @@ def format_token_result(result: dict, chain_id: int) -> str:
         'unknown': '⚪'
     }
 
-    safety_level = 'unknown' if incomplete else result.get('safety_level', 'unknown')
+    # A proven honeypot is dangerous whatever else the scan left open, as the scanner's safety level says (its
+    # sell reverted before a sell tax could be measured). Its heuristic score only adds findings, so what is
+    # missing can leave the score lower but never higher: it is at least its two critical findings' 80.
+    proven = result.get('is_honeypot') is True
+    safety_level = 'danger' if proven else 'unknown' if incomplete else result.get('safety_level', 'unknown')
     emoji = safety_emoji.get(safety_level, '⚪')
-    score = 'Unknown (incomplete provider coverage)' if incomplete else f"{result.get('risk_score', 'N/A')}/100"
+    score = (
+        'Unknown (incomplete provider coverage)' if incomplete and not proven
+        else f"{result.get('risk_score', 'N/A')}/100"
+    )
     honeypot = result.get('is_honeypot')
-    if honeypot is None or (result.get('simulation_failed') and honeypot is False):
+    # A failed, unavailable, or undecided sell simulation leaves its "not a honeypot" unresolved.
+    unresolved = result.get('simulation_failed') or result.get('rpc_failed') or result.get('undecided')
+    if honeypot is None or (unresolved and honeypot is False):
         honeypot_display = 'Unknown (honeypot data incomplete)'
     else:
         honeypot_display = '🔴 HONEYPOT DETECTED' if honeypot else '✅ Not a honeypot'
@@ -1619,7 +1627,8 @@ def format_token_result(result: dict, chain_id: int) -> str:
     for key, label in (('can_buy', 'Can Buy'), ('can_sell', 'Can Sell'),
                        ('ownership_renounced', 'Ownership Renounced'), ('liquidity_locked', 'Liquidity Locked')):
         value = checks.get(key)
-        if key == 'can_sell' and result.get('simulation_failed'):
+        # An unsettled simulation never says the token sells; a failed sell it proved still shows.
+        if key == 'can_sell' and unresolved and value is True:
             value = None
         status_icon = 'Unknown' if value is None else ('✅' if value else '❌')
         response += f"{status_icon} {label}\n"
@@ -1638,7 +1647,7 @@ def format_token_result(result: dict, chain_id: int) -> str:
     # AI structured risk score
     ai_risk = result.get('ai_risk_score')
     if ai_risk and not incomplete:
-        response += f"\n🤖 **AI Risk Assessment:**\n"
+        response += "\n🤖 **AI Risk Assessment:**\n"
         response += (
             f"Score: {escape_untrusted(ai_risk.get('risk_score', 'N/A'))}/100 | "
             f"Level: {escape_untrusted(ai_risk.get('risk_level', 'N/A'))}\n"

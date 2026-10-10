@@ -15,7 +15,7 @@ from cachetools import TTLCache
 from eth_utils import keccak
 from web3 import Web3
 
-from utils.chain_info import get_dexscreener_slug
+from utils.chain_info import CHAIN_INFO, get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,11 @@ RECENT_LOG_WINDOW_BLOCKS = 10_000
 # 10,000,000 blocks in 1 to 3 s, so it is read in windows of 500,000 blocks (12,000,000 blocks,
 # about 35 days). It refuses a window matching more than 10,000 logs, which only a wallet
 # approving thousands of times a day reaches, and the scan then stops there as for any window.
-PUBLIC_LOG_WINDOW_BLOCKS = {8453: 2_000, 42161: 500_000}
+PUBLIC_LOG_WINDOW_BLOCKS = {
+    chain_id: info["public_log_window_blocks"]
+    for chain_id, info in CHAIN_INFO.items()
+    if info["public_log_window_blocks"] is not None
+}
 RECENT_LOG_WINDOWS = 24
 PUBLIC_RPC_CONCURRENCY = 4
 PUBLIC_RPC_ATTEMPTS = 3
@@ -409,107 +413,121 @@ class RescueService:
         public_rpc = chain_id not in self._logs_rpcs
         deadline = asyncio.get_running_loop().time() + HISTORY_DEADLINE_SECONDS
         try:
-            if not public_rpc:
-                budget = asyncio.timeout_at(deadline)
-                try:
-                    all_logs, scanned_from, latest = await self._fetch_all_approval_logs(
-                        wallet, rpc_url, budget
-                    )
-                except UnsupportedChainError:
-                    raise
-                except Exception as e:
-                    # Read what the logs RPC can serve instead, the rate-limit-aware way.
-                    logger.warning("Full approval history unavailable: %s", type(e).__name__)
-                    public_rpc = True
-                else:
-                    # A logs RPC that served none of its chunks is read that way too, unless the
-                    # deadline stopped the read: then nothing more is asked of it.
-                    public_rpc = scanned_from > latest and not budget.expired()
-            if public_rpc:
-                window = PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
-                budget = asyncio.timeout_at(deadline)
-                all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
-                    wallet, rpc_url, window, budget
-                )
-                # A configured RPC can cap ranges below a wider window measured on the default one;
-                # when it served none of them, it is read at the default width while time allows.
-                if window > RECENT_LOG_WINDOW_BLOCKS and scanned_from > latest and not budget.expired():
+            # The history, allowance and balance reads share one pool of connections to the chain's
+            # RPC, so a scan sets its connections up once rather than once per step. Each step still
+            # opens its own session over it and keeps its cookies to itself, as before: Optimism's
+            # public RPC sets a load-balancer cookie.
+            async with aiohttp.TCPConnector() as connector:
+                if not public_rpc:
+                    budget = asyncio.timeout_at(deadline)
+                    try:
+                        all_logs, scanned_from, latest = await self._fetch_all_approval_logs(
+                            wallet, connector, rpc_url, budget
+                        )
+                    except UnsupportedChainError:
+                        raise
+                    except Exception as e:
+                        # Read what the logs RPC can serve instead, the rate-limit-aware way.
+                        logger.warning("Full approval history unavailable: %s", type(e).__name__)
+                        public_rpc = True
+                    else:
+                        # A logs RPC that served none of its chunks is read that way too, unless the
+                        # deadline stopped the read: then nothing more is asked of it.
+                        public_rpc = scanned_from > latest and not budget.expired()
+                if public_rpc:
+                    window = PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
+                    budget = asyncio.timeout_at(deadline)
                     all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
-                        wallet, rpc_url, RECENT_LOG_WINDOW_BLOCKS, asyncio.timeout_at(deadline)
+                        wallet, connector, rpc_url, window, budget
                     )
-            if scanned_from > latest:
-                coverage_reasons["allowances"] = NOTHING_READ_REASON
-            elif scanned_from > 0:
-                coverage_reasons["allowances"] = f"Approvals before block {scanned_from} not scanned"
-            scanned_blocks = (
-                {"from_block": scanned_from, "to_block": latest} if scanned_from <= latest else None
-            )
+                    # A configured RPC can cap ranges below a wider window measured on the default one;
+                    # when it served none of them, it is read at the default width while time allows.
+                    if window > RECENT_LOG_WINDOW_BLOCKS and scanned_from > latest and not budget.expired():
+                        all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
+                            wallet, connector, rpc_url, RECENT_LOG_WINDOW_BLOCKS,
+                            asyncio.timeout_at(deadline),
+                        )
+                if scanned_from > latest:
+                    coverage_reasons["allowances"] = NOTHING_READ_REASON
+                elif scanned_from > 0:
+                    coverage_reasons["allowances"] = f"Approvals before block {scanned_from} not scanned"
+                scanned_blocks = (
+                    {"from_block": scanned_from, "to_block": latest} if scanned_from <= latest else None
+                )
 
-            # Step 3: Keep latest event per (token, spender)
-            latest_events: Dict[tuple, Dict] = {}
-            for log in all_logs:
-                try:
-                    token = log["address"].lower()
-                    topics = log.get("topics", [])
-                    if len(topics) < 3:
+                # Step 3: Keep latest event per (token, spender)
+                latest_events: Dict[tuple, Dict] = {}
+                for log in all_logs:
+                    try:
+                        token = log["address"].lower()
+                        topics = log.get("topics", [])
+                        if len(topics) < 3:
+                            continue
+                        spender = "0x" + topics[2][-40:]
+                        amount_hex = log.get("data", "0x0")
+                        amount = int(amount_hex, 16) if amount_hex and amount_hex != "0x" else 0
+                        block = int(log.get("blockNumber", "0x0"), 16)
+
+                        key = (token, spender.lower())
+                        existing = latest_events.get(key)
+                        if not existing or block > existing["block"]:
+                            latest_events[key] = {
+                                "token": token,
+                                "spender": spender.lower(),
+                                "amount": amount,
+                                "block": block,
+                            }
+                    except (ValueError, IndexError, KeyError):
                         continue
-                    spender = "0x" + topics[2][-40:]
-                    amount_hex = log.get("data", "0x0")
-                    amount = int(amount_hex, 16) if amount_hex and amount_hex != "0x" else 0
-                    block = int(log.get("blockNumber", "0x0"), 16)
 
-                    key = (token, spender.lower())
-                    existing = latest_events.get(key)
-                    if not existing or block > existing["block"]:
-                        latest_events[key] = {
-                            "token": token,
-                            "spender": spender.lower(),
-                            "amount": amount,
-                            "block": block,
-                        }
-                except (ValueError, IndexError, KeyError):
-                    continue
+                # Filter out already-revoked events before hitting the chain
+                candidates = {k: v for k, v in latest_events.items() if v["amount"] > 0}
+                if not candidates:
+                    return [], coverage_reasons, scanned_blocks
 
-            # Filter out already-revoked events before hitting the chain
-            candidates = {k: v for k, v in latest_events.items() if v["amount"] > 0}
-            if not candidates:
-                return [], coverage_reasons, scanned_blocks
-
-            # Step 4: Verify current on-chain allowances — eliminates false positives
-            if scan_budget.expired():
-                coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
-                return [], coverage_reasons, scanned_blocks
-            try:
-                allowances = await self._verify_allowances(wallet, candidates, rpc_url, public_rpc)
-            except asyncio.CancelledError:
+                # Step 4: Verify current on-chain allowances — eliminates false positives
                 if scan_budget.expired():
                     coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
                     return [], coverage_reasons, scanned_blocks
-                raise
-            unresolved = [pair for pair, allowance in allowances.items() if allowance is None]
-            if unresolved:
-                reason = f"Allowance unavailable for {len(unresolved)} approval(s)"
-                history_reason = coverage_reasons.get("allowances")
-                coverage_reasons["allowances"] = f"{history_reason}; {reason}" if history_reason else reason
-            verified = {pair: allowance for pair, allowance in allowances.items() if allowance}
-            if not verified:
-                return [], coverage_reasons, scanned_blocks
+                try:
+                    allowances = await self._verify_allowances(
+                        wallet, candidates, connector, rpc_url, public_rpc
+                    )
+                except asyncio.CancelledError:
+                    if scan_budget.expired():
+                        coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
+                        return [], coverage_reasons, scanned_blocks
+                    raise
+                unresolved = [pair for pair, allowance in allowances.items() if allowance is None]
+                if unresolved:
+                    reason = f"Allowance unavailable for {len(unresolved)} approval(s)"
+                    history_reason = coverage_reasons.get("allowances")
+                    coverage_reasons["allowances"] = (
+                        f"{history_reason}; {reason}" if history_reason else reason
+                    )
+                verified = {pair: allowance for pair, allowance in allowances.items() if allowance}
+                if not verified:
+                    return [], coverage_reasons, scanned_blocks
 
-            # Step 5: Fetch wallet balances for value-at-risk calculation
-            active_tokens = list({token for (token, _) in verified.keys()})
-            if scan_budget.expired():
-                coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
-                return [], coverage_reasons, scanned_blocks
-            try:
-                balances = await self._fetch_balances(wallet, active_tokens, rpc_url, public_rpc)
-            except asyncio.CancelledError:
+                # Step 5: Fetch wallet balances for value-at-risk calculation
+                active_tokens = list({token for (token, _) in verified.keys()})
                 if scan_budget.expired():
                     coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
                     return [], coverage_reasons, scanned_blocks
-                raise
-            unresolved_balances = [token for token in active_tokens if token not in balances]
-            if unresolved_balances:
-                coverage_reasons["balances"] = f"Balance unavailable for {len(unresolved_balances)} token(s)"
+                try:
+                    balances = await self._fetch_balances(
+                        wallet, active_tokens, connector, rpc_url, public_rpc
+                    )
+                except asyncio.CancelledError:
+                    if scan_budget.expired():
+                        coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
+                        return [], coverage_reasons, scanned_blocks
+                    raise
+                unresolved_balances = [token for token in active_tokens if token not in balances]
+                if unresolved_balances:
+                    coverage_reasons["balances"] = (
+                        f"Balance unavailable for {len(unresolved_balances)} token(s)"
+                    )
 
             # Step 6: Fetch token prices (DexScreener, stablecoins hardcoded)
             if scan_budget.expired():
@@ -551,13 +569,26 @@ class RescueService:
                     token_info_map[token] = result
                 else:
                     token_info_map[token] = {}
+            # A priced token with a balance has no USD value without its decimals. An unpriced one
+            # is already counted above, and with no balance nothing is at risk.
+            undecimaled = [
+                token for token in active_tokens
+                if token_info_map[token].get("decimals") is None and token in prices
+                and (token not in balances or balances[token] > 0)
+            ]
+            if undecimaled:
+                reason = f"Token decimals unavailable for {len(undecimaled)} token(s)"
+                price_reason = coverage_reasons.get("prices")
+                coverage_reasons["prices"] = f"{price_reason}; {reason}" if price_reason else reason
 
             # Build ApprovalInfo for each verified active approval
             for (token, spender), current_allowance in verified.items():
                 token_info = token_info_map.get(token, {})
                 name = token_info.get("name", "Unknown")
                 symbol = token_info.get("symbol", "???")
-                decimals = token_info.get("decimals", 18)
+                # Unread decimals stay unknown: a default of 18 misstated every amount of a token
+                # with other decimals by 10^(18 - decimals), 1,000 USDC at risk as $0.00.
+                decimals = token_info.get("decimals")
 
                 spender_label = _known_spender(spender, chain_id) or "Unknown Contract"
                 risk_level, risk_reason = self._assess_approval_risk(
@@ -566,6 +597,8 @@ class RescueService:
 
                 if current_allowance >= UNLIMITED_THRESHOLD:
                     allowance_str = "Unlimited"
+                elif decimals is None:
+                    allowance_str = str(current_allowance)
                 else:
                     try:
                         allowance_str = f"{current_allowance / (10 ** decimals):,.2f}"
@@ -576,7 +609,7 @@ class RescueService:
                 balance = balances.get(token, 0)
                 price = prices.get(token)
                 value_at_risk_usd = None
-                if price is not None and balance > 0:
+                if price is not None and balance > 0 and decimals is not None:
                     try:
                         at_risk_raw = min(current_allowance, balance)
                         at_risk_tokens = at_risk_raw / (10 ** decimals)
@@ -615,7 +648,7 @@ class RescueService:
         return approvals, coverage_reasons, scanned_blocks
 
     async def _fetch_all_approval_logs(
-        self, wallet: str, rpc_url: str, budget: asyncio.Timeout
+        self, wallet: str, connector: aiohttp.BaseConnector, rpc_url: str, budget: asyncio.Timeout
     ) -> Tuple[list, int, int]:
         """Fetch Approval logs from the latest block of a logs RPC back towards genesis.
 
@@ -633,7 +666,7 @@ class RescueService:
         topic0 = APPROVAL_TOPIC
         topic1 = "0x" + wallet.replace("0x", "").lower().zfill(64)
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=connector, connector_owner=False) as session:
             async with session.post(
                 rpc_url,
                 json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
@@ -682,7 +715,8 @@ class RescueService:
         return logs, scanned_from, latest
 
     async def _fetch_recent_approval_logs(
-        self, wallet: str, rpc_url: str, window_blocks: int, budget: asyncio.Timeout
+        self, wallet: str, connector: aiohttp.BaseConnector, rpc_url: str, window_blocks: int,
+        budget: asyncio.Timeout,
     ) -> Tuple[list, int, int]:
         """Fetch Approval logs from the newest RECENT_LOG_WINDOWS block windows of a public RPC.
 
@@ -694,7 +728,7 @@ class RescueService:
         latest block was not read before the budget expired.
         """
         topics = [APPROVAL_TOPIC, "0x" + wallet.replace("0x", "").lower().zfill(64)]
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=connector, connector_owner=False) as session:
             latest = None
             logs: list = []
             try:
@@ -823,7 +857,8 @@ class RescueService:
             raise
 
     async def _verify_allowances(
-        self, wallet: str, candidates: Dict[tuple, Dict], rpc_url: str, public_rpc: bool = False
+        self, wallet: str, candidates: Dict[tuple, Dict], connector: aiohttp.BaseConnector,
+        rpc_url: str, public_rpc: bool = False,
     ) -> Dict[tuple, Optional[int]]:
         """Batch-verify current on-chain allowances via eth_call.
 
@@ -841,7 +876,7 @@ class RescueService:
         CONCURRENCY = PUBLIC_RPC_CONCURRENCY if public_rpc else 50
         eth_call = self._public_eth_call if public_rpc else self._eth_call
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=connector, connector_owner=False) as session:
             for i in range(0, len(pairs), CONCURRENCY):
                 batch = pairs[i: i + CONCURRENCY]
                 tasks = []
@@ -860,7 +895,8 @@ class RescueService:
         return verified
 
     async def _fetch_balances(
-        self, wallet: str, tokens: List[str], rpc_url: str, public_rpc: bool = False
+        self, wallet: str, tokens: List[str], connector: aiohttp.BaseConnector, rpc_url: str,
+        public_rpc: bool = False,
     ) -> Dict[str, int]:
         """Batch-fetch wallet token balances via eth_call, omitting calls that returned no data.
 
@@ -874,7 +910,7 @@ class RescueService:
         CONCURRENCY = PUBLIC_RPC_CONCURRENCY if public_rpc else 50
         eth_call = self._public_eth_call if public_rpc else self._eth_call
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=connector, connector_owner=False) as session:
             for i in range(0, len(tokens), CONCURRENCY):
                 batch = tokens[i: i + CONCURRENCY]
                 tasks = [

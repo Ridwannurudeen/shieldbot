@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from redis.exceptions import RedisError
 from typing import Optional, Dict, Any, List, Literal, Tuple
 
-from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD, resolve_selector
+from utils.calldata_decoder import UNLIMITED_THRESHOLD, resolve_selector
 from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
 from utils.scam_db import BLACKLIST_RELOAD_SECONDS

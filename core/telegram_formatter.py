@@ -150,7 +150,7 @@ def format_full_report(
     scores = risk_output.get('category_scores', {})
     not_applicable = risk_output.get('not_applicable', {})
     incomplete = is_scan_incomplete(risk_output) or bool(
-        honeypot_data and honeypot_data.get('simulation_failed')
+        honeypot_data and (honeypot_data.get('simulation_failed') or honeypot_data.get('undecided'))
     )
     # An incomplete scan's level is not known either: the engine raises missing data to a MEDIUM floor,
     # and its band still sets the icon and the final verdict.
@@ -319,9 +319,13 @@ def format_full_report(
             honeypot_data.get('reason') or honeypot_data.get('honeypot_reason') or 'Provider data unavailable'
         )
         is_honeypot = honeypot_data.get('is_honeypot')
-        # A sell simulation that failed, or of ShieldBot's own that could not run, leaves a provider's
+        # A sell simulation that failed, could not run, or left sellability undecided leaves a provider's
         # "not a honeypot" (GoPlus's, after it) unresolved.
-        unresolved = honeypot_data.get('simulation_failed') or honeypot_data.get('rpc_failed')
+        unresolved = (
+            honeypot_data.get('simulation_failed')
+            or honeypot_data.get('rpc_failed')
+            or honeypot_data.get('undecided')
+        )
         if is_honeypot is None or (unresolved and is_honeypot is False):
             hp = f'Unknown ({reason})'
         else:
@@ -333,7 +337,8 @@ def format_full_report(
             lines.append(f'  {label}: {rendered}')
         for key, label in (('can_buy', 'Buyability'), ('can_sell', 'Sellability')):
             value = honeypot_data.get(key)
-            if key == 'can_sell' and honeypot_data.get('simulation_failed'):
+            # An unsettled simulation never says the token sells; a failed sell it proved still shows.
+            if key == 'can_sell' and unresolved and value is True:
                 value = None
             rendered = f'Unknown ({reason})' if value is None else ('Yes' if value else 'No')
             lines.append(f'  {label}: {rendered}')

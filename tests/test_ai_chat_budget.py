@@ -1,7 +1,6 @@
 """The daily AI token budget shared by advisor chat and scan explanations."""
 
 import asyncio
-import logging
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock

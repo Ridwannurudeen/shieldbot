@@ -8,6 +8,15 @@ from utils.scam_db import ScamDatabase
 logger = logging.getLogger(__name__)
 
 _TRADE_FIELDS = ('is_honeypot', 'buy_tax', 'sell_tax', 'can_buy', 'can_sell')
+# The honeypot analyzer (analyzers/honeypot.py) scores a sell tax (percent) above SELL_TAX_HIGH.
+# Beside a sell ShieldBot's own simulation made at a tax it could not measure, the gate below takes
+# a GoPlus sell tax only above that line, as evidence against the token: it is taken and scored,
+# but it does not complete the answer. So the gate never takes a tax the analyzer would not score.
+SELL_TAX_HIGH = 20
+# The analyzer flags a sell tax above SELL_TAX_EXTREME as extreme. On Arbitrum One, a deepest pool
+# that sells at or below it, or at a tax the simulation could not measure, keeps another pool's trap
+# from deciding the token (services/arbitrum_simulation.py).
+SELL_TAX_EXTREME = 50
 
 
 def map_goplus_token_security(raw: dict) -> dict:
@@ -57,6 +66,7 @@ class HoneypotService:
             'honeypot_reason': None,
             'simulation_failed': False,
             'rpc_failed': False,
+            'undecided': False,
             'low_tax_honeypot': False,
             'likely_false_positive': False,
             'buy_tax': None,
@@ -73,10 +83,12 @@ class HoneypotService:
                 data['observed_at'] = min(data['observed_at'], response.get('observed_at', data['observed_at']))
                 if response.get('reason'):
                     reasons.append(response['reason'])
+                # A provider that does not name itself for a field is honeypot.is.
+                providers = response.get('field_providers') or {}
                 for field in ('simulation_failed', 'low_tax_honeypot', 'likely_false_positive'):
                     if response.get(field) is True:
                         data[field] = True
-                        data['field_providers'][field] = 'honeypot.is'
+                        data['field_providers'][field] = providers.get(field, 'honeypot.is')
                 # Only ShieldBot's own simulations (Robinhood Chain, Arbitrum One) report one that could not run.
                 if response.get('rpc_failed') is True:
                     data['rpc_failed'] = True
@@ -85,7 +97,6 @@ class HoneypotService:
                     simulation_success = False
                 elif response.get('simulation_success') is True and simulation_success is None:
                     simulation_success = True
-                providers = response.get('field_providers') or {}
                 for field in ('is_honeypot', 'can_buy', 'can_sell'):
                     if isinstance(response.get(field), bool):
                         data[field] = response[field]
@@ -111,6 +122,8 @@ class HoneypotService:
                 if data[action] is None and data[tax] is not None:
                     data[action] = data[tax] < 100
                     data['field_providers'][action] = data['field_providers'][tax]
+        # A GoPlus sell tax taken for a sell ShieldBot's own simulation made at a tax it could not measure.
+        goplus_tax_for_unmeasured_sell = False
         if any(data[field] is None for field in _TRADE_FIELDS):
             try:
                 response = await ScamDatabase.fetch_token_security(address, chain_id)
@@ -118,11 +131,19 @@ class HoneypotService:
                 mapped = map_goplus_token_security(response['data'])
                 if response['reason']:
                     reasons.append(response['reason'])
+                # A sell ShieldBot's own simulation made at a tax it could not measure: GoPlus's tax is not
+                # that sell's, so the sell tax stays unknown. Above SELL_TAX_HIGH, where the honeypot
+                # analyzer scores a sell tax, GoPlus's tax is evidence against the token: it is taken and
+                # scored, but it still does not complete the answer (coverage below).
+                unmeasured = (data['can_sell'] is True and data['sell_tax'] is None
+                              and data['field_providers'].get('can_sell') == 'eth_simulateV1')
                 for field, value in mapped.items():
-                    if data.get(field) is None:
+                    if data.get(field) is None and not (unmeasured and field == 'sell_tax'
+                                                        and (value is None or value <= SELL_TAX_HIGH)):
                         data[field] = value
                         if value is not None:
                             data['field_providers'][field] = 'goplus'
+                goplus_tax_for_unmeasured_sell = unmeasured and data['sell_tax'] is not None
             except UnsupportedChainError:
                 raise
             except Exception as e:
@@ -150,9 +171,25 @@ class HoneypotService:
                 data['field_providers'].pop('can_sell', None)
             reasons.append('Honeypot simulation could not run (unresolved)')
 
+        undecided = (
+            'simulation_block' in data
+            and not data['simulation_failed']
+            and not data['rpc_failed']
+            and data['field_providers'].get('can_sell') != 'eth_simulateV1'
+        )
+        if undecided:
+            # A provider's adverse answer stands; only its clean answer is refused.
+            if data['can_sell'] is True:
+                data['can_sell'] = None
+                data['field_providers'].pop('can_sell', None)
+            data['undecided'] = True
+            reasons.append('Own simulation left sellability undecided (unresolved)')
+
         data['coverage'] = {field: data[field] is not None for field in _TRADE_FIELDS}
-        if data['simulation_failed'] or data['rpc_failed']:
+        if data['simulation_failed'] or data['rpc_failed'] or data['undecided']:
             data['coverage']['can_sell'] = False
+        if goplus_tax_for_unmeasured_sell:
+            data['coverage']['sell_tax'] = False
         missing = [field for field, covered in data['coverage'].items() if not covered]
         data['status'] = 'unknown' if missing else 'ok'
         if missing:

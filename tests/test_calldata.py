@@ -2,7 +2,7 @@
 
 import pytest
 from eth_abi import encode
-from utils.calldata_decoder import CalldataDecoder, WHITELISTED_ROUTERS
+from utils.calldata_decoder import CalldataDecoder
 
 
 @pytest.fixture

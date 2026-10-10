@@ -588,11 +588,15 @@ class RiskEngine:
         if contract_data.get('contract_age_days') is not None:
             score += 10
 
-        # Honeypot data. A provider's "not a honeypot" beside a sell simulation that failed, or of
-        # ShieldBot's own that could not run, is unresolved: it does not settle sellability, so it
-        # earns no confidence either.
+        # Honeypot data. A provider's "not a honeypot" beside a sell simulation that failed, could not
+        # run, or left sellability undecided is unresolved: it does not settle sellability, so it earns no
+        # confidence either.
         total += 25
-        unresolved = honeypot_data.get('simulation_failed') or honeypot_data.get('rpc_failed')
+        unresolved = (
+            honeypot_data.get('simulation_failed')
+            or honeypot_data.get('rpc_failed')
+            or honeypot_data.get('undecided')
+        )
         if honeypot_data.get('is_honeypot') is not None and not unresolved:
             score += 15
         if honeypot_data.get('sell_tax') is not None and honeypot_data['sell_tax'] >= 0:

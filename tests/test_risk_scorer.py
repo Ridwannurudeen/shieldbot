@@ -1,6 +1,5 @@
 """Tests for utils/risk_scorer.py — scoring logic, confidence."""
 
-import pytest
 from utils.risk_scorer import (
     calculate_risk_score,
     compute_confidence,

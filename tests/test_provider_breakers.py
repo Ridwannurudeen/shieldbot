@@ -369,7 +369,7 @@ async def test_malformed_token_data_never_opens_the_market_breaker():
 
 
 @pytest.mark.asyncio
-async def test_a_blockscout_lookup_queued_on_the_host_lock_sends_nothing_once_the_breaker_opens():
+async def test_a_blockscout_lookup_queued_on_the_host_lane_sends_nothing_once_the_breaker_opens():
     lookup = blockscout()
 
     async def times_out_after_a_moment(*args):
@@ -382,7 +382,7 @@ async def test_a_blockscout_lookup_queued_on_the_host_lock_sends_nothing_once_th
     with patch(CASES["blockscout"].target, client):
         for i in range(FAILURE_THRESHOLD - 1):
             await lookup(i)
-        # The first of these opens the breaker while the second waits for the host's lock.
+        # The first of these opens the breaker while the second waits for the host's lane.
         first, second = await asyncio.gather(
             lookup(FAILURE_THRESHOLD), lookup(FAILURE_THRESHOLD + 1)
         )

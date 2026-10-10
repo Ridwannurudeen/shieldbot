@@ -494,8 +494,9 @@ def official_asset_reason(check: Dict, finding: str) -> str:
 
     The market analyzer skips every official address with this reason and note. The honeypot analyzer
     always skips canonical WETH and USDG, but simulates official tokenised stocks, including through
-    hookless USDG pools. It uses this note for a stock token only when the simulation leaves
-    is_honeypot or can_sell undecided. A gap there is not evidence about the token.
+    hookless USDG pools. It uses this note for a stock token when no supported route is found or a
+    completed simulation leaves is_honeypot or can_sell undecided. When the simulation could not run or
+    failed, the stock is not skipped and the scan reads unknown. A gap there is not evidence about the token.
     """
     if check["canonical"]:
         return f"Canonical {check['symbol']} of Robinhood Chain (exact address): {finding}"

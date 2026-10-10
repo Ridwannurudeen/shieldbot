@@ -113,6 +113,9 @@ RATE_WINDOW_SECONDS = 3600
 SETTLED_STATUSES = ("pending", "sending", "confirmed")
 # About 18x the 0.056 gwei base fee of a recorded 4663 block. Arbitrum chains ignore priority fees.
 MAX_FEE_PER_GAS_WEI = 10**9
+# gas * max_fee reserves about 2.4x a record's real cost: 1,000 reservations cover roughly 2,400 records,
+# about nine days at the 2026-10-09 rate.
+LOW_BALANCE_RECORDS = 1000
 # Arbitrum Nitro's eth_estimateGas includes the L1 data fee as gas, so leave room above the ~140k execution cost.
 MAX_GAS_LIMIT = 1_000_000
 RPC_ATTEMPTS = 3
@@ -187,9 +190,12 @@ class ObservationDropped(Exception):
 class VerdictPublisher:
     """Stores verdict evidence; in the process that runs the drain, also records Robinhood Chain verdicts on-chain."""
 
-    def __init__(self, db, rpc_url: Optional[str] = None, registry_address: Optional[str] = None):
+    def __init__(
+        self, db, rpc_url: Optional[str] = None, registry_address: Optional[str] = None, alert=None
+    ):
         self._db = db
         self._rpc_url = rpc_url or os.getenv("ROBINHOOD_RPC_URL") or DEFAULT_RPC_URL
+        self._alert_callback = alert
         registry = (
             registry_address
             if registry_address is not None
@@ -208,6 +214,8 @@ class VerdictPublisher:
         # claims another row.
         self._lease_lost = False
         self._waits = 0
+        self._low_funds_alerted = False
+        self._failure_alerted = False
         # Per row, the bytes last broadcast again and how often in a row: {evidence_id: (tx_hash, count)}.
         self._resends = {}
         if not registry:
@@ -306,6 +314,11 @@ class VerdictPublisher:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return task
+
+    def _alert(self, text: str) -> None:
+        if self._alert_callback is None:
+            return
+        self._spawn(self._alert_callback(text))
 
     # ------------------------------------------------------------------
     # Sending (the API process, or workers.py in its place)
@@ -656,9 +669,23 @@ class VerdictPublisher:
                     reason = e.reason if isinstance(e, RecordFailed) else type(e).__name__
                     await self._db.release_verdict_claim(evidence_id)
                     self._note_wait(reason)
+                    if reason in ("InsufficientFunds", "FeeCapExceeded") and not self._failure_alerted:
+                        self._failure_alerted = True
+                        detail = (
+                            "the base fee is above the configured cap"
+                            if reason == "FeeCapExceeded"
+                            else "the recorder has insufficient funds"
+                        )
+                        self._alert(
+                            f"*ShieldBot verdict recorder cannot record* on chain {CHAIN_ID}: {reason}\n"
+                            f"`{self.recorder}`\n"
+                            f"{detail}; recording is paused; queued verdicts are retried and dropped "
+                            f"once their observation is older than {MAX_OBSERVATION_AGE_SECONDS // 60} minutes"
+                        )
                     logger.warning("Verdict record deferred: %s", reason)
                     return "retry"
                 self._waits = 0
+                self._failure_alerted = False
                 if prepared[0] == "mined":
                     # One of the row's earlier transactions was mined after all; nothing is sent.
                     _, status, tx_hash = prepared
@@ -843,7 +870,19 @@ class VerdictPublisher:
         if gas > MAX_GAS_LIMIT:
             raise RecordFailed("GasCapExceeded")
         max_fee = min(base_fee * 2, MAX_FEE_PER_GAS_WEI)
-        if balance < gas * max_fee:
+        reservation = gas * max_fee
+        if balance < LOW_BALANCE_RECORDS * reservation and not self._low_funds_alerted:
+            self._low_funds_alerted = True
+            balance_eth = f"{balance // 10**18}.{balance % 10**18 * 1_000_000 // 10**18:06d}"
+            self._alert(
+                f"*ShieldBot verdict recorder is running low* on chain {CHAIN_ID}\n"
+                f"`{self.recorder}`\n"
+                f"Balance: {balance_eth} ETH; about {balance // reservation} records left "
+                f"at the current fee reservation"
+            )
+        elif balance >= 2 * LOW_BALANCE_RECORDS * reservation:
+            self._low_funds_alerted = False
+        if balance < reservation:
             raise RecordFailed("InsufficientFunds")
         signed = self._account.sign_transaction(
             {
@@ -909,6 +948,7 @@ class VerdictPublisher:
             if (
                 len(rows) != len(body)
                 or not all(isinstance(row, dict) for row in rows)
+                or not all(type(row.get("id")) is int for row in rows)
                 or {row.get("id") for row in rows} != set(range(len(body)))
             ):
                 raise RecordFailed("MalformedRPCResponse")

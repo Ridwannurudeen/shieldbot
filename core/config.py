@@ -1,6 +1,6 @@
 """Centralized configuration via Pydantic Settings."""
 
-from typing import List, Literal, Optional
+from typing import List, Literal
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
