@@ -16,11 +16,11 @@ The HackQuest submission is the [`open-house-submission`](https://github.com/Rid
 | `f1c2af7` | 2026-10-05 | Restores hookless USDG simulation without pool batching, including official stock tokens when a pool resolves. |
 | `302eb66` | 2026-10-05 | Sends simulations to an optional faster node with a five second timeout, falling back to the official node (commits `0ad9c17` and `302eb66`). |
 
-Production has run `302eb66` since 5 October 2026 and has not been redeployed. The next deployment will follow the Open House result on 12 October 2026. Deployment notes are in [SUBMISSION.md](SUBMISSION.md).
+Production has run `302eb66` since 5 October 2026 and has not been redeployed; on 10 October 2026 the server's checkout was `302eb66` and its services had last started at 13:36 UTC on 5 October. The next deployment will follow the Open House result on 12 October 2026. Deployment notes are in [SUBMISSION.md](SUBMISSION.md).
 
-## Every commit on main after the deadline
+## Every commit on main after the deadline, up to `cad9130`
 
-The first-parent history of `origin/main` contains 33 commits after the submission tag. Counting the commits inside the four merged pull requests, the range holds 49. Times in the tables are committer dates. The first commit, `2315085`, was committed at 16:01 UTC, two minutes after the close. Its author date, which git keeps from the commit's first version, is 15:38 UTC, 21 minutes before the close. It is the only commit after the tag with an author or committer date before the close. It is not part of the submitted tag, and it was deployed after the submission form was filed. No other commit after the tag is dated before the close by either date.
+Up to `cad9130` (10 October 2026), the first-parent history of `main` contains 33 commits after the submission tag. The list stops there; the next commit, `afb29ad`, only adds this document and its README link. Counting the commits inside the four merged pull requests, the range holds 49. Times in the tables are committer dates. The first commit, `2315085`, was committed at 16:01 UTC, two minutes after the close. Its author date, which git keeps from the commit's first version, is 15:38 UTC, 21 minutes before the close. It is the only commit after the tag with an author or committer date before the close. It is not part of the submitted tag, and it was deployed after the submission form was filed. No other commit after the tag is dated before the close by either date.
 
 ### Live in production (20)
 
@@ -79,9 +79,9 @@ Run in a clone of the repository with `TZ=UTC`. For each SHA from the first comm
 
 ```bash
 export TZ=UTC
-git log --first-parent --reverse --format='%cd %h %s' --date=format-local:'%Y-%m-%d %H:%M' open-house-submission..origin/main
+git log --first-parent --reverse --format='%cd %h %s' --date=format-local:'%Y-%m-%d %H:%M' open-house-submission..cad9130
 git log -1 --format='2315085 author %ad, committed %cd' --date=format-local:'%Y-%m-%d %H:%M:%S UTC' 2315085
-for sha in $(git rev-list --first-parent --reverse open-house-submission..origin/main); do
+for sha in $(git rev-list --first-parent --reverse open-house-submission..cad9130); do
   if git merge-base --is-ancestor "$sha" 302eb66; then
     printf '%s live in production\n' "$(git rev-parse --short "$sha")"
   else
