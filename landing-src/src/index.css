@@ -150,6 +150,37 @@
   }
 }
 
+/* Sections read on view (src/reading.ts): paused on the first frame until [data-read] turns "go".
+   Chain matrix (Chains.tsx): a 2 px magenta marker walks down the rows, 110 ms apart; each row's three cells resolve
+   behind it left to right, 70 ms apart (filled ones wipe in, dashed and outline ones fade in), and their labels rise
+   from dim. A late /api/stats reply re-reads only the mempool cell whose state it changed. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-read="wait"] *,
+  [data-read="wait"] *::before,
+  [data-read="wait"] *::after { animation-play-state: paused !important; }
+
+  [data-read] td:nth-child(3) { --c: 1; }
+  [data-read] td:nth-child(4) { --c: 2; }
+  .rd-row { position: relative; }
+  .rd-row::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 2px;
+    background: rgb(var(--c-accent));
+    opacity: 0;
+    animation: rd-mark 520ms var(--e-read) calc(var(--r) * 110ms) both;
+  }
+  .rd-cell {
+    --t: calc(var(--r) * 110ms + 140ms + var(--c, 0) * 70ms);
+    animation: story-fade-in 240ms ease-out var(--t) both;
+  }
+  .rd-available { animation: vr-wipe 280ms var(--e-out) var(--t) both; }
+  .rd-label { animation: rd-dim 420ms ease-out var(--t) both; }
+}
+
 @media (prefers-reduced-motion: no-preference) and (min-width: 640px) {
   .hero-loading { animation: hero-loading 2000ms linear both; }
   .hero-verdict { animation: story-fade-in 350ms ease-out 1800ms both; }
@@ -165,6 +196,8 @@
 @keyframes vr-draw { from { transform: scaleY(0); } }
 @keyframes vr-tick { from { transform: scaleX(0); } }
 @keyframes vr-settle { from { opacity: 0; transform: translateX(-6px); } }
+@keyframes rd-mark { 30% { opacity: 1; } }
+@keyframes rd-dim { from { opacity: 0.35; } }
 @keyframes story-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes hero-loading {
   0%, 100% { opacity: 0; }

@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useStats, type Stats } from "../liveStats";
+import { useReading } from "../reading";
 
 // Per-chain coverage. tests/test_website_claims.py checks each row against the chain adapters
 // (sell simulation), services/mempool_service.py (mempool) and services/launch_discovery.py.
@@ -161,9 +162,9 @@ function CapabilityCell({
     <span className="inline-flex min-w-0 max-w-full items-start gap-1 text-[11px] leading-4 text-ink sm:items-center sm:gap-2 sm:text-[13px] sm:leading-5">
       <span
         aria-hidden="true"
-        className={"h-2.5 w-2.5 flex-none rounded-[2px] border " + square}
+        className={`rd-cell rd-${state} h-2.5 w-2.5 flex-none rounded-[2px] border ${square}`}
       />
-      <span className="min-w-0 whitespace-normal">
+      <span className="rd-label min-w-0 whitespace-normal">
         {label}
         {note && <span className="block text-secondary">{note}</span>}
       </span>
@@ -205,6 +206,9 @@ function launchCell(chain: Chain): { state: CellState; label: string } {
 
 export default function Chains() {
   const { stats, fetchedAt } = useStats();
+  // The matrix takes its reading on view: a magenta marker walks down the rows and each row's cells resolve
+  // behind it, left to right (index.css).
+  const matrix = useReading<HTMLDivElement>();
   return (
     <section id="chains" aria-labelledby="chains-title" className="bg-ground-alt py-14 md:py-[72px] lg:py-24">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -242,6 +246,8 @@ export default function Chains() {
           </div>
 
           <div
+            ref={matrix}
+            data-read="wait"
             role="region"
             className="mt-4 overflow-x-auto rounded-lg border border-hairline bg-ground"
             tabIndex={0}
@@ -267,15 +273,19 @@ export default function Chains() {
                 </tr>
               </thead>
               <tbody>
-                {chains.map((chain) => {
+                {chains.map((chain, i) => {
                   const simulation = simulationCell(chain);
                   const mempool = mempoolCell(chain, stats);
 
                   return (
-                    <tr key={chain.chainId} className="border-t border-hairline">
+                    <tr
+                      key={chain.chainId}
+                      className="border-t border-hairline"
+                      style={{ "--r": i } as CSSProperties}
+                    >
                       <th
                         scope="row"
-                        className="py-3 pl-2 pr-1 text-left font-medium text-ink sm:pl-4 sm:pr-3"
+                        className="rd-row py-3 pl-2 pr-1 text-left font-medium text-ink sm:pl-4 sm:pr-3"
                       >
                         <span className="flex min-w-0 items-center gap-1.5 sm:gap-3">
                           {chain.logo}
