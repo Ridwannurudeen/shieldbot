@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import Badge, { type Verdict } from "./Badge";
 import CheckRow, { CheckReasons } from "./CheckRow";
 import { short, shortenHex, utc } from "../registryFeed";
@@ -13,9 +14,15 @@ import { short, shortenHex, utc } from "../registryFeed";
 // Every hex string of 40 or more digits in any prop is shown shortened (0x1234…abcd), so a record never
 // prints a full 64-hex hash; tests/test_website_claims.py renders it with one in every field to check.
 //
+// With animate, the record reads itself once (index.css, "The reading"): the request line arrives, a magenta
+// needle passes over each cell in CHECK_ORDER and the cell resolves behind it (a dashed cell's served reason
+// appears as it resolves), the evidence rule draws down, the chip lands, and the evidence lines settle out of
+// the rule one by one, the evidence hash last.
+//
 // Props, all real fields of a recorded reply (src/recordedReplies.ts) or of a live API answer. Never pass a
 // stand-in value. For every optional field: undefined leaves its line out (the source has no such field);
 // null prints "Unavailable" (the source has the field but did not answer, or answered without it).
+//   request       the recorded request, one line (method and target), printed above the checks.
 //   chip          { verdict, label }: the chip's shape and text. The caller maps its vocabulary: an
 //                 /api/firewall or /api/scan reply through verdictOf (src/firewallVerdict.ts); a registry
 //                 record (LOW, MEDIUM, HIGH, HONEYPOT, UNKNOWN) through registryChip (src/registryVerdict.ts).
@@ -32,10 +39,10 @@ import { short, shortenHex, utc } from "../registryFeed";
 //   guard         the guard's answer as served or recorded, e.g. "allowed=True, reason=0".
 //   source        the provenance line under the record: where the fields came from and when.
 //   variant       "full" (hero, figures) or "compact" (a row in a list).
-//   animate       play the resolve once on mount (cells fill in order, then the chip, then the body);
-//                 the final frame is the base style, so reduced motion shows it at once. Remount (a new
-//                 key) to replay.
+//   animate       play the reading once on mount; the final frame is the base style, so reduced motion shows
+//                 it at once. Remount (a new key) to replay.
 export interface VerdictRecordProps {
+  request?: string;
   chip: { verdict: Verdict; label: string };
   coverage?: Partial<Record<string, number | boolean | null>>;
   reasons?: Partial<Record<string, string | null>> | null;
@@ -56,6 +63,7 @@ function recordedTime(iso: string) {
 }
 
 export default function VerdictRecord({
+  request,
   chip,
   coverage,
   reasons,
@@ -107,9 +115,12 @@ export default function VerdictRecord({
       className={[
         "min-w-0 rounded-lg border border-hairline bg-ground",
         animate && "vr-animate",
+        !full && "vr-compact",
+        !coverage && "vr-bare",
       ]
         .filter(Boolean)
         .join(" ")}
+      style={{ "--n": lines.length } as CSSProperties}
     >
       {coverage && (
         <div
@@ -119,6 +130,14 @@ export default function VerdictRecord({
               : "border-b border-hairline px-4 py-3"
           }
         >
+          {request && (
+            <p className="vr-req mb-5 font-mono text-[13px] leading-5 text-ink [overflow-wrap:anywhere]">
+              <span className="mr-3 text-[11px] uppercase tracking-[0.08em] text-secondary">
+                Request
+              </span>
+              {shortenHex(request)}
+            </p>
+          )}
           {full && (
             <p className="mb-3 font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-secondary">
               Checks
@@ -145,8 +164,8 @@ export default function VerdictRecord({
         <div
           className={
             full
-              ? "border-l border-accent pl-4 sm:pl-5"
-              : "border-l border-accent pl-3"
+              ? "vr-rule border-l border-accent pl-4 sm:pl-5"
+              : "vr-rule border-l border-accent pl-3"
           }
         >
           <div className="vr-chip">
@@ -174,10 +193,11 @@ export default function VerdictRecord({
                     : "mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs leading-[18px]"
                 }
               >
-                {lines.map(([label, value]) => (
+                {lines.map(([label, value], j) => (
                   <div
                     key={label}
                     className={full ? "contents" : "flex gap-1.5"}
+                    style={{ "--j": j } as CSSProperties}
                   >
                     <dt
                       className={
@@ -201,8 +221,8 @@ export default function VerdictRecord({
           <p
             className={
               full
-                ? "vr-body mt-4 text-xs leading-[18px] text-secondary"
-                : "vr-body mt-2 text-xs leading-[18px] text-secondary"
+                ? "vr-src mt-4 text-xs leading-[18px] text-secondary"
+                : "vr-src mt-2 text-xs leading-[18px] text-secondary"
             }
           >
             {source}

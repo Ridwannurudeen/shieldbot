@@ -47,12 +47,16 @@ export function CheckReasons({
     <dl
       className={
         full
-          ? "vr-body grid gap-y-1.5 font-mono text-xs leading-[18px] sm:grid-cols-[max-content_1fr] sm:gap-x-4"
-          : "vr-body grid gap-y-1 font-mono text-[11px] leading-4 sm:grid-cols-[max-content_1fr] sm:gap-x-3"
+          ? "vr-why grid gap-y-1.5 font-mono text-xs leading-[18px] sm:grid-cols-[max-content_1fr] sm:gap-x-4"
+          : "vr-why grid gap-y-1 font-mono text-[11px] leading-4 sm:grid-cols-[max-content_1fr] sm:gap-x-3"
       }
     >
       {entries.map(({ key, reason }) => (
-        <div key={key} className="contents">
+        <div
+          key={key}
+          className="contents"
+          style={{ "--i": CHECK_ORDER.indexOf(key as CheckKey) } as CSSProperties}
+        >
           <dt className="text-secondary">{key}</dt>
           <dd className="min-w-0 text-ink [overflow-wrap:anywhere]">
             {shortenHex(reason)}
@@ -101,11 +105,12 @@ export default function CheckRow({
             key={key}
             className={full ? "flex min-w-0 flex-col items-start gap-1.5" : ""}
             title={full ? undefined : `${key}: ${stateText(state, value)}`}
+            style={{ "--i": i } as CSSProperties}
           >
             <span
               aria-hidden="true"
               className={[
-                "relative block flex-none rounded-[2px] border",
+                "vr-slot relative block flex-none rounded-[2px] border",
                 // Unavailable is the ink outline of the legend (Mechanism.tsx); the other states draw their own edge
                 // over a hairline.
                 state === "absent"
@@ -116,14 +121,13 @@ export default function CheckRow({
             >
               <span
                 className={[
-                  "vr-cell absolute -inset-px rounded-[2px]",
+                  `vr-cell vr-${state} absolute -inset-px rounded-[2px]`,
                   state === "ran" && "bg-ink",
                   (state === "partial" || state === "none") &&
                     "border border-dashed border-ink",
                 ]
                   .filter(Boolean)
                   .join(" ")}
-                style={{ "--i": i } as CSSProperties}
               >
                 {state === "partial" && (
                   <span

@@ -1176,6 +1176,7 @@ process.stdout.write(JSON.stringify(out));
         "publishedAt": 1760000000,
         "evidenceHash": digest,
         "guard": f"guard.check({digest}, 900)",
+        "request": f"approve(address,uint256) · to {digest}",
         "source": "test",
     }
     result = subprocess.run(
@@ -1190,3 +1191,47 @@ process.stdout.write(JSON.stringify(out));
         assert sorted(CHECK_ORDER, key=lambda key: row.index(f">{key}")) == CHECK_ORDER, variant
         for label in ("Recorded", "Chain", "Block", "Published", "Evidence", "Guard"):
             assert f">{label}</dt>" in markup, (variant, label)
+        assert "approve(address,uint256) · to 0xab12…ab12" in markup, variant
+
+
+def test_the_hero_request_lines_are_the_recorded_calls():
+    # The hero record opens with the recorded request: the method its selector names and its target, shortened,
+    # transcribed from hero-overlay{,-unknown,-safe}-request.json (the calldata itself is never transcribed).
+    selectors = {"0x095ea7b3": "approve(address,uint256)"}
+    for name, record in recorded_replies().items():
+        request = json.loads(read(LANDING_SRC / "scripts" / record["fixture"].replace("-response.json", "-request.json")))
+        assert request["chainId"] == record["chain_id"], name
+        assert record["request"]["method"] == selectors[request["data"][:10]], name
+        assert record["request"]["to"] == f"{request['to'][:6]}…{request['to'][-4:]}", name
+    assert "request={`${reply.request.method} · to ${reply.request.to}`}" in read(COMPONENTS / "HeroRecord.tsx")
+
+
+def media_blocks(css: str):
+    # Yield (enclosing @media conditions, declaration block) for every rule in a stylesheet, by brace depth.
+    stack, start = [], 0
+    for i, ch in enumerate(css):
+        if ch == "{":
+            stack.append(css[start:i].strip())
+            start = i + 1
+        elif ch == "}":
+            yield [p for p in stack[:-1] if p.startswith("@media")], stack[-1] if stack else "", css[start:i]
+            if stack:
+                stack.pop()
+            start = i + 1
+
+
+def test_every_animation_runs_only_when_motion_is_allowed():
+    # Reduced motion shows every final frame at once: in the built CSS, each animation declaration sits inside
+    # @media (prefers-reduced-motion: no-preference), so with reduce no element starts hidden or waits for a reading.
+    css = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.css"))
+    assert css
+    animated = 0
+    for media, selector, body in media_blocks(css):
+        if selector.startswith("@keyframes") or selector.startswith("from") or selector.startswith("to") or "%" in selector:
+            continue
+        if re.search(r"(^|;)\s*animation(-name)?:", body) and not re.search(r"(^|;)\s*animation(-name)?:\s*none", body):
+            assert any("prefers-reduced-motion:no-preference" in m.replace(" ", "") for m in media), selector
+            animated += 1
+    assert animated >= 10
+    source = read(LANDING_SRC / "src" / "index.css")
+    assert "animation-duration: 0.01ms !important;" in source

@@ -4,10 +4,13 @@ import type { ScanReply } from "./firewallVerdict";
 // with sent_at from hero-overlay-recordings.json. The JSON is not imported: each reply carries its full 64-hex
 // evidence hash, which the page never shows. Instead the fields the page renders are transcribed here, the
 // hash already shortened, and tests/test_website_claims.py checks every one against its fixture.
+// request is the recorded call itself (hero-overlay{,-unknown,-safe}-request.json): the method its 4-byte selector
+// names and its target address, shortened; the calldata is not transcribed.
 // A recorded reply has no observed block, publication time or guard outcome; those are registry fields.
 export interface RecordedReply extends ScanReply {
   fixture: string;
   sent_at: string;
+  request: { method: string; to: string };
   chain_id: number;
   network: string;
   plain_english: string;
@@ -21,6 +24,10 @@ export const recordedReplies: Record<
   block: {
     fixture: "hero-overlay-response.json",
     sent_at: "2026-09-26T07:14Z",
+    request: {
+      method: "approve(address,uint256)",
+      to: "0xa0b8…eb48",
+    },
     status: "ok",
     partial: false,
     classification: "BLOCK_RECOMMENDED",
@@ -42,6 +49,10 @@ export const recordedReplies: Record<
   unknown: {
     fixture: "hero-overlay-unknown-response.json",
     sent_at: "2026-10-11T09:21:20Z",
+    request: {
+      method: "approve(address,uint256)",
+      to: "0x8adb…8900",
+    },
     status: "unknown",
     partial: true,
     classification: "CAUTION",
@@ -68,6 +79,10 @@ export const recordedReplies: Record<
   safe: {
     fixture: "hero-overlay-safe-response.json",
     sent_at: "2026-10-11T09:21:15Z",
+    request: {
+      method: "approve(address,uint256)",
+      to: "0x912c…6548",
+    },
     status: "ok",
     partial: false,
     classification: "SAFE",

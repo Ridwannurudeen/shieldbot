@@ -6,9 +6,10 @@ import { recordedReplies } from "../recordedReplies";
 // The hero figure: one recorded /api/firewall reply drawn as a verdict record, beside the capture of the
 // extension's overlay fed that same reply (landing-src/scripts/capture-hero-overlay.py). The switcher picks one
 // of three recordings; a record and a capture are only ever shown together for the same reply. On each pick the
-// record resolves (VerdictRecord's animate) while the capture slot shows the overlay's real loading dialog,
-// then the verdict dialog; the final frame is the base style, so reduced motion shows it at once. Nothing here
-// talks to the network.
+// record replays its reading (VerdictRecord's animate: the recorded request, the six checks, the verdict, the
+// evidence) while the capture slot shows the overlay's real loading dialog, then the verdict dialog as the chip
+// lands; the final frame is the base style, so reduced motion shows it at once. Nothing here talks to the
+// network.
 type Pick = "block" | "unknown" | "safe";
 
 const picks: { id: Pick; label: string }[] = [
@@ -105,6 +106,7 @@ export default function HeroRecord() {
       >
         <VerdictRecord
           animate
+          request={`${reply.request.method} · to ${reply.request.to}`}
           chip={{ verdict: label.verdict, label: label.text }}
           coverage={reply.coverage}
           reasons={reply.coverage_reasons}
