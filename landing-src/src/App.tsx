@@ -1,5 +1,6 @@
 import Navbar from "./components/Navbar";
 import Hero from "./components/Hero";
+import TryIt from "./components/TryIt";
 import WhyUnknown from "./components/WhyUnknown";
 import Mechanism from "./components/Mechanism";
 import Chains from "./components/Chains";
@@ -24,13 +25,14 @@ export default function App() {
       <Navbar />
       <main id="main" tabIndex={-1} className="focus:outline-none">
         <Hero />
+        <TryIt />
         <WhyUnknown />
         <Mechanism />
+        <WorkedExample />
+        <OnChain />
         <Chains />
         <HowItWorks />
         <FeatureTabs />
-        <WorkedExample />
-        <OnChain />
         <AgentSecurity />
         <FAQ />
         <CtaCard />

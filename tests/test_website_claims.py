@@ -417,7 +417,9 @@ def test_structured_data_is_valid_and_matches_the_visible_faq():
 HERO_CAPTURES = [
     # (recorded reply, component whose alt text describes it, captures made from the reply)
     ("hero-overlay-response.json", "HowItWorks.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
-    ("hero-overlay-response.json", "HeroStory.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
+    ("hero-overlay-response.json", "HeroRecord.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
+    ("hero-overlay-unknown-response.json", "HeroRecord.tsx", ("hero-overlay-unknown.webp",)),
+    ("hero-overlay-safe-response.json", "HeroRecord.tsx", ("hero-overlay-safe.webp",)),
     ("hero-overlay-safe-response.json", "TryIt.tsx", ("hero-overlay-safe.webp",)),
     ("hero-overlay-unknown-response.json", "TryIt.tsx", ("hero-overlay-unknown.webp",)),
     ("hero-overlay-unknown-response.json", "FeatureTabs.tsx", ("hero-overlay-unknown.webp",)),
@@ -490,11 +492,11 @@ def test_hero_image_describes_its_recorded_api_reply(fixture, component, capture
 
 
 def test_hero_story_shows_the_real_loading_dialog():
-    # The story's "Checking" frame is a capture of the extension's loading overlay (showLoadingOverlay in
+    # The hero's "Checking" frame is a capture of the extension's loading overlay (showLoadingOverlay in
     # extension/content.js), so its alt text quotes that overlay's own string.
     messages = json.loads(read(ROOT / "extension" / "locales" / "en" / "messages.json"))
     assert '<p>${_t("overlayAnalyzing")}</p>' in read(ROOT / "extension" / "content.js")
-    story = read(COMPONENTS / "HeroStory.tsx")
+    story = read(COMPONENTS / "HeroRecord.tsx")
     assert f"It reads {messages['overlayAnalyzing']}" in story
     assert '"/hero-overlay-loading.webp"' in story
     source = (LANDING_SRC / "public" / "hero-overlay-loading.webp").read_bytes()
@@ -632,7 +634,7 @@ def test_built_landing_bundle_contains_the_current_feature_copy(component):
 
 
 HERO_SECTION_COPY = {
-    "HeroStory.tsx": (
+    "HeroRecord.tsx": (
         "Recorded reply of 26 September 2026, chain 1, BLOCK RECOMMENDED.",
         "Recorded examples, not live scans.",
         "overlay at unreleased commit 2b54a1b, fed that reply.",
@@ -784,13 +786,14 @@ def test_the_site_says_which_verdicts_reach_the_registry():
 
 
 def test_hero_demo_shows_documented_examples_and_makes_no_request():
-    # The hero story plays captures of recorded replies, says so, and does not talk to the network. TryIt.tsx is
-    # the one hero component that calls the API (POST /api/scan). The VIRTUAL guard example left the page with
+    # The hero plays captures of recorded replies and draws their records, says so, and does not talk to the
+    # network. TryIt.tsx, the section after the hero, calls the API (POST /api/scan). The VIRTUAL guard example left the page with
     # verdictScenes.ts in PR C and is in FeatureTabs.tsx since PR D1 (plan 3.3).
-    story = read(COMPONENTS / "HeroStory.tsx")
+    story = read(COMPONENTS / "HeroRecord.tsx")
     assert "Recorded examples, not live scans" in story
-    for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
-        assert forbidden not in story, forbidden
+    for name in ("HeroRecord.tsx", "VerdictRecord.tsx", "CheckRow.tsx"):
+        for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
+            assert forbidden not in read(COMPONENTS / name), (name, forbidden)
     try_it = read(COMPONENTS / "TryIt.tsx")
     assert "https://api.shieldbotsecurity.online/api/scan" in try_it
     for forbidden in ("XMLHttpRequest", "WebSocket", "EventSource"):
@@ -824,3 +827,106 @@ def test_built_dashboard_contains_the_current_source_strings():
         assert label in built, (
             f"dashboard/index.html is stale: missing {label!r}; run the dashboard build"
         )
+
+
+CHECK_ORDER = ["structural", "market", "behavioral", "honeypot", "intent", "signature"]
+
+
+def recorded_replies() -> dict:
+    # landing-src/src/recordedReplies.ts is one object literal; read it as JSON (quote the keys, drop trailing
+    # commas) so each transcribed field can be compared with its fixture.
+    source = read(LANDING_SRC / "src" / "recordedReplies.ts")
+    body = source[source.index("> = {") + 4 : source.rindex("};") + 1]
+    body = re.sub(r"(?m)^(\s*)(\w+):", r'\1"\2":', body)
+    body = re.sub(r",(\s*[}\]])", r"\1", body)
+    return json.loads(body)
+
+
+def test_the_hero_records_are_the_recorded_replies_field_for_field():
+    # The hero's verdict records are drawn from the three recorded /api/firewall replies. The JSON is not imported
+    # (it carries full evidence hashes), so every field the page renders is transcribed and checked here.
+    replies = recorded_replies()
+    assert sorted(replies) == ["block", "safe", "unknown"]
+    recordings = {
+        entry["fixture"]: entry for entry in json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-recordings.json"))["recordings"]
+    }
+    for name, record in replies.items():
+        fixture = json.loads(read(LANDING_SRC / "scripts" / record["fixture"]))
+        assert record["sent_at"] == recordings[record["fixture"].removesuffix("-response.json")]["sent_at"], name
+        for field in ("status", "partial", "classification", "risk_score", "coverage", "chain_id", "network", "plain_english"):
+            assert record[field] == fixture[field], (name, field)
+        assert list(record["coverage"]) == list(fixture["coverage"]) == CHECK_ORDER, name
+        assert record.get("coverage_reasons") == fixture.get("coverage_reasons"), name
+        digest = fixture["evidence_hash"]
+        assert record["evidence_hash"] == f"{digest[:6]}…{digest[-4:]}", name
+    unknown = replies["unknown"]
+    assert unknown["coverage"]["market"] == 0 and 0 < unknown["coverage"]["honeypot"] < 1
+    assert set(unknown["coverage_reasons"]) == {"market", "honeypot"}
+
+
+def test_the_check_row_order_is_fixed():
+    # One cell per coverage key, always in the order the API serves the keys in, whatever order an object has.
+    source = read(COMPONENTS / "CheckRow.tsx")
+    declared = re.search(r"export const CHECK_ORDER = \[([^\]]*)\] as const;", source).group(1)
+    assert re.findall(r'"(\w+)"', declared) == CHECK_ORDER
+    assert "CHECK_ORDER.map(" in source and "Object.keys(" not in source and "Object.entries(" not in source
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert json.dumps(CHECK_ORDER, separators=(",", ":")) in bundle, "landing bundle is stale: missing CHECK_ORDER"
+
+
+def test_a_verdict_record_never_renders_a_full_hash():
+    # Render VerdictRecord (both variants) with a 64-hex value in every text field and the coverage keys in
+    # reverse order: no 64-hex string may reach the markup, and the cells keep CHECK_ORDER.
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    modules = LANDING_SRC / "node_modules"
+    if node is None or not (modules / "typescript").is_dir() or not (modules / "react-dom").is_dir():
+        pytest.skip("Node.js and landing-src/node_modules (npm ci) are required to render the component")
+    script = r"""
+const fs = require("fs");
+const path = require("path");
+const root = process.argv[1];
+const ts = require(path.join(root, "node_modules", "typescript"));
+for (const ext of [".ts", ".tsx"]) {
+  require.extensions[ext] = (module, filename) => {
+    const options = {module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020, esModuleInterop: true};
+    module._compile(ts.transpileModule(fs.readFileSync(filename, "utf8"), {compilerOptions: options, fileName: filename}).outputText, filename);
+  };
+}
+const React = require(path.join(root, "node_modules", "react"));
+const {renderToStaticMarkup} = require(path.join(root, "node_modules", "react-dom", "server"));
+const VerdictRecord = require(path.join(root, "src", "components", "VerdictRecord.tsx")).default;
+const props = JSON.parse(process.argv[2]);
+const out = {};
+for (const variant of ["full", "compact"]) out[variant] = renderToStaticMarkup(React.createElement(VerdictRecord, {...props, variant}));
+process.stdout.write(JSON.stringify(out));
+"""
+    digest = "0x" + "ab12" * 16
+    coverage = dict(zip(reversed(CHECK_ORDER), (1, 0.5, 0, 1, 1, 0)))
+    props = {
+        "chip": {"verdict": "unknown", "label": "UNKNOWN"},
+        "coverage": coverage,
+        "reasons": {key: f"reason for {key}: {digest}" for key in CHECK_ORDER},
+        "reason": f"served reason {digest}",
+        "recordedAt": "2026-10-11T09:21:20Z",
+        "chain": {"id": 4663, "name": "Robinhood Chain"},
+        "block": 85035031,
+        "publishedAt": 1760000000,
+        "evidenceHash": digest,
+        "guard": f"guard.check({digest}, 900)",
+        "source": "test",
+    }
+    result = subprocess.run(
+        [node, "-e", script, str(LANDING_SRC), json.dumps(props)],
+        cwd=LANDING_SRC, capture_output=True, text=True, encoding="utf-8", check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    for variant, markup in json.loads(result.stdout).items():
+        assert not re.search(r"0x[0-9a-fA-F]{64}", markup), variant
+        assert "0xab12…ab12" in markup, variant
+        row = markup[: markup.index("</ol>")]
+        assert sorted(CHECK_ORDER, key=lambda key: row.index(f">{key}")) == CHECK_ORDER, variant
+        for label in ("Recorded", "Chain", "Block", "Published", "Evidence", "Guard"):
+            assert f">{label}</dt>" in markup, (variant, label)
