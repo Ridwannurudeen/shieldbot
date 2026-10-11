@@ -181,6 +181,19 @@
   .rd-label { animation: rd-dim 420ms ease-out var(--t) both; }
 }
 
+/* A record inside a section read on view (registry records, the process track's record) keeps its text readable from
+   the first frame: chip, reason, evidence lines and source rise from 0.6 opacity; only the rule, the needle, the cell
+   fills and the dt ticks draw from nothing. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-read] .vr-animate .vr-chip,
+  [data-read] .vr-animate .vr-src { animation-name: vr-legible; }
+  [data-read] .vr-animate .vr-body > p,
+  [data-read] .vr-animate .vr-body dt,
+  [data-read] .vr-animate .vr-body dd,
+  [data-read] .vr-animate .vr-why dt,
+  [data-read] .vr-animate .vr-why dd { animation-name: vr-settle-legible; }
+}
+
 /* Process track (HowItWorks.tsx): the rule draws one segment per step, 600 ms each; as a segment starts its node
    lights and its step rises from dim; the last segment is the magenta one, and the record at its end reads itself
    from 1500 ms (--vr-d). About 4 s, once. */
@@ -227,6 +240,8 @@
 @keyframes pt-draw-x { from { transform: scaleX(0); } }
 @keyframes pt-node { from { opacity: 0; transform: scale(0.4); } }
 @keyframes pt-rise { from { opacity: 0.35; transform: translateY(6px); } }
+@keyframes vr-legible { from { opacity: 0.6; } }
+@keyframes vr-settle-legible { from { opacity: 0.6; transform: translateX(-6px); } }
 @keyframes story-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes hero-loading {
   0%, 100% { opacity: 0; }
