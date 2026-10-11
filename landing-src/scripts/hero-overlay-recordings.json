@@ -1,0 +1,8 @@
+{
+  "note": "Each *-response.json is the verbatim body of POST https://api.shieldbotsecurity.online/api/firewall to the *-request.json beside it, sent once with headers Content-Type: application/json and X-Policy-Mode: BALANCED (the extension's background.js request).",
+  "recordings": [
+    {"fixture": "hero-overlay", "sent_at": "2026-09-26T07:14Z", "http_status": 200, "classification": "BLOCK_RECOMMENDED"},
+    {"fixture": "hero-overlay-safe", "sent_at": "2026-10-11T09:21:15Z", "http_status": 200, "classification": "SAFE", "status": "ok"},
+    {"fixture": "hero-overlay-unknown", "sent_at": "2026-10-11T09:21:20Z", "http_status": 200, "classification": "CAUTION", "status": "unknown", "partial": true}
+  ]
+}
