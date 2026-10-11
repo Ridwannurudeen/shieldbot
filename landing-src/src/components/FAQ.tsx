@@ -40,7 +40,7 @@ const faqs = [
   },
   {
     q: "How is ShieldBot different from other crypto security tools?",
-    a: "Many tools only check a URL or a token list. ShieldBot checks the actual transaction before you sign, simulates buys and sells to catch honeypots where the chain allows it, and tells you plainly when it could not check something. It also works through Telegram, an API and an MCP server for AI agents.",
+    a: "ShieldBot checks the actual transaction before you sign, simulates buys and sells to catch honeypots where the chain allows it, and tells you plainly when it could not check something. It also works through Telegram, an API and an MCP server for AI agents.",
   },
   {
     q: "How do I install ShieldBot?",

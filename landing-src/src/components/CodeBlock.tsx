@@ -1,9 +1,20 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 
 export default function CodeBlock({ code, label }: { code: string; label?: string }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const resetTimer = useRef<number | undefined>(undefined);
+  // Long lines scroll sideways on a narrow screen; a line under the block says so while any line is cut off.
+  const pre = useRef<HTMLPreElement>(null);
+  const [overflows, setOverflows] = useState(false);
+
+  useEffect(() => {
+    const element = pre.current as HTMLPreElement;
+    const measure = () => setOverflows(element.scrollWidth > element.clientWidth);
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   async function copyCode() {
     window.clearTimeout(resetTimer.current);
@@ -35,6 +46,7 @@ export default function CodeBlock({ code, label }: { code: string; label?: strin
           </button>
         </div>
         <pre
+          ref={pre}
           tabIndex={0}
           aria-label="Command block"
           className="overflow-x-auto p-4 pt-3 font-mono text-[13px] leading-relaxed text-ink whitespace-pre"
@@ -42,6 +54,14 @@ export default function CodeBlock({ code, label }: { code: string; label?: strin
           {code}
         </pre>
       </div>
+      {overflows && (
+        <p className="mt-2 flex items-center gap-1.5 text-[13px] text-secondary">
+          Scroll the block sideways to read each line in full
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+        </p>
+      )}
       {copyState === "failed" && <p className="mt-2 text-[13px] text-ink" role="status">Could not copy. Select the commands and copy them by hand.</p>}
       <p className="sr-only" aria-live="polite">{copyState === "copied" ? "Commands copied" : ""}</p>
     </div>

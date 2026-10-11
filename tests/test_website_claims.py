@@ -1020,6 +1020,13 @@ process.stdout.write(JSON.stringify(out));
     assert re.search(r'border border-ink bg-ground" />\s*Outline: Unavailable', legend)
 
 
+def test_a_code_block_says_when_its_lines_scroll_sideways():
+    block = read(COMPONENTS / "CodeBlock.tsx")
+    assert "new ResizeObserver(measure)" in block
+    assert "setOverflows(element.scrollWidth > element.clientWidth)" in block
+    assert "Scroll the block sideways to read each line in full" in block
+
+
 def test_built_dashboard_contains_the_current_source_strings():
     built = read(ROOT / "dashboard" / "index.html")
     labels = re.findall(r"label:'([^']+)'", read(DASHBOARD_SRC))
