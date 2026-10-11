@@ -570,6 +570,11 @@ def test_strict_mode_removes_proceed_on_errors_block_and_unknown_verdicts(policy
   await intercept('request');
   const html = overlay().innerHTML;
   const removed = policy === 'STRICT' && outcome !== 'CAUTION';
+  if (outcome === 'error') {
+    // A request the API did not check is Unknown, not a measured High Risk.
+    assert.deepEqual(overlay().querySelector('.shieldai-badge').className.split(/\s+/),
+      ['shieldai-badge', 'shieldai-badge-unknown'], html);
+  }
   assert.equal(html.includes('id="shieldai-proceed"'), !removed);
   assert.equal(html.includes('Strict mode is on'), removed);
   userClick(byId('shieldai-block'));
@@ -1035,6 +1040,8 @@ def test_a_request_that_cannot_be_read_is_shown_as_unknown_structure(policy):
   const html = overlay().innerHTML;
   assert(html.includes('UNKNOWN STRUCTURE'), html);
   assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-high'));
+  // Nothing in it was checked, so the dialog is drawn in the Unknown register.
+  assert(overlay().querySelector('.shieldai-modal').classList.contains('shieldai-modal-unknown'), html);
   assert.equal(html.includes('id="shieldai-proceed"'), storage.policyMode !== 'STRICT');
   assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length, 1);
   assert.deepEqual(verdicts(), []);
