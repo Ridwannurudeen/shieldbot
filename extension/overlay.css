@@ -188,6 +188,17 @@
   border-left: 3px dashed #8b8b86;
 }
 
+/* A result some sources did not return: the Unknown register, not a verdict. */
+.shieldai-section.shieldai-partial {
+  background: #f7f6f2;
+  border-left: 2px dashed #8b8b86;
+  border-radius: 0 4px 4px 0;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.shieldai-section.shieldai-partial p { font-size: 13px; }
+
 .shieldai-unknown-why {
   font-size: 13px;
   color: #141414;

@@ -498,7 +498,7 @@
       if (_overlayHost === host) removeOverlay();
     });
     observer.observe(document, { childList: true, subtree: true });
-    modal.focus();
+    (root.getElementById("shieldai-block") || modal).focus();
     if (requestId) {
       _awaitingRequestId = requestId;
       channelProof(requestId, "shown").then((proof) => {
@@ -1084,8 +1084,8 @@
         ${lookalikeSection(recipient, lookalike)}
 
         ${result.partial ? `
-          <div class="shieldai-section" style="background:#78350f;border-radius:6px;padding:8px 12px;margin-bottom:8px;">
-            <p style="color:#fbbf24;font-size:12px;margin:0;">
+          <div class="shieldai-section shieldai-partial">
+            <p>
               <strong>${_t("overlayPartialAnalysis")}</strong> — ${escapeHtml((result.failed_sources || []).join(', '))} ${_t("overlayResultsIncomplete")}
               ${result.policy_mode === 'STRICT' ? _t("overlayStrictBlock") : ''}
             </p>
@@ -1243,7 +1243,7 @@
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal ${delegation ? "shieldai-modal-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+      <div class="shieldai-modal ${delegation ? "shieldai-modal-danger" : "shieldai-modal-unknown"}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
           <span class="shieldai-logo" aria-hidden="true"></span>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
