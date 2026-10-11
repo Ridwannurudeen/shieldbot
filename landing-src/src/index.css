@@ -137,15 +137,6 @@
   50% { filter: blur(4px); opacity: 0.8; }
 }
 
-/* Floating record cards (WhyUnknown.tsx): 4 s, 10 px up or down; under reduced motion they stand still. */
-@media (prefers-reduced-motion: no-preference) {
-  .float-a { animation: soft-flotation 4000ms ease-in-out infinite; }
-  .float-b { animation: soft-flotation-inverse 4000ms ease-in-out infinite; }
-}
-
-@keyframes soft-flotation { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
-@keyframes soft-flotation-inverse { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(10px); } }
-
 /* Accordion (FAQ.tsx): the panel opens from 0fr to 1fr in 300 ms, so nothing measures height. */
 @layer components {
   .acc-panel {

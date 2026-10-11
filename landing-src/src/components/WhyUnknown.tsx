@@ -1,18 +1,25 @@
 import { useEffect, useState } from "react";
-import Icon from "./Icon";
+import type { Verdict } from "./Badge";
+import VerdictRecord from "./VerdictRecord";
 
 // Two records from the API, fetched when the page loads: the newest blocked Robinhood Chain launch as the
-// registry holds it (GET /api/verdict/4663/{subject}), and that chain's coverage (GET /api/coverage/4663).
-// A route that does not answer leaves each of its fields reading Unavailable; nothing is filled in.
+// registry holds it (GET /api/verdict/4663/{subject}), drawn as a verdict record whose check-row is the coverage
+// in its published evidence, and that chain's coverage (GET /api/coverage/4663) as a row of cells. A route that
+// does not answer leaves each of its fields reading Unavailable; nothing is filled in.
 const API = "https://api.shieldbotsecurity.online";
 const SUBJECT = "0x34357625e8b7414b47c0410327c29361a70c26dd";
 
-interface VerdictRecord {
+interface RegistryReply {
   verdict: string | null;
+  evidence_hash: string | null;
   observed_block: number | null;
   published_at: number | null;
   onchain_status: string | null;
   tx_hash: string | null;
+  evidence: {
+    coverage?: Record<string, number | boolean>;
+    coverage_reasons?: Record<string, string | null>;
+  } | null;
 }
 
 interface Coverage {
@@ -29,6 +36,15 @@ const reasons = [
   "The contract's age is not available, so the overlay says Unknown and why.",
   "The typed data could not be read, so the overlay says Unknown and why.",
 ];
+
+// The registry's verdict names on the chip shapes: HONEYPOT a solid fill, HIGH a heavy edge, UNKNOWN dashed. LOW
+// and MEDIUM, which the guard allows, take the neutral hairline shape, not SAFE's green; the label is the
+// registry's own word.
+const registryShape: Record<string, Verdict> = {
+  HONEYPOT: "block",
+  HIGH: "high",
+  UNKNOWN: "unknown",
+};
 
 function short(hex: string) {
   return `${hex.slice(0, 6)}…${hex.slice(-4)}`;
@@ -63,49 +79,50 @@ function useRecord<T>(url: string) {
   return data;
 }
 
-function Row({
-  label,
-  value,
-  loading,
-}: {
-  label: string;
-  value: string | null | undefined;
-  loading: boolean;
-}) {
-  return (
-    <>
-      <dt className="text-secondary">{label}</dt>
-      <dd className="min-w-0 font-medium text-ink [overflow-wrap:anywhere]">
-        {value ?? (loading ? "…" : "—")}
-      </dd>
-    </>
-  );
-}
-
 function Source({ path, failed }: { path: string; failed: boolean }) {
   return (
-    <p className="mt-4 border-t border-hairline pt-3 text-xs leading-[18px] text-secondary">
+    <p className="text-xs leading-[18px] text-secondary">
       {failed && <span className="font-medium text-ink">Unavailable. </span>}
       {failed ? `GET ${path} did not answer.` : `Live from GET ${path}.`}
     </p>
   );
 }
 
+// One coverage capability as a check cell: filled when the chain has it, dashed when the API says it has not,
+// an empty hairline cell while loading or when the route did not answer.
+function Capability({
+  label,
+  value,
+  has,
+  loading,
+}: {
+  label: string;
+  value: string | null | undefined;
+  has: boolean;
+  loading: boolean;
+}) {
+  return (
+    <li className="grid grid-cols-[12px_minmax(0,1fr)_auto] items-center gap-3 py-2.5">
+      <span
+        aria-hidden="true"
+        className={`h-3 w-3 rounded-[2px] border ${value == null ? "border-hairline-strong" : has ? "border-ink bg-ink" : "border-dashed border-ink"}`}
+      />
+      <span className="text-secondary">{label}</span>
+      <span className="min-w-0 text-right text-ink [overflow-wrap:anywhere]">
+        {value ?? (loading ? "…" : "Unavailable")}
+      </span>
+    </li>
+  );
+}
+
 export default function WhyUnknown() {
-  const record = useRecord<VerdictRecord>(`${API}/api/verdict/4663/${SUBJECT}`);
+  const record = useRecord<RegistryReply>(`${API}/api/verdict/4663/${SUBJECT}`);
   const coverage = useRecord<Coverage>(`${API}/api/coverage/4663`);
 
-  const published =
-    typeof record?.published_at === "number"
-      ? new Date(record.published_at * 1000).toLocaleDateString("en-GB", {
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        })
-      : null;
   const caps = coverage?.capabilities;
   const routers = caps?.router_allowlist?.routers;
   const mempool = caps?.public_mempool;
+  const recordPath = `/api/verdict/4663/${short(SUBJECT)}`;
 
   return (
     <section
@@ -113,9 +130,11 @@ export default function WhyUnknown() {
       aria-labelledby="why-unknown-title"
       className="border-b border-hairline py-16 md:py-24"
     >
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-16">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 items-start gap-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-accent">Why Unknown exists</p>
+          <p className="font-mono text-xs uppercase tracking-[0.08em] text-secondary">
+            Why Unknown exists
+          </p>
           <h2
             id="why-unknown-title"
             className="mt-3 text-h2-sm md:text-h2 text-ink"
@@ -130,93 +149,94 @@ export default function WhyUnknown() {
             {reasons.map((reason) => (
               <li
                 key={reason}
-                className="grid grid-cols-[22px_1fr] gap-3 text-base leading-6 text-ink"
+                className="grid grid-cols-[12px_1fr] gap-3 text-base leading-6 text-ink"
               >
-                <Icon name="check" size={20} className="mt-0.5 text-accent" />
+                <span
+                  aria-hidden="true"
+                  className="mt-1.5 h-3 w-3 rounded-[2px] border border-dashed border-ink"
+                />
                 {reason}
               </li>
             ))}
           </ul>
         </div>
 
-        <div className="relative grid min-w-0 gap-4 lg:block lg:h-[520px]">
-          <div className="float-a rounded-[14px] border border-hairline bg-ground p-5 shadow-md lg:absolute lg:left-0 lg:top-2 lg:w-[360px]">
-            <p className="text-[13px] font-medium text-secondary">
-              Registry record, Robinhood Chain
-            </p>
-            <p className="mt-2 font-mono text-xl text-ink">
-              {record?.verdict ?? (record === undefined ? "…" : "—")}
-            </p>
-            <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
-              <Row label="Token" value={short(SUBJECT)} loading={false} />
-              <Row
-                label="Observed block"
-                value={
-                  typeof record?.observed_block === "number"
-                    ? String(record.observed_block)
-                    : null
-                }
-                loading={record === undefined}
+        <div className="grid min-w-0 gap-8">
+          <figure className="grid min-w-0 gap-3">
+            <figcaption className="font-mono text-xs leading-4 text-secondary">
+              Registry record, Robinhood Chain · token {short(SUBJECT)}
+            </figcaption>
+            {record ? (
+              <VerdictRecord
+                chip={{
+                  verdict: record.verdict
+                    ? (registryShape[record.verdict] ?? "caution")
+                    : "unknown",
+                  label: record.verdict ?? "Unavailable",
+                }}
+                coverage={record.evidence?.coverage}
+                reasons={record.evidence?.coverage_reasons}
+                chain={{ id: 4663, name: "Robinhood Chain" }}
+                block={record.observed_block}
+                publishedAt={record.published_at}
+                evidenceHash={record.evidence_hash}
               />
-              <Row
-                label="Published"
-                value={published}
-                loading={record === undefined}
-              />
-              <Row
-                label="Registry status"
-                value={record?.onchain_status}
-                loading={record === undefined}
-              />
-              <dt className="text-secondary">Transaction</dt>
-              <dd className="min-w-0 font-medium text-ink">
-                {record?.tx_hash ? (
-                  <a
-                    href={`https://robin.etherscan.io/tx/${record.tx_hash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-mono font-normal text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
-                  >
-                    {short(record.tx_hash)}
-                  </a>
-                ) : record === undefined ? (
-                  "…"
-                ) : (
-                  "—"
-                )}
-              </dd>
-            </dl>
-            <Source
-              path={`/api/verdict/4663/${short(SUBJECT)}`}
-              failed={record === null}
-            />
-          </div>
+            ) : (
+              <div className="grid min-h-[120px] place-items-center rounded-lg border border-dashed border-hairline-strong px-5 font-mono text-[13px] text-secondary">
+                {record === undefined ? `GET ${recordPath} …` : "Unavailable"}
+              </div>
+            )}
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <Source path={recordPath} failed={record === null} />
+              {record && (
+                <p className="font-mono text-xs leading-[18px] text-secondary">
+                  Registry status {record.onchain_status ?? "Unavailable"}
+                  {record.tx_hash && (
+                    <>
+                      {" · tx "}
+                      <a
+                        href={`https://robin.etherscan.io/tx/${record.tx_hash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
+                      >
+                        {short(record.tx_hash)}
+                      </a>
+                    </>
+                  )}
+                </p>
+              )}
+            </div>
+          </figure>
 
-          <div className="float-b rounded-[14px] border border-hairline bg-ground p-5 shadow-md lg:absolute lg:bottom-2 lg:right-0 lg:w-[330px]">
-            <p className="text-[13px] font-medium text-secondary">
+          <figure className="grid min-w-0 gap-3">
+            <figcaption className="font-mono text-xs leading-4 text-secondary">
               Coverage, Robinhood Chain
-            </p>
-            <dl className="mt-3 grid grid-cols-[124px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
-              <Row
+            </figcaption>
+            <ul className="divide-y divide-hairline rounded-lg border border-hairline bg-ground px-5 font-mono text-[13px] leading-5">
+              <Capability
                 label="Sell simulation"
                 value={caps?.sell_simulation}
+                has={!!caps?.sell_simulation && caps.sell_simulation !== "no"}
                 loading={coverage === undefined}
               />
-              <Row
+              <Capability
                 label="Pool routers"
                 value={
                   typeof routers === "number" ? `${routers} allowlisted` : null
                 }
+                has={caps?.router_allowlist?.present === true}
                 loading={coverage === undefined}
               />
-              <Row
+              <Capability
                 label="Public mempool"
                 value={mempool === "no" ? "None" : mempool}
+                has={!!mempool && mempool !== "no"}
                 loading={coverage === undefined}
               />
-            </dl>
+            </ul>
             <Source path="/api/coverage/4663" failed={coverage === null} />
-          </div>
+          </figure>
         </div>
       </div>
     </section>
