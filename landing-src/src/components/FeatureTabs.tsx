@@ -188,8 +188,9 @@ function Media({ id }: { id: string }) {
           >
             docs/SUBMISSION.md
           </a>
-          ). Derived: the registry's record for 0x3435…26dd is HONEYPOT, and the
-          guard's source returns reason 4 for a HONEYPOT record at any age.
+          ). Derived: the registry's record for 0x3435…26dd, as served on 11
+          October 2026, is HONEYPOT, and the guard's source returns reason 4
+          for a HONEYPOT record at any age.
         </figcaption>
       </figure>
     );
