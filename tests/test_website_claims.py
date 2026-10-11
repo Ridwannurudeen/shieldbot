@@ -24,7 +24,7 @@ def read(path: Path) -> str:
 
 
 def landing_texts() -> dict:
-    files = list(COMPONENTS.glob("*.tsx")) + [
+    files = list(COMPONENTS.glob("*.tsx")) + list((LANDING_SRC / "src").glob("*.ts")) + [
         LANDING_SRC / "index.html",
         LANDING_SRC / "public" / "about.html",
         LANDING_SRC / "scripts" / "gen-og-image.mjs",
