@@ -142,7 +142,7 @@ export default function Chains() {
             <ellipse cx="552" cy="222" rx="250" ry="62" fill="none" stroke="rgb(var(--c-hairline-strong))" strokeDasharray="2 6" />
             <ellipse cx="552" cy="232" rx="470" ry="124" fill="none" stroke="rgb(var(--c-hairline-strong))" strokeDasharray="2 6" />
           </svg>
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
+          <div className="absolute left-1/2 top-[38%] z-10 -translate-x-1/2 -translate-y-1/2 text-center md:top-1/2">
             <b className="block font-medium text-[64px] leading-none tracking-[-0.04em] text-ink md:text-[88px]">{SUPPORTED_CHAINS}</b>
             <span className="mt-1.5 block text-[15px] text-secondary">EVM chains</span>
           </div>

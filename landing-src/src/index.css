@@ -124,12 +124,13 @@
    and blurred at the back. Pure CSS; under reduced motion the ring stands still. */
 @layer components {
   .orbit { perspective: 900px; }
-  .orbit-tilt { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: preserve-3d; transform: rotateX(-14deg); }
+  .orbit-tilt { position: absolute; left: 50%; top: 58%; width: 0; height: 0; transform-style: preserve-3d; transform: rotateX(-14deg); }
   .orbit-ring { position: absolute; left: 0; top: 0; transform-style: preserve-3d; }
   .orbit-item { --r: 140px; position: absolute; left: 0; top: 0; transform-style: preserve-3d; transform: rotateY(var(--a)) translateZ(var(--r)); }
   .orbit-face { transform-style: preserve-3d; transform: translate(-50%, -50%) rotateY(calc(var(--a) * -1)) rotateX(14deg); }
   @media (min-width: 768px) {
     .orbit { perspective: 2000px; }
+    .orbit-tilt { top: 50%; }
     .orbit-item { --r: 360px; }
   }
 }
