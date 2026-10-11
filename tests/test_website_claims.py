@@ -423,7 +423,6 @@ HERO_CAPTURES = [
     ("hero-overlay-unknown-response.json", "TryIt.tsx", ("hero-overlay-unknown.webp",)),
     ("hero-overlay-unknown-response.json", "FeatureTabs.tsx", ("hero-overlay-unknown.webp",)),
     ("hero-overlay-safe-response.json", "FeatureTabs.tsx", ("hero-overlay-safe.webp",)),
-    ("hero-overlay-response.json", "CtaCard.tsx", ("hero-overlay.webp",)),
 ]
 
 
