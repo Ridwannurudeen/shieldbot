@@ -1,5 +1,13 @@
 import Icon from "./Icon";
-import { short, shortenHex, useFeed, utc } from "../registryFeed";
+import VerdictRecord from "./VerdictRecord";
+import type { Verdict } from "./Badge";
+import {
+  short,
+  shortenHex,
+  useFeed,
+  utc,
+  type RegistryRecord,
+} from "../registryFeed";
 
 // The newest launch ShieldBot blocked on Robinhood Chain, told by its own scan: the two simulated transactions
 // are quoted from scan.coverage_reasons.honeypot as GET /api/launches serves it, and the record beside them is
@@ -12,29 +20,34 @@ function simulations(reason: string) {
     : null;
 }
 
-function Field({
-  label,
-  value,
-  loading,
-}: {
-  label: string;
-  value: string | null | undefined;
-  loading: boolean;
-}) {
-  return (
-    <div className="min-w-0 bg-ground p-4">
-      <dt className="text-xs text-secondary">{label}</dt>
-      <dd className="mt-1.5 font-mono text-[13px] leading-5 text-ink [overflow-wrap:anywhere]">
-        {value ?? (loading ? "…" : "—")}
-      </dd>
-    </div>
-  );
+type RegistryProof = RegistryRecord & {
+  chain_id?: number | null;
+  evidence_hash?: string | null;
+};
+
+function registryChip(record: RegistryRecord) {
+  const shapes: Record<string, Verdict> = {
+    LOW: "safe",
+    MEDIUM: "caution",
+    HIGH: "high",
+    HONEYPOT: "block",
+    UNKNOWN: "unknown",
+  };
+  return {
+    verdict: shapes[record.verdict] ?? "unknown",
+    label: `${record.verdict} · ${record.verdict_code}`,
+  };
 }
 
 export default function WorkedExample() {
   const { launches, records, fetchedAt } = useFeed();
   const launch = launches?.[0];
   const record = launch ? records[launch.token_address] : undefined;
+  const proof = record as RegistryProof | null | undefined;
+  const chain =
+    proof?.chain_id === 4663
+      ? { id: 4663, name: "Robinhood Chain" }
+      : undefined;
   const reason = launch?.scan?.coverage_reasons?.honeypot ?? null;
   const steps = reason ? simulations(reason) : null;
   const recordLoading =
@@ -82,68 +95,75 @@ export default function WorkedExample() {
             )}
           </p>
 
-          <dl className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-hairline bg-hairline sm:grid-cols-3">
-            <Field
-              label="Registry verdict"
-              value={
-                record ? `${record.verdict} · ${record.verdict_code}` : null
-              }
-              loading={recordLoading}
-            />
-            <Field
-              label="Observed block"
-              value={
-                typeof record?.observed_block === "number"
-                  ? record.observed_block.toLocaleString("en-US")
-                  : null
-              }
-              loading={recordLoading}
-            />
-            <Field
-              label="Published"
-              value={record ? utc(record.published_at) : null}
-              loading={recordLoading}
-            />
-            <div className="min-w-0 bg-ground p-4">
-              <dt className="text-xs text-secondary">Registry transaction</dt>
-              <dd className="mt-1.5 font-mono text-[13px] leading-5 text-ink">
-                {record?.tx_hash ? (
-                  <a
-                    href={`https://robin.etherscan.io/tx/${record.tx_hash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
-                  >
-                    {short(record.tx_hash)}
-                  </a>
-                ) : recordLoading ? (
-                  "…"
+          <div className="mt-8">
+            {record ? (
+              <>
+                <VerdictRecord
+                  chip={registryChip(record)}
+                  chain={chain}
+                  block={record.observed_block}
+                  publishedAt={record.published_at}
+                  evidenceHash={proof?.evidence_hash}
+                  source={
+                    `Live from GET /api/verdict/4663/${short(record.subject)}${fetchedAt ? `, fetched ${utc(fetchedAt.getTime() / 1000)}` : ""}. Anyone can recompute the evidence hash: keccak256 of the served document must equal it.`
+                  }
+                  variant="full"
+                />
+                <dl className="mt-3 grid grid-cols-2 gap-3 text-xs leading-[18px] sm:grid-cols-3">
+                  <div className="min-w-0">
+                    <dt className="text-secondary">Token</dt>
+                    <dd className="mt-1 font-mono text-ink [overflow-wrap:anywhere]">
+                      {short(record.subject)}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-secondary">Registry transaction</dt>
+                    <dd className="mt-1 font-mono text-ink [overflow-wrap:anywhere]">
+                      {record.tx_hash ? (
+                        <a
+                          href={`https://robin.etherscan.io/tx/${record.tx_hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
+                        >
+                          {short(record.tx_hash)}
+                        </a>
+                      ) : (
+                        "Unavailable"
+                      )}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-secondary">Status</dt>
+                    <dd className="mt-1 font-mono text-ink [overflow-wrap:anywhere]">
+                      {record.onchain_status}
+                    </dd>
+                  </div>
+                </dl>
+              </>
+            ) : (
+              <p
+                aria-busy={recordLoading}
+                className="text-sm leading-6 text-secondary"
+              >
+                {recordLoading ? (
+                  "Loading registry record…"
+                ) : record === null && launch ? (
+                  <>
+                    <span className="font-medium text-ink">Unavailable. </span>
+                    GET /api/verdict/4663/{launch.token_address} did not answer.
+                  </>
+                ) : launches === null ? (
+                  <>
+                    <span className="font-medium text-ink">Unavailable. </span>
+                    GET /api/launches/4663 did not answer, so no record is shown.
+                  </>
                 ) : (
-                  "—"
+                  "No registry record is available for this launch."
                 )}
-              </dd>
-            </div>
-            <Field
-              label="Token"
-              value={launch ? short(launch.token_address) : null}
-              loading={launches === undefined}
-            />
-            <Field
-              label="Status"
-              value={record?.onchain_status}
-              loading={recordLoading}
-            />
-          </dl>
-          <p className="mt-3 text-xs leading-[18px] text-secondary">
-            {record === null && (
-              <span className="font-medium text-ink">Unavailable. </span>
+              </p>
             )}
-            {launch
-              ? record === null
-                ? `GET /api/verdict/4663/${short(launch.token_address)} did not answer.`
-                : `Live from GET /api/verdict/4663/${short(launch.token_address)}${fetchedAt ? `, fetched ${utc(fetchedAt.getTime() / 1000)}` : ""}. Anyone can recompute the evidence hash: keccak256 of the served document must equal it.`
-              : "Live from GET /api/launches/4663?outcome=blocked, then GET /api/verdict/4663/{address}."}
-          </p>
+          </div>
         </div>
 
         <figure className="min-w-0 rounded-[14px] border border-hairline bg-ground p-6 shadow-md md:p-7 lg:order-1">

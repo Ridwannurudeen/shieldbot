@@ -106,37 +106,6 @@
   }
 }
 
-/* Chain orbit (Chains.tsx): a 3D ring turning once every 12 s, each logo counter-rotated to face front
-   and blurred at the back. Pure CSS; under reduced motion the ring stands still. */
-@layer components {
-  .orbit { perspective: 900px; }
-  .orbit-tilt { position: absolute; left: 50%; top: 58%; width: 0; height: 0; transform-style: preserve-3d; transform: rotateX(-14deg); }
-  .orbit-ring { position: absolute; left: 0; top: 0; transform-style: preserve-3d; }
-  .orbit-item { --r: 140px; position: absolute; left: 0; top: 0; transform-style: preserve-3d; transform: rotateY(var(--a)) translateZ(var(--r)); }
-  .orbit-face { transform-style: preserve-3d; transform: translate(-50%, -50%) rotateY(calc(var(--a) * -1)) rotateX(14deg); }
-  @media (min-width: 768px) {
-    .orbit { perspective: 2000px; }
-    .orbit-tilt { top: 50%; }
-    .orbit-item { --r: 360px; }
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .orbit-ring { animation: orbit-rotate 12000ms linear infinite; }
-  .orbit-face { animation: orbit-counter 12000ms linear infinite; }
-  .orbit-pill { animation: orbit-depth 12000ms linear infinite; animation-delay: var(--d); }
-}
-
-@keyframes orbit-rotate { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
-@keyframes orbit-counter {
-  from { transform: translate(-50%, -50%) rotateY(calc(var(--a) * -1)) rotateX(14deg); }
-  to { transform: translate(-50%, -50%) rotateY(calc(var(--a) * -1 - 360deg)) rotateX(14deg); }
-}
-@keyframes orbit-depth {
-  0%, 100% { filter: blur(0); opacity: 1; }
-  50% { filter: blur(4px); opacity: 0.8; }
-}
-
 /* Floating record cards (WhyUnknown.tsx): 4 s, 10 px up or down; under reduced motion they stand still. */
 @media (prefers-reduced-motion: no-preference) {
   .float-a { animation: soft-flotation 4000ms ease-in-out infinite; }

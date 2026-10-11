@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
 import CodeBlock from "./CodeBlock";
 import ContractCard from "./ContractCard";
 import SectionHeader from "./SectionHeader";
 import Icon from "./Icon";
+import VerdictRecord from "./VerdictRecord";
+import type { Verdict } from "./Badge";
 import { short, useFeed, utc, type RegistryRecord } from "../registryFeed";
 
 const contracts = [
@@ -97,89 +98,94 @@ export REGISTRY='0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138'
 export SUBJECT='0xf8bc08092c06db6148114dcf82af881f1085f92b'`;
 
 const API = "https://api.shieldbotsecurity.online";
-const columns = [
-  "Token",
-  "Verdict",
-  "Observed block",
-  "Published",
-  "Transaction",
-  "Status",
-];
 
-// The registry's own words: the verdict name and code, the observed block, the publication time, the
-// recording transaction and the on-chain status, each exactly as GET /api/verdict serves it.
-function verdictTag(verdict: string) {
-  if (verdict === "HIGH" || verdict === "HONEYPOT")
-    return "border-block text-block-text";
-  if (verdict === "UNKNOWN") return "border-dashed border-ink text-ink";
-  return "border-hairline-strong text-ink";
-}
-
+type RegistryProof = RegistryRecord & {
+  evidence_hash?: string | null;
+};
 type Row = { subject: string; record: RegistryRecord | null | undefined };
 
-function Cell({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex min-w-0 items-baseline justify-between gap-4 lg:block">
-      <span className="text-xs text-secondary lg:sr-only">{label}</span>
-      <span className="min-w-0 text-right font-mono text-[13px] text-ink lg:text-left">
-        {children}
-      </span>
-    </div>
-  );
+function registryChip(record: RegistryRecord) {
+  const shapes: Record<string, Verdict> = {
+    LOW: "safe",
+    MEDIUM: "caution",
+    HIGH: "high",
+    HONEYPOT: "block",
+    UNKNOWN: "unknown",
+  };
+  return {
+    verdict: shapes[record.verdict] ?? "unknown",
+    label: `${record.verdict} · ${record.verdict_code}`,
+  };
 }
 
 function RecordRow({ subject, record }: Row) {
   const loading = record === undefined;
-  const missing = loading ? "…" : "—";
+  const proof = record as RegistryProof | null | undefined;
+  const chain = record
+    ? { id: 4663, name: "Robinhood Chain" }
+    : undefined;
   return (
-    <li className="grid gap-2 border-t border-hairline px-5 py-4 lg:grid-cols-[1.1fr_1.1fr_1fr_1.3fr_1fr_0.9fr] lg:items-center lg:gap-4 lg:py-3.5">
-      <Cell label="Token">
-        <a
-          href={`${API}/api/verdict/4663/${subject}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`Record for token ${subject}`}
-          className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
-        >
-          {short(subject)}
-        </a>
-      </Cell>
-      <Cell label="Verdict">
-        {record ? (
-          <span
-            className={`inline-flex rounded border px-1.5 py-px text-xs ${verdictTag(record.verdict)}`}
-          >
-            {record.verdict} · {record.verdict_code}
-          </span>
-        ) : (
-          missing
-        )}
-      </Cell>
-      <Cell label="Observed block">
-        {typeof record?.observed_block === "number"
-          ? record.observed_block.toLocaleString("en-US")
-          : missing}
-      </Cell>
-      <Cell label="Published">
-        {(record && utc(record.published_at)) ?? missing}
-      </Cell>
-      <Cell label="Transaction">
-        {record?.tx_hash ? (
+    <li className="border-t border-hairline px-5 py-4 lg:py-5">
+      <div className="grid gap-4 sm:grid-cols-[minmax(120px,0.7fr)_minmax(0,2.4fr)] lg:grid-cols-[minmax(140px,0.65fr)_minmax(0,2fr)] lg:items-start">
+        <div className="min-w-0">
+          <p className="text-xs text-secondary">Token</p>
           <a
-            href={`https://robin.etherscan.io/tx/${record.tx_hash}`}
+            href={`${API}/api/verdict/4663/${subject}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
+            aria-label={`Record for token ${subject}`}
+            className="mt-1 inline-block font-mono text-[13px] text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
           >
-            {short(record.tx_hash)}
+            {short(subject)}
           </a>
-        ) : (
-          missing
-        )}
-      </Cell>
-      <Cell label="Status">
-        {record?.onchain_status ?? (record === null ? "Unavailable" : missing)}
-      </Cell>
+        </div>
+        <div className="min-w-0">
+          {record ? (
+            <>
+              <VerdictRecord
+                chip={registryChip(record)}
+                chain={chain}
+                block={record.observed_block}
+                publishedAt={record.published_at}
+                evidenceHash={proof?.evidence_hash}
+                variant="compact"
+              />
+              <div className="mt-2 grid gap-2 text-xs leading-[18px] sm:grid-cols-2">
+                <p className="min-w-0">
+                  <span className="mr-2 text-secondary">Transaction</span>
+                  {record.tx_hash ? (
+                    <a
+                      href={`https://robin.etherscan.io/tx/${record.tx_hash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
+                    >
+                      {short(record.tx_hash)}
+                    </a>
+                  ) : (
+                    <span className="font-mono text-ink">Unavailable</span>
+                  )}
+                </p>
+                <p className="min-w-0">
+                  <span className="mr-2 text-secondary">Status</span>
+                  <span className="font-mono text-ink">{record.onchain_status}</span>
+                </p>
+              </div>
+            </>
+          ) : (
+            <p aria-busy={loading} className="text-sm text-secondary">
+              {loading ? (
+                "Loading registry record…"
+              ) : (
+                <>
+                  <span className="font-medium text-ink">Unavailable. </span>
+                  GET /api/verdict/4663/{subject} did not answer.
+                </>
+              )}
+            </p>
+          )}
+        </div>
+      </div>
     </li>
   );
 }
@@ -213,14 +219,6 @@ function RecentRecords() {
           Every record on the dashboard
           <Icon name="chevron" size={16} className="-rotate-90" />
         </a>
-      </div>
-      <div
-        className="hidden border-t border-hairline bg-ground-alt px-5 py-2.5 text-xs text-secondary lg:grid lg:grid-cols-[1.1fr_1.1fr_1fr_1.3fr_1fr_0.9fr] lg:gap-4"
-        aria-hidden="true"
-      >
-        {columns.map((column) => (
-          <span key={column}>{column}</span>
-        ))}
       </div>
       {rows === undefined ? (
         <ol aria-busy="true">
