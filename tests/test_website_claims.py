@@ -827,6 +827,10 @@ def test_live_chain_matrix_and_check_definitions_use_reported_fields():
     assert "**adapter.capabilities()," in read(ROOT / "api.py")
     assert "GoPlus flags only" in chains
     assert 'label: "Not observable"' in chains
+    # /api/coverage serves sell simulation but no launch scan field: the footnote keeps the two sources apart.
+    assert "Sell simulation: from the code, the chain adapters, the configuration GET /api/coverage/" in chains
+    assert "Launch scans: from the code, services/launch_discovery.py, Robinhood Chain only." in chains
+    assert "Sell simulation and launch scans: from the code" not in chains
     assert 'label: "/launchalerts"' in chains
     assert "<CapabilityCell {...launchCell(chain)} />" in chains
     assert 'label="Unavailable"' not in chains

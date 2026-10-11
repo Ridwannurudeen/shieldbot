@@ -3,8 +3,9 @@ import { useStats, type Stats } from "../liveStats";
 
 // Per-chain coverage. tests/test_website_claims.py checks each row against the chain adapters
 // (sell simulation), services/mempool_service.py (mempool) and services/launch_discovery.py.
-// The sell simulation and launch scan columns are drawn from these rows: GET /api/coverage/{chain_id} serves the
-// same adapter configuration, so asking it for each chain would add eight requests and no information. Whether a
+// The sell simulation and launch scan columns are drawn from these rows. GET /api/coverage/{chain_id} serves the same
+// adapter configuration for sell simulation, so asking it for each chain would add eight requests and no information;
+// it has no launch scan field, so that column is from services/launch_discovery.py alone. Whether a
 // public mempool was read is live: GET /api/stats (src/liveStats.ts, the request Mechanism already makes) lists
 // the chains the monitor read on its last poll.
 interface Chain {
@@ -296,8 +297,8 @@ export default function Chains() {
           </div>
 
           <p className="mt-4 text-xs leading-[18px] text-secondary">
-            Sell simulation and launch scans: from the code, the chain adapters and services/launch_discovery.py,
-            the configuration GET /api/coverage/{"{chain_id}"} serves.{" "}
+            Sell simulation: from the code, the chain adapters, the configuration GET /api/coverage/{"{chain_id}"} serves.
+            Launch scans: from the code, services/launch_discovery.py, Robinhood Chain only.{" "}
             {stats === null
               ? "Public mempool: Unavailable. GET /api/stats did not answer, so no chain is shown as observed."
               : stats === undefined
