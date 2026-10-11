@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useStats, type Stats } from "../liveStats";
 import { useReading } from "../reading";
 
@@ -146,10 +146,12 @@ function CapabilityCell({
   state,
   label,
   note,
+  late,
 }: {
   state: CellState;
   label: string;
   note?: string;
+  late?: boolean;
 }) {
   const square =
     state === "available"
@@ -162,7 +164,7 @@ function CapabilityCell({
     <span className="inline-flex min-w-0 max-w-full items-start gap-1 text-[11px] leading-4 text-ink sm:items-center sm:gap-2 sm:text-[13px] sm:leading-5">
       <span
         aria-hidden="true"
-        className={`rd-cell rd-${state} h-2.5 w-2.5 flex-none rounded-[2px] border ${square}`}
+        className={`rd-cell rd-${state}${late ? " rd-late" : ""} h-2.5 w-2.5 flex-none rounded-[2px] border ${square}`}
       />
       <span className="min-w-0 whitespace-normal">
         {label}
@@ -209,6 +211,12 @@ export default function Chains() {
   // The matrix takes its reading on view: a magenta marker walks down the rows and each row's cells resolve
   // behind it, left to right (index.css).
   const matrix = useReading<HTMLDivElement>();
+  // A /api/stats reply that lands after the matrix has started its reading switches the mempool squares in place:
+  // no replay, so a square never vanishes for its row's delay (rd-late, index.css).
+  const [late, setLate] = useState(false);
+  useLayoutEffect(() => {
+    if (stats !== undefined && matrix.current!.dataset.read === "go") setLate(true);
+  }, [stats, matrix]);
   return (
     <section id="chains" aria-labelledby="chains-title" className="bg-ground-alt py-14 md:py-[72px] lg:py-24">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -296,7 +304,7 @@ export default function Chains() {
                         <CapabilityCell {...simulation} />
                       </td>
                       <td className="px-0.5 py-3 sm:px-3">
-                        <CapabilityCell {...mempool} />
+                        <CapabilityCell {...mempool} late={late} />
                       </td>
                       <td className="py-3 pl-0.5 pr-1 sm:pl-3 sm:pr-4">
                         <CapabilityCell {...launchCell(chain)} />

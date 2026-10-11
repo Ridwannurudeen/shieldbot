@@ -153,7 +153,8 @@
 /* Sections read on view (src/reading.ts): paused on the first frame until [data-read] turns "go".
    Chain matrix (Chains.tsx): a 2 px magenta marker walks down the rows, 110 ms apart; each row's three cells resolve
    behind it left to right, 70 ms apart (filled ones wipe in, dashed and outline ones fade in); their labels stay
-   legible throughout. A late /api/stats reply re-reads only the mempool cell whose state it changed. */
+   legible throughout. A /api/stats reply that lands once the reading has started switches the mempool cells in
+   place (rd-late). */
 @media (prefers-reduced-motion: no-preference) {
   [data-read="wait"] *,
   [data-read="wait"] *::before,
@@ -178,6 +179,7 @@
     animation: story-fade-in 240ms ease-out var(--t) both;
   }
   .rd-available { animation: vr-wipe 280ms var(--e-out) var(--t) both; }
+  .rd-cell.rd-late { animation: none; }
 }
 
 /* A record inside a section read on view (registry records, the process track's record) waits on its first frame, so
