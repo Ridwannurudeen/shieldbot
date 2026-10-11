@@ -411,7 +411,7 @@ def contrast(foreground, background):
         ("popup.html", ".dh-version", "#FFFFFF"),
         ("popup.html", ".feed-empty-lbl", "#FFFFFF"),
         ("popup.html", ".wh-hint", "#FFFFFF"),
-        ("welcome.html", ".version", "#1e293b"),
+        ("welcome.html", ".version", "#FFFFFF"),
     ],
 )
 def test_popup_secondary_text_is_readable(page, selector, background):
