@@ -1,12 +1,12 @@
 import Icon from "./Icon";
 import VerdictRecord from "./VerdictRecord";
-import type { Verdict } from "./Badge";
+import { registryChip } from "../registryVerdict";
 import {
+  REGISTRY_CHAIN,
   short,
   shortenHex,
   useFeed,
   utc,
-  type RegistryRecord,
 } from "../registryFeed";
 
 // The newest launch ShieldBot blocked on Robinhood Chain, told by its own scan: the two simulated transactions
@@ -20,34 +20,10 @@ function simulations(reason: string) {
     : null;
 }
 
-type RegistryProof = RegistryRecord & {
-  chain_id?: number | null;
-  evidence_hash?: string | null;
-};
-
-function registryChip(record: RegistryRecord) {
-  const shapes: Record<string, Verdict> = {
-    LOW: "safe",
-    MEDIUM: "caution",
-    HIGH: "high",
-    HONEYPOT: "block",
-    UNKNOWN: "unknown",
-  };
-  return {
-    verdict: shapes[record.verdict] ?? "unknown",
-    label: `${record.verdict} · ${record.verdict_code}`,
-  };
-}
-
 export default function WorkedExample() {
   const { launches, records, fetchedAt } = useFeed();
   const launch = launches?.[0];
   const record = launch ? records[launch.token_address] : undefined;
-  const proof = record as RegistryProof | null | undefined;
-  const chain =
-    proof?.chain_id === 4663
-      ? { id: 4663, name: "Robinhood Chain" }
-      : undefined;
   const reason = launch?.scan?.coverage_reasons?.honeypot ?? null;
   const steps = reason ? simulations(reason) : null;
   const recordLoading =
@@ -99,11 +75,11 @@ export default function WorkedExample() {
             {record ? (
               <>
                 <VerdictRecord
-                  chip={registryChip(record)}
-                  chain={chain}
+                  chip={registryChip(record.verdict, record.verdict_code)}
+                  chain={REGISTRY_CHAIN}
                   block={record.observed_block}
                   publishedAt={record.published_at}
-                  evidenceHash={proof?.evidence_hash}
+                  evidenceHash={record.evidence_hash}
                   source={
                     `Live from GET /api/verdict/4663/${short(record.subject)}${fetchedAt ? `, fetched ${utc(fetchedAt.getTime() / 1000)}` : ""}. Anyone can recompute the evidence hash: keccak256 of the served document must equal it.`
                   }

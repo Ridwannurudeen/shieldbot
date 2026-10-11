@@ -852,15 +852,78 @@ def test_live_chain_matrix_and_check_definitions_use_reported_fields():
 def test_registry_records_use_full_and_compact_verdict_records():
     worked = read(COMPONENTS / "WorkedExample.tsx")
     rows = read(COMPONENTS / "OnChain.tsx")
+    why = read(COMPONENTS / "WhyUnknown.tsx")
     assert "<VerdictRecord" in worked
     assert 'variant="full"' in worked
-    assert "evidenceHash={proof?.evidence_hash}" in worked
+    assert "evidenceHash={record.evidence_hash}" in worked
     assert "short(record.subject)" in worked
     assert "<VerdictRecord" in rows
     assert 'variant="compact"' in rows
-    assert "evidenceHash={proof?.evidence_hash}" in rows
+    assert "evidenceHash={record.evidence_hash}" in rows
     assert "record.onchain_status" in rows
-    assert '{ id: 4663, name: "Robinhood Chain" }' in rows
+    # One chain line for a registry record, from the route, in every section that draws one.
+    assert 'export const REGISTRY_CHAIN = { id: 4663, name: "Robinhood Chain" };' in read(LANDING_SRC / "src" / "registryFeed.ts")
+    for source in (worked, rows, why):
+        assert "chain={REGISTRY_CHAIN}" in source
+        assert '"Robinhood Chain" }' not in source
+
+
+def run_typescript(script: str, *args: str) -> str:
+    # Run a Node script that can require landing-src's .ts and .tsx files (transpiled by its own typescript).
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    modules = LANDING_SRC / "node_modules"
+    if node is None or not (modules / "typescript").is_dir() or not (modules / "react-dom").is_dir():
+        pytest.skip("Node.js and landing-src/node_modules (npm ci) are required to run the sources")
+    prelude = r"""
+const fs = require("fs");
+const path = require("path");
+const root = process.argv[1];
+const ts = require(path.join(root, "node_modules", "typescript"));
+for (const ext of [".ts", ".tsx"]) {
+  require.extensions[ext] = (module, filename) => {
+    const options = {module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020, esModuleInterop: true};
+    module._compile(ts.transpileModule(fs.readFileSync(filename, "utf8"), {compilerOptions: options, fileName: filename}).outputText, filename);
+  };
+}
+"""
+    result = subprocess.run(
+        [node, "-e", prelude + script, str(LANDING_SRC), *args],
+        cwd=LANDING_SRC, capture_output=True, text=True, encoding="utf-8", check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result.stdout
+
+
+def test_registry_verdicts_have_one_mapping_and_low_or_medium_is_never_a_firewall_verdict():
+    # A registry LOW or MEDIUM is a token risk level the guard allows alike while fresh, not an extension SAFE or
+    # CAUTION verdict: both take the neutral registry shape. One module maps the registry's words, for every section.
+    script = r"""
+const {registryChip} = require(path.join(root, "src", "registryVerdict.ts"));
+const words = ["LOW", "MEDIUM", "HIGH", "HONEYPOT", "UNKNOWN", "SAFE", "constructor", "low", null];
+process.stdout.write(JSON.stringify(words.map((word) => [word, registryChip(word, 1), registryChip(word, null)])));
+"""
+    chips = {word: (with_code, without) for word, with_code, without in json.loads(run_typescript(script))}
+    expected = {
+        "LOW": "registry", "MEDIUM": "registry", "HIGH": "high", "HONEYPOT": "block", "UNKNOWN": "unknown",
+        "SAFE": "unknown", "constructor": "unknown", "low": "unknown", None: "unknown",
+    }
+    for word, shape in expected.items():
+        with_code, without = chips[word]
+        assert with_code["verdict"] == without["verdict"] == shape, word
+        assert with_code["verdict"] not in ("safe", "caution") or word not in ("LOW", "MEDIUM"), word
+    assert chips["LOW"][0]["label"] == "LOW · 1" and chips["MEDIUM"][1]["label"] == "MEDIUM"
+    assert chips[None][0]["label"] == "Unavailable"
+    assert '  registry: { classes: "' in read(COMPONENTS / "Badge.tsx")
+    assert "registry" not in read(LANDING_SRC / "src" / "firewallVerdict.ts")
+    for name in ("WhyUnknown.tsx", "OnChain.tsx", "WorkedExample.tsx"):
+        source = read(COMPONENTS / name)
+        assert 'import { registryChip } from "../registryVerdict";' in source, name
+        assert "registryChip(record.verdict, record.verdict_code)" in source, name
+        assert not re.search(r"\b(LOW|MEDIUM|HONEYPOT)\b\s*:", source), name
+        assert "function registryChip" not in source, name
 
 
 def test_try_it_uses_a_verdict_record_without_repeated_hero_captures():

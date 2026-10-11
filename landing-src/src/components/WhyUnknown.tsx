@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { Verdict } from "./Badge";
 import VerdictRecord from "./VerdictRecord";
+import { registryChip } from "../registryVerdict";
+import { REGISTRY_CHAIN } from "../registryFeed";
 
 // Two records from the API, fetched when the page loads: the newest blocked Robinhood Chain launch as the
 // registry holds it (GET /api/verdict/4663/{subject}), drawn as a verdict record whose check-row is the coverage
@@ -11,6 +12,7 @@ const SUBJECT = "0x34357625e8b7414b47c0410327c29361a70c26dd";
 
 interface RegistryReply {
   verdict: string | null;
+  verdict_code: number | null;
   evidence_hash: string | null;
   observed_block: number | null;
   published_at: number | null;
@@ -36,15 +38,6 @@ const reasons = [
   "The contract's age is not available, so the overlay says Unknown and why.",
   "The typed data could not be read, so the overlay says Unknown and why.",
 ];
-
-// The registry's verdict names on the chip shapes: HONEYPOT a solid fill, HIGH a heavy edge, UNKNOWN dashed. LOW
-// and MEDIUM, which the guard allows, take the neutral hairline shape, not SAFE's green; the label is the
-// registry's own word.
-const registryShape: Record<string, Verdict> = {
-  HONEYPOT: "block",
-  HIGH: "high",
-  UNKNOWN: "unknown",
-};
 
 function short(hex: string) {
   return `${hex.slice(0, 6)}…${hex.slice(-4)}`;
@@ -168,15 +161,10 @@ export default function WhyUnknown() {
             </figcaption>
             {record ? (
               <VerdictRecord
-                chip={{
-                  verdict: record.verdict
-                    ? (registryShape[record.verdict] ?? "caution")
-                    : "unknown",
-                  label: record.verdict ?? "Unavailable",
-                }}
+                chip={registryChip(record.verdict, record.verdict_code)}
                 coverage={record.evidence?.coverage}
                 reasons={record.evidence?.coverage_reasons}
-                chain={{ id: 4663, name: "Robinhood Chain" }}
+                chain={REGISTRY_CHAIN}
                 block={record.observed_block}
                 publishedAt={record.published_at}
                 evidenceHash={record.evidence_hash}
@@ -230,7 +218,7 @@ export default function WhyUnknown() {
               />
               <Capability
                 label="Public mempool"
-                value={mempool === "no" ? "None" : mempool}
+                value={mempool === "no" ? "No public mempool" : mempool}
                 has={!!mempool && mempool !== "no"}
                 loading={coverage === undefined}
               />

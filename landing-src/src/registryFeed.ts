@@ -13,6 +13,10 @@ import { useSyncExternalStore } from "react";
 const API = "https://api.shieldbotsecurity.online";
 const LIMIT = 5;
 
+// Every route above is on Robinhood Chain, so a record's chain line is the route's chain, the same in every
+// section that draws one.
+export const REGISTRY_CHAIN = { id: 4663, name: "Robinhood Chain" };
+
 export interface RegistryRecord {
   subject: string;
   verdict: string;
@@ -21,6 +25,7 @@ export interface RegistryRecord {
   published_at: number | null;
   onchain_status: string;
   tx_hash: string | null;
+  evidence_hash?: string | null;
 }
 
 export interface Launch {

@@ -6,7 +6,7 @@ import { short, shortenHex, utc } from "../registryFeed";
 //   1. the check-row (CheckRow.tsx): one cell per coverage key in CHECK_ORDER, filled when the check ran,
 //      dashed when it ran in part or not at all, each with its key as text and, when the reply gives one,
 //      the reason it did not fully run;
-//   2. the verdict chip (Badge.tsx, five shapes);
+//   2. the verdict chip (Badge.tsx: five firewall shapes and the registry's neutral one);
 //   3. the reason, one sentence from the reply or the registry;
 //   4. the evidence in IBM Plex Mono, joined by a fine magenta rule: recorded time, chain, observed block,
 //      publication time, evidence hash, guard outcome.
@@ -18,7 +18,7 @@ import { short, shortenHex, utc } from "../registryFeed";
 // null prints "Unavailable" (the source has the field but did not answer, or answered without it).
 //   chip          { verdict, label }: the chip's shape and text. The caller maps its vocabulary: an
 //                 /api/firewall or /api/scan reply through verdictOf (src/firewallVerdict.ts); a registry
-//                 record (LOW, MEDIUM, HIGH, HONEYPOT, UNKNOWN) by the caller's own rule, label verbatim.
+//                 record (LOW, MEDIUM, HIGH, HONEYPOT, UNKNOWN) through registryChip (src/registryVerdict.ts).
 //   coverage      reply.coverage. Leave it out for a source with no coverage (a registry record): no row.
 //   reasons       reply.coverage_reasons, printed verbatim under the row for each cell not fully run.
 //   reason        reply.plain_english, or the registry's served reason.

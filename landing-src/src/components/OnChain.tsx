@@ -3,8 +3,14 @@ import ContractCard from "./ContractCard";
 import SectionHeader from "./SectionHeader";
 import Icon from "./Icon";
 import VerdictRecord from "./VerdictRecord";
-import type { Verdict } from "./Badge";
-import { short, useFeed, utc, type RegistryRecord } from "../registryFeed";
+import { registryChip } from "../registryVerdict";
+import {
+  REGISTRY_CHAIN,
+  short,
+  useFeed,
+  utc,
+  type RegistryRecord,
+} from "../registryFeed";
 
 const contracts = [
   {
@@ -99,31 +105,10 @@ export SUBJECT='0xf8bc08092c06db6148114dcf82af881f1085f92b'`;
 
 const API = "https://api.shieldbotsecurity.online";
 
-type RegistryProof = RegistryRecord & {
-  evidence_hash?: string | null;
-};
 type Row = { subject: string; record: RegistryRecord | null | undefined };
-
-function registryChip(record: RegistryRecord) {
-  const shapes: Record<string, Verdict> = {
-    LOW: "safe",
-    MEDIUM: "caution",
-    HIGH: "high",
-    HONEYPOT: "block",
-    UNKNOWN: "unknown",
-  };
-  return {
-    verdict: shapes[record.verdict] ?? "unknown",
-    label: `${record.verdict} · ${record.verdict_code}`,
-  };
-}
 
 function RecordRow({ subject, record }: Row) {
   const loading = record === undefined;
-  const proof = record as RegistryProof | null | undefined;
-  const chain = record
-    ? { id: 4663, name: "Robinhood Chain" }
-    : undefined;
   return (
     <li className="border-t border-hairline px-5 py-4 lg:py-5">
       <div className="grid gap-4 sm:grid-cols-[minmax(120px,0.7fr)_minmax(0,2.4fr)] lg:grid-cols-[minmax(140px,0.65fr)_minmax(0,2fr)] lg:items-start">
@@ -143,11 +128,11 @@ function RecordRow({ subject, record }: Row) {
           {record ? (
             <>
               <VerdictRecord
-                chip={registryChip(record)}
-                chain={chain}
+                chip={registryChip(record.verdict, record.verdict_code)}
+                chain={REGISTRY_CHAIN}
                 block={record.observed_block}
                 publishedAt={record.published_at}
-                evidenceHash={proof?.evidence_hash}
+                evidenceHash={record.evidence_hash}
                 variant="compact"
               />
               <div className="mt-2 grid gap-2 text-xs leading-[18px] sm:grid-cols-2">
