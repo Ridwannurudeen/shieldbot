@@ -395,7 +395,7 @@ def _dialog_visibility_violations(css):
             continue
         for selector in prelude.split(","):
             subject = re.split(r"[\s>+~]+", selector.strip())[-1]
-            if not re.match(r"(:host|\.shieldai-(modal|overlay))", subject):
+            if not re.search(r"(:host|\.shieldai-(modal|overlay))", subject):
                 continue
             for name, value in declarations(body):
                 if offending(subject, name, value):

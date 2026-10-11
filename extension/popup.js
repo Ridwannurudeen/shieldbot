@@ -102,7 +102,7 @@ function initHealthChain(selectEl, hintEl) {
 
 function showMsg(el, text, isError) {
   el.textContent = text;
-  el.style.color = isError ? "#ef4444" : "";
+  el.style.color = isError ? "#C21F30" : "";
   el.classList.add("show");
   setTimeout(() => { el.classList.remove("show"); el.textContent = isError ? "" : t("msgSaved"); el.style.color = ""; }, isError ? 3000 : 2000);
 }
@@ -376,22 +376,22 @@ function renderHealthData(data, ctx) {
   const usdText    = incomplete || totalUsd == null ? "Unknown" : fmtUsd(totalUsd) || "$0";
   const reasonText = Object.values(data.coverage_reasons || {}).join("; ") || "Approval data incomplete";
   const score      = Math.max(0, 100 - highRisk * 20 - mediumRisk * 5);
-  const scoreColor = score < 50 ? "#ef4444" : score < 80 ? "#f97316" : "#22c55e";
+  const scoreColor = score < 50 ? "#C21F30" : score < 80 ? "#141414" : "#176E48";
 
   ctx.scoreNumEl.textContent = incomplete ? "?" : score;
-  ctx.scoreNumEl.style.color = incomplete ? "#eab308" : scoreColor;
+  ctx.scoreNumEl.style.color = incomplete ? "#141414" : scoreColor;
 
-  const usdColor = incomplete ? "#eab308" : totalUsd > 0 ? "#ef4444" : "#94a3b8";
+  const usdColor = incomplete || totalUsd == null ? "#141414" : totalUsd > 0 ? "#C21F30" : "#176E48";
 
   if (ctx.compact) {
     ctx.statsEl.innerHTML = `
-      <div class="health-stat"><div class="health-stat-num" style="color:#ef4444">${highRisk}</div><div class="health-stat-label">${t("healthHighRisk")}</div></div>
-      <div class="health-stat"><div class="health-stat-num" style="color:#f97316">${mediumRisk}</div><div class="health-stat-label">${t("healthMedium")}</div></div>
+      <div class="health-stat"><div class="health-stat-num" style="color:#C21F30">${highRisk}</div><div class="health-stat-label">${t("healthHighRisk")}</div></div>
+      <div class="health-stat"><div class="health-stat-num" style="color:#141414">${mediumRisk}</div><div class="health-stat-label">${t("healthMedium")}</div></div>
       <div class="health-stat"><div class="health-stat-num" style="color:${usdColor};font-size:14px">${usdText}</div><div class="health-stat-label">${t("healthAtRisk")}</div></div>`;
   } else {
     ctx.statsEl.innerHTML = `
-      <div class="wh-stat"><div class="wh-statnum" style="color:#ef4444">${highRisk}</div><div class="wh-statlbl">${t("healthHighRisk")}</div></div>
-      <div class="wh-stat"><div class="wh-statnum" style="color:#f97316">${mediumRisk}</div><div class="wh-statlbl">${t("healthMedium")}</div></div>
+      <div class="wh-stat"><div class="wh-statnum" style="color:#C21F30">${highRisk}</div><div class="wh-statlbl">${t("healthHighRisk")}</div></div>
+      <div class="wh-stat"><div class="wh-statnum" style="color:#141414">${mediumRisk}</div><div class="wh-statlbl">${t("healthMedium")}</div></div>
       <div class="wh-stat"><div class="wh-statnum" style="color:${usdColor};font-size:11px">${usdText}</div><div class="wh-statlbl">${t("healthAtRisk")}</div></div>`;
   }
 
@@ -537,9 +537,9 @@ function initDashboard() {
 
 function showDashMsg(el, text, isError) {
   el.textContent = text;
-  el.style.color = isError ? "#ef4444" : "#22C55E";
+  el.style.color = isError ? "#C21F30" : "#176E48";
   el.classList.add("show");
-  setTimeout(() => { el.classList.remove("show"); el.textContent = t("msgSavedDash"); el.style.color = "#22C55E"; }, isError ? 3000 : 2000);
+  setTimeout(() => { el.classList.remove("show"); el.textContent = t("msgSavedDash"); el.style.color = "#176E48"; }, isError ? 3000 : 2000);
 }
 
 function applyHistory(history) {
@@ -550,12 +550,12 @@ function applyHistory(history) {
 
 // ---- Feed ----
 const FEED_MAP = {
-  SAFE:              { cls: "badge-safe",    label: "SAFE",    color: "#22C55E", border: "#22C55E" },
-  CAUTION:           { cls: "badge-caution", label: "CAUTION", color: "#EAB308", border: "#EAB308" },
-  HIGH_RISK:         { cls: "badge-high",    label: "HIGH",    color: "#F97316", border: "#F97316" },
-  BLOCK_RECOMMENDED: { cls: "badge-block",   label: "BLOCK",   color: "#EF4444", border: "#EF4444" },
+  SAFE:              { cls: "badge-safe",    label: "SAFE",    color: "#176E48", border: "#176E48" },
+  CAUTION:           { cls: "badge-caution", label: "CAUTION", color: "#141414", border: "#8B8B86" },
+  HIGH_RISK:         { cls: "badge-high",    label: "HIGH",    color: "#C21F30", border: "#C21F30" },
+  BLOCK_RECOMMENDED: { cls: "badge-block",   label: "BLOCK",   color: "#C21F30", border: "#C21F30" },
 };
-const FEED_UNKNOWN = { cls: "badge-unknown", color: "#94A3B8", border: "#94A3B8" };
+const FEED_UNKNOWN = { cls: "badge-unknown", color: "#141414", border: "#8B8B86" };
 
 function renderDashFeed(history) {
   const feedEl = document.getElementById("dash-feed");
@@ -574,7 +574,7 @@ function renderDashFeed(history) {
   };
   feedEl.innerHTML = history.slice(0, 8).map((item) => {
     const incomplete = isIncompleteScan(item);
-    const b = incomplete ? FEED_UNKNOWN : FEED_MAP[item.classification] || { cls: "badge-caution", color: "#EAB308", border: "#EAB308" };
+    const b = incomplete ? FEED_UNKNOWN : FEED_MAP[item.classification] || { cls: "badge-caution", color: "#141414", border: "#8B8B86" };
     const lbl = incomplete ? t("classUnknown") : FEED_LABELS[item.classification] || item.classification;
     const safety = incomplete ? "Unknown" : 100 - item.risk_score;
     const addr = escapeHtml(shortAddr(item.recipient || item.to || "Unknown"));
@@ -668,11 +668,11 @@ function setGauge(arcEl, numEl, score) {
 
   arcEl.style.strokeDasharray = `${filled} ${circumference - filled}`;
 
-  const color = score === null ? "#94A3B8" : clamped >= 80 ? "#22C55E" : clamped >= 50 ? "#F97316" : "#EF4444";
+  const color = score === null ? "#141414" : clamped >= 80 ? "#176E48" : clamped >= 50 ? "#141414" : "#C21F30";
   arcEl.style.stroke = color;
 
   numEl.textContent  = score === null ? "?" : clamped;
-  numEl.style.fill   = clamped >= 80 ? "#f8fafc" : color;
+  numEl.style.fill   = color;
 }
 
 // ============================================================
