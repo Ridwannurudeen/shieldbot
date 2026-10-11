@@ -38,13 +38,27 @@ function useRecord<T>(url: string) {
   // undefined while loading, null when the route did not answer.
   const [data, setData] = useState<T | null | undefined>(undefined);
   useEffect(() => {
-    fetch(url)
+    const controller = new AbortController();
+    let active = true;
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+
+    fetch(url, { signal: controller.signal })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then((d: T) => setData(d))
-      .catch(() => setData(null));
+      .then((d: T) => {
+        if (active) setData(d);
+      })
+      .catch(() => {
+        if (active) setData(null);
+      })
+      .finally(() => clearTimeout(timeout));
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+      controller.abort();
+    };
   }, [url]);
   return data;
 }
