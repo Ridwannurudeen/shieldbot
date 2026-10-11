@@ -8,6 +8,8 @@ import FAQ from "./components/FAQ";
 import Footer from "./components/Footer";
 import OnChain from "./components/OnChain";
 import Mechanism from "./components/Mechanism";
+import WhyUnknown from "./components/WhyUnknown";
+import FeatureTabs from "./components/FeatureTabs";
 
 export default function App() {
   return (
@@ -22,9 +24,11 @@ export default function App() {
         <Navbar />
         <main id="main" tabIndex={-1} className="focus:outline-none">
           <Hero />
+          <WhyUnknown />
           <Mechanism />
           <Chains />
           <HowItWorks />
+          <FeatureTabs />
           <OnChain />
           <AgentSecurity />
           <FAQ />

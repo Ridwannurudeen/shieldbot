@@ -150,3 +150,29 @@
   0%, 100% { filter: blur(0); opacity: 1; }
   50% { filter: blur(4px); opacity: 0.8; }
 }
+
+/* Floating record cards (WhyUnknown.tsx): 4 s, 10 px up or down; under reduced motion they stand still. */
+@media (prefers-reduced-motion: no-preference) {
+  .float-a { animation: soft-flotation 4000ms ease-in-out infinite; }
+  .float-b { animation: soft-flotation-inverse 4000ms ease-in-out infinite; }
+}
+
+@keyframes soft-flotation { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+@keyframes soft-flotation-inverse { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(10px); } }
+
+/* Accordion (HowItWorks.tsx): the panel opens from 0fr to 1fr in 300 ms, so nothing measures height. */
+@layer components {
+  .acc-panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .acc-panel[data-open="true"] { grid-template-rows: 1fr; }
+  .acc-panel > div { overflow: hidden; }
+  .band :focus-visible { outline-color: #FFFFFF; }
+}
+
+/* Feature tabs (FeatureTabs.tsx): the panel that appears fades in over 150 ms. */
+@media (prefers-reduced-motion: no-preference) {
+  .tab-fade { animation: story-fade-in 150ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+}

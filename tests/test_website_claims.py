@@ -373,7 +373,7 @@ def test_score_bands_on_the_site_match_the_classifier():
 
 
 def test_no_placeholder_numbers_stand_in_for_live_data():
-    for component in ("Mechanism.tsx", "TryIt.tsx"):
+    for component in ("Mechanism.tsx", "TryIt.tsx", "WhyUnknown.tsx"):
         assert "FALLBACK" not in read(COMPONENTS / component), component
     dashboard = read(DASHBOARD_SRC)
     for placeholder in ("SEED_KPI", "FALLBACK_CHAIN_DATA", "* 180", "* 0.08"):
@@ -419,6 +419,8 @@ HERO_CAPTURES = [
     ("hero-overlay-response.json", "HeroStory.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
     ("hero-overlay-safe-response.json", "TryIt.tsx", ("hero-overlay-safe.webp",)),
     ("hero-overlay-unknown-response.json", "TryIt.tsx", ("hero-overlay-unknown.webp",)),
+    ("hero-overlay-unknown-response.json", "FeatureTabs.tsx", ("hero-overlay-unknown.webp",)),
+    ("hero-overlay-safe-response.json", "FeatureTabs.tsx", ("hero-overlay-safe.webp",)),
 ]
 
 
@@ -609,7 +611,7 @@ def test_built_landing_bundle_contains_the_current_faq():
     assert stated and {int(n) for n in stated} == {mempool_chain_count()}
 
 
-@pytest.mark.parametrize("component", ["HowItWorks.tsx", "AgentSecurity.tsx"])
+@pytest.mark.parametrize("component", ["HowItWorks.tsx", "AgentSecurity.tsx", "FeatureTabs.tsx"])
 def test_built_landing_bundle_contains_the_current_feature_copy(component):
     # The claims these sections make (what the extension refuses, ERC-20 approvals only) ship only in the
     # built bundle, so an edit to the source without `npm run build` must fail here, not go out stale.
@@ -644,6 +646,11 @@ HERO_SECTION_COPY = {
         "Each check runs, or it says it did not.",
         "A source that is not running reads Unavailable, never 0.",
         "GET /api/stats did not answer, so every figure reads Unavailable.",
+    ),
+    "WhyUnknown.tsx": (
+        "A check that did not run is not a pass.",
+        "The typed data could not be read, so the overlay says Unknown and why.",
+        "did not answer.",
     ),
     "Chains.tsx": (
         "Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is "
@@ -746,7 +753,7 @@ def test_the_site_says_which_verdicts_reach_the_registry():
 def test_hero_demo_shows_documented_examples_and_makes_no_request():
     # The hero story plays captures of recorded replies, says so, and does not talk to the network. TryIt.tsx is
     # the one hero component that calls the API (POST /api/scan). The VIRTUAL guard example left the page with
-    # verdictScenes.ts in PR C and returns in FeatureTabs.tsx (plan 3.3, PR D1).
+    # verdictScenes.ts in PR C and is in FeatureTabs.tsx since PR D1 (plan 3.3).
     story = read(COMPONENTS / "HeroStory.tsx")
     assert "Recorded examples, not live scans" in story
     for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
@@ -755,6 +762,15 @@ def test_hero_demo_shows_documented_examples_and_makes_no_request():
     assert "https://api.shieldbotsecurity.online/api/scan" in try_it
     for forbidden in ("XMLHttpRequest", "WebSocket", "EventSource"):
         assert forbidden not in try_it, forbidden
+    # The VIRTUAL guard example is in the feature tabs, with the answer docs/SUBMISSION.md records (plan 3.3).
+    tabs = read(COMPONENTS / "FeatureTabs.tsx")
+    deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
+    subject = re.search(r"`subject\(\)` is VIRTUAL \(`(0x[0-9a-fA-F]{40})`\)", deployments).group(1)
+    assert subject.lower() in tabs.lower()
+    assert "allowed=True, reason=0" in tabs and "allowed=True, reason=0" in read(ROOT / "docs" / "SUBMISSION.md")
+    assert "Derived, not a recorded call" in tabs
+    for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
+        assert forbidden not in tabs, forbidden
     # ARBROKER, the documented Arbitrum honeypot, is shown in the Arbitrum coverage note.
     fixture = json.loads(read(ROOT / "tests" / "fixtures" / "arbitrum_simulation" / "v2_honeypot.json"))
     assert fixture["token"] in read(COMPONENTS / "Chains.tsx")
