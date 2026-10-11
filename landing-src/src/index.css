@@ -152,8 +152,8 @@
 
 /* Sections read on view (src/reading.ts): paused on the first frame until [data-read] turns "go".
    Chain matrix (Chains.tsx): a 2 px magenta marker walks down the rows, 110 ms apart; each row's three cells resolve
-   behind it left to right, 70 ms apart (filled ones wipe in, dashed and outline ones fade in), and their labels rise
-   from dim. A late /api/stats reply re-reads only the mempool cell whose state it changed. */
+   behind it left to right, 70 ms apart (filled ones wipe in, dashed and outline ones fade in); their labels stay
+   legible throughout. A late /api/stats reply re-reads only the mempool cell whose state it changed. */
 @media (prefers-reduced-motion: no-preference) {
   [data-read="wait"] *,
   [data-read="wait"] *::before,
@@ -178,7 +178,6 @@
     animation: story-fade-in 240ms ease-out var(--t) both;
   }
   .rd-available { animation: vr-wipe 280ms var(--e-out) var(--t) both; }
-  .rd-label { animation: rd-dim 420ms ease-out var(--t) both; }
 }
 
 /* A record inside a section read on view (registry records, the process track's record) waits on its first frame, so
@@ -230,7 +229,6 @@
 @keyframes vr-draw { from { transform: scaleY(0); } }
 @keyframes vr-tick { from { transform: scaleX(0); } }
 @keyframes rd-mark { 30% { opacity: 1; } }
-@keyframes rd-dim { from { opacity: 0.35; } }
 @keyframes pt-draw-x { from { transform: scaleX(0); } }
 @keyframes pt-node { from { opacity: 0; transform: scale(0.4); } }
 @keyframes pt-rise { from { opacity: 0.6; transform: translateY(6px); } }

@@ -164,7 +164,7 @@ function CapabilityCell({
         aria-hidden="true"
         className={`rd-cell rd-${state} h-2.5 w-2.5 flex-none rounded-[2px] border ${square}`}
       />
-      <span className="rd-label min-w-0 whitespace-normal">
+      <span className="min-w-0 whitespace-normal">
         {label}
         {note && <span className="block text-secondary">{note}</span>}
       </span>
