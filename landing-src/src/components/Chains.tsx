@@ -126,7 +126,7 @@ const chains: Chain[] = [
 
 export default function Chains() {
   return (
-    <section id="chains" aria-labelledby="chains-title" className="bg-surface-2 py-14 md:py-[72px] lg:py-24">
+    <section id="chains" aria-labelledby="chains-title" className="bg-ground-alt py-14 md:py-[72px] lg:py-24">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <div className="mx-auto max-w-3xl text-center">
           <p className="text-sm font-medium text-accent">Coverage</p>
@@ -162,43 +162,43 @@ export default function Chains() {
           </div>
         </div>
 
-        <div className="mt-10 max-w-4xl overflow-x-auto rounded-2xl border border-line bg-surface px-3 py-2 shadow-sm sm:px-6" tabIndex={0} aria-label="Coverage by chain">
+        <div className="mt-10 max-w-4xl overflow-x-auto rounded-2xl border border-hairline bg-ground px-3 py-2 shadow-sm sm:px-6" tabIndex={0} aria-label="Coverage by chain">
           <table className="w-full text-[13px] sm:text-sm">
             <caption className="sr-only">
               Which checks run on each supported chain
             </caption>
             <thead>
-              <tr className="text-left text-[11px] uppercase text-muted md:tracking-wider sm:text-xs">
-                <th scope="col" className="py-3 pr-1.5 font-semibold sm:pr-2">Chain</th>
-                <th scope="col" className="py-3 px-1.5 sm:px-2 font-semibold">Sell simulation</th>
-                <th scope="col" className="py-3 px-1.5 sm:px-2 font-semibold">Mempool watch</th>
-                <th scope="col" className="py-3 pl-1.5 sm:pl-2 font-semibold">Launch scans</th>
+              <tr className="text-left text-[11px] uppercase text-secondary md:tracking-wider sm:text-xs">
+                <th scope="col" className="py-3 pr-1.5 font-medium sm:pr-2">Chain</th>
+                <th scope="col" className="py-3 px-1.5 sm:px-2 font-medium">Sell simulation</th>
+                <th scope="col" className="py-3 px-1.5 sm:px-2 font-medium">Mempool watch</th>
+                <th scope="col" className="py-3 pl-1.5 sm:pl-2 font-medium">Launch scans</th>
               </tr>
             </thead>
             <tbody>
               {chains.map((c) => (
-                <tr key={c.name} className="border-t border-line">
-                  <th scope="row" className="py-3 pr-1.5 text-left font-semibold text-ink sm:pr-2">
+                <tr key={c.name} className="border-t border-hairline">
+                  <th scope="row" className="py-3 pr-1.5 text-left font-medium text-ink sm:pr-2">
                     <span className="flex items-center gap-1.5 sm:gap-3">
                       {c.logo}
                       {c.name}
                     </span>
                   </th>
-                  <td className={`py-3 px-1.5 sm:px-2 ${c.simulation ? "text-body" : "text-caution-fg"}`}>
+                  <td className="py-3 px-1.5 text-ink sm:px-2">
                     {c.simulation ?? "None"}
                     {c.simulationScope && (
-                      <span className="block text-xs text-muted">{c.simulationScope}</span>
+                      <span className="block text-xs text-secondary">{c.simulationScope}</span>
                     )}
                   </td>
-                  <td className="py-3 px-1.5 text-body sm:px-2">{c.mempool ? "Yes" : "No"}</td>
-                  <td className="py-3 pl-1.5 text-body sm:pl-2">{c.launches ? "Yes" : "No"}</td>
+                  <td className="py-3 px-1.5 text-ink sm:px-2">{c.mempool ? "Yes" : "No"}</td>
+                  <td className="py-3 pl-1.5 text-ink sm:pl-2">{c.launches ? "Yes" : "No"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        <ul className="mt-6 max-w-3xl space-y-2 text-sm leading-relaxed text-muted">
+        <ul className="mt-6 max-w-3xl space-y-2 text-sm leading-relaxed text-secondary">
           <li>
             <span className="text-ink">Sell simulation:</span> honeypot.is
             simulates a buy and a sell on Ethereum, BNB Chain and Base, and

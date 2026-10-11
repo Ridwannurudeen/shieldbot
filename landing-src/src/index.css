@@ -52,7 +52,7 @@
   ::selection { background: rgb(var(--c-accent-tint)); color: rgb(var(--c-ink)); }
 }
 
-/* framer-motion follows the same setting through MotionConfig in App.tsx. */
+/* Reduced motion: every animation and transition ends at once; the loops below run only without it. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

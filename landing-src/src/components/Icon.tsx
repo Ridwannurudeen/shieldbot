@@ -153,35 +153,3 @@ export default function Icon({
     </svg>
   );
 }
-
-// Interim mark until the brand mark is chosen: the wordmark initial on the accent square.
-export function Mark({
-  size = 28,
-  className,
-}: {
-  size?: number;
-  className?: string;
-}) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      aria-hidden="true"
-      className={className}
-    >
-      <rect width="24" height="24" rx="4" fill="rgb(var(--c-accent))" />
-      <text
-        x="12"
-        y="17.2"
-        textAnchor="middle"
-        fontFamily="Geist, 'Geist Fallback', Arial, sans-serif"
-        fontSize="15"
-        fontWeight="500"
-        fill="#FFFFFF"
-      >
-        S
-      </text>
-    </svg>
-  );
-}

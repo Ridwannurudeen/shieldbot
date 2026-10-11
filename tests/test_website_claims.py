@@ -421,6 +421,7 @@ HERO_CAPTURES = [
     ("hero-overlay-unknown-response.json", "TryIt.tsx", ("hero-overlay-unknown.webp",)),
     ("hero-overlay-unknown-response.json", "FeatureTabs.tsx", ("hero-overlay-unknown.webp",)),
     ("hero-overlay-safe-response.json", "FeatureTabs.tsx", ("hero-overlay-safe.webp",)),
+    ("hero-overlay-response.json", "CtaCard.tsx", ("hero-overlay.webp",)),
 ]
 
 
@@ -657,6 +658,20 @@ HERO_SECTION_COPY = {
         "reported as Unknown, never as Safe.",
         "It has been tested with Rabby; MetaMask testing is still outstanding.",
     ),
+    "WorkedExample.tsx": (
+        "One token. Two transactions.",
+        "1 · Simulated sell to the pool",
+        "2 · Simulated transfer to a fresh address",
+    ),
+    "OnChain.tsx": (
+        "Newest confirmed records in the registry",
+        "Records of the newest launches ShieldBot blocked",
+        "/api/verdicts/recent?chain_id=4663&limit=",
+    ),
+    "CtaCard.tsx": (
+        "Check before you sign.",
+        "Ask the registry before funds move.",
+    ),
 }
 
 
@@ -732,6 +747,17 @@ def test_every_static_page_declares_its_geist_face():
             html = read(page)
             assert not any(line.startswith("+") for line in html.splitlines()), page
             assert re.search(r"^\s*@font-face\s*\{[^}]*Geist", html, re.MULTILINE), page
+
+
+def test_the_site_ships_without_framer_motion():
+    # Plan 1.2 and row D2: every animation is CSS in the bundle, so the motion library is gone from the
+    # dependencies, the sources and the built bundle.
+    package = json.loads(read(LANDING_SRC / "package.json"))
+    assert "framer-motion" not in {**package.get("dependencies", {}), **package.get("devDependencies", {})}
+    source = "\n".join(read(path) for path in (LANDING_SRC / "src").rglob("*") if path.is_file())
+    assert "framer-motion" not in source and "MotionConfig" not in source
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert bundle and "framer" not in bundle
 
 
 def test_the_site_describes_the_quick_scan_as_the_readme_does():
