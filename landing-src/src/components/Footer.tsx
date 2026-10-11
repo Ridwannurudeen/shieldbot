@@ -1,12 +1,59 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import Badge from "./Badge";
+import { labels } from "../firewallVerdict";
+import { short } from "../registryFeed";
 
 const linkClass = "inline-flex items-center min-h-[44px] md:min-h-[32px] text-[15px] text-ink hover:text-accent transition-colors duration-150 ease-out";
 const headingClass = "text-xs font-medium uppercase tracking-[0.08em] text-secondary";
+const docHeadingClass = "font-mono text-xs uppercase tracking-[0.08em] text-secondary";
+
+// The three Robinhood Chain contracts, as docs/DEPLOYMENTS.md records them (OnChain.tsx lists them in full).
+const contracts = [
+  { name: "Registry", address: "0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138" },
+  { name: "Guard", address: "0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e" },
+  { name: "Guarded transfer", address: "0x336254bA85406D9af39357101b688E2B757751b3" },
+];
+
+interface Health {
+  status: string;
+  supported_chains: number[];
+}
+
+// GET /api/health once when the page loads, with the time its reply arrived. undefined while loading, null when it
+// did not answer in 10 seconds; nothing is filled in.
+function useHealth() {
+  const [health, setHealth] = useState<{ reply: Health; at: Date } | null | undefined>(undefined);
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+
+    fetch("https://api.shieldbotsecurity.online/api/health", { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((reply: Health) => {
+        if (active) setHealth({ reply, at: new Date() });
+      })
+      .catch(() => {
+        if (active) setHealth(null);
+      })
+      .finally(() => clearTimeout(timeout));
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, []);
+  return health;
+}
 
 export default function Footer() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error" | "dup">("idle");
   const [message, setMessage] = useState("");
+  const health = useHealth();
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -51,7 +98,7 @@ export default function Footer() {
           : "";
 
   return (
-    <footer className="overflow-hidden border-t border-hairline bg-ground-alt">
+    <footer className="border-t border-hairline bg-ground-alt">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-14 lg:pt-20">
         <div className="grid grid-cols-1 gap-12 lg:grid-cols-12">
           <div className="min-w-0 lg:col-span-5">
@@ -125,17 +172,61 @@ export default function Footer() {
           </div>
         </div>
 
-        <div className="mt-14 flex flex-col gap-2 border-t border-hairline py-6 text-[13px] text-secondary sm:flex-row sm:justify-between">
+        <div className="mt-14 grid grid-cols-1 gap-10 border-t border-hairline-strong pt-8 md:grid-cols-2 lg:grid-cols-[minmax(0,5fr)_minmax(0,4fr)_minmax(0,3fr)] lg:gap-12">
+          <div className="min-w-0">
+            <h2 className={docHeadingClass}>Contracts · Robinhood Chain (4663)</h2>
+            <dl className="mt-2 grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-x-5 font-mono text-[13px] leading-5">
+              {contracts.map((contract) => (
+                <div key={contract.name} className="contents">
+                  <dt className="text-secondary">{contract.name}</dt>
+                  <dd className="min-w-0">
+                    <a
+                      href={`https://robin.etherscan.io/address/${contract.address}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-[44px] items-center text-ink underline decoration-hairline-strong md:min-h-8 underline-offset-4 transition-colors duration-150 ease-out hover:text-accent"
+                    >
+                      {short(contract.address)}
+                    </a>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <p className="mt-3 text-[13px] leading-5 text-secondary">Deployed on Robinhood Chain on 27 September 2026.</p>
+          </div>
+          <div className="min-w-0">
+            <h2 className={docHeadingClass}>Verdicts</h2>
+            <ul className="mt-4 flex flex-wrap gap-2">
+              {Object.values(labels).map(({ verdict, text }) => (
+                <li key={verdict}>
+                  <Badge verdict={verdict}>{text}</Badge>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-[13px] leading-5 text-secondary">When a check cannot run, the verdict is Unknown, never Safe.</p>
+          </div>
+          <div className="min-w-0">
+            <h2 className={docHeadingClass}>API</h2>
+            <p role="status" className="mt-4 font-mono text-[13px] leading-5 text-ink">
+              {health === undefined
+                ? "GET /api/health …"
+                : health === null
+                  ? "Unavailable. GET /api/health did not answer."
+                  : `GET /api/health: ${health.reply.status}, ${health.reply.supported_chains.length} chains`}
+            </p>
+            {health && (
+              <p className="mt-1 font-mono text-[13px] leading-5 text-secondary">
+                Fetched {health.at.toISOString().slice(0, 19).replace("T", " ")} UTC
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-10 flex flex-col gap-2 border-t border-hairline py-6 text-[13px] text-secondary sm:flex-row sm:justify-between">
           <span>© 2026 ShieldBot. Transaction security for 8 EVM chains.</span>
           <span>ShieldBot does not issue, sell or endorse any token.</span>
         </div>
       </div>
-      <p
-        className="mx-auto -mb-[0.2em] max-w-6xl select-none whitespace-nowrap px-4 text-center text-[clamp(64px,21vw,262px)] font-medium leading-none tracking-[-0.04em] text-transparent [-webkit-text-stroke:1px_rgb(var(--c-hairline-strong))] sm:px-6"
-        aria-hidden="true"
-      >
-        ShieldBot
-      </p>
     </footer>
   );
 }

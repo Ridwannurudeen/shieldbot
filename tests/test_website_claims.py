@@ -202,6 +202,8 @@ def test_the_site_shows_the_robinhood_contract_addresses():
     # recorded there, link its explorer page and its Sourcify match, and the built bundle must carry the addresses.
     deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
     section = read(COMPONENTS / "OnChain.tsx")
+    # The footer lists the same three contracts, shortened, each linked to its explorer page.
+    footer = read(COMPONENTS / "Footer.tsx")
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
     for contract in ("ShieldBotVerdictRegistry", "ShieldBotVerdictGuard", "ShieldBotGuardedTransfer"):
         row = re.search(
@@ -213,6 +215,7 @@ def test_the_site_shows_the_robinhood_contract_addresses():
         assert f"https://robin.etherscan.io/address/{address}" in section, contract
         assert f"https://sourcify.dev/server/v2/contract/4663/{address}" in section, contract
         assert address in bundle, f"landing bundle is stale: missing {contract}"
+        assert f'address: "{address}"' in footer, f"Footer.tsx: {contract}"
     assert "Deployed 27 September 2026" in read(COMPONENTS / "ContractCard.tsx")
     assert "0x7578ca9e…f0c772a4" in section
     assert "judge guide" in section
