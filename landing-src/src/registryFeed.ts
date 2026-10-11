@@ -31,7 +31,7 @@ export interface RegistryRecord {
   evidence_hash?: string | null;
   // The published evidence document's coverage, as GET /api/verdict serves it.
   evidence?: {
-    coverage?: Record<string, number | boolean>;
+    coverage?: Record<string, number | boolean | null>;
     coverage_reasons?: Record<string, string | null>;
   } | null;
 }

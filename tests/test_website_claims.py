@@ -994,6 +994,32 @@ process.stdout.write(renderToStaticMarkup(React.createElement(VerdictRecord, pro
     assert "<ol" not in markup
 
 
+def test_a_null_check_reads_unavailable_with_the_legends_ink_outline():
+    # A coverage value served as null is not a 0: its cell reads Unavailable, drawn as the legend's ink outline,
+    # which clears 3:1 on white; 0 still reads as a check that did not run.
+    script = r"""
+const React = require(path.join(root, "node_modules", "react"));
+const {renderToStaticMarkup} = require(path.join(root, "node_modules", "react-dom", "server"));
+const CheckRow = require(path.join(root, "src", "components", "CheckRow.tsx")).default;
+const out = {};
+for (const variant of ["full", "compact"]) {
+  out[variant] = renderToStaticMarkup(React.createElement(CheckRow, {coverage: JSON.parse(process.argv[2]), variant}));
+}
+process.stdout.write(JSON.stringify(out));
+"""
+    coverage = {"structural": 1, "market": None, "behavioral": 0, "honeypot": 0.5}
+    markup = json.loads(run_typescript(script, json.dumps(coverage)))
+    cells = dict(zip(CHECK_ORDER, markup["full"].split("<li")[1:]))
+    assert "Unavailable" in cells["market"] and not re.search(r">\s*0</span>", cells["market"])
+    assert "border-ink bg-ground" in cells["market"] and "border-hairline-strong" not in cells["market"]
+    assert re.search(r">\s*0</span>", cells["behavioral"]) and "border-hairline-strong" in cells["behavioral"]
+    for key in ("intent", "signature"):
+        assert "Unavailable" in cells[key] and "border-ink bg-ground" in cells[key], key
+    assert "market: Unavailable" in markup["compact"] and "market: did not run" not in markup["compact"]
+    legend = read(COMPONENTS / "Mechanism.tsx")
+    assert re.search(r'border border-ink bg-ground" />\s*Outline: Unavailable', legend)
+
+
 def test_built_dashboard_contains_the_current_source_strings():
     built = read(ROOT / "dashboard" / "index.html")
     labels = re.findall(r"label:'([^']+)'", read(DASHBOARD_SRC))

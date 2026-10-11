@@ -69,7 +69,7 @@ function Source({ path, failed }: { path: string; failed: boolean }) {
 }
 
 // One coverage capability as a check cell: filled when the chain has it, dashed when the API says it has not,
-// an empty hairline cell while loading or when the route did not answer.
+// the legend's ink outline (Unavailable) while loading or when the route did not answer.
 function Capability({
   label,
   value,
@@ -85,7 +85,7 @@ function Capability({
     <li className="grid grid-cols-[12px_minmax(0,1fr)_auto] items-center gap-3 py-2.5">
       <span
         aria-hidden="true"
-        className={`h-3 w-3 rounded-[2px] border ${value == null ? "border-hairline-strong" : has ? "border-ink bg-ink" : "border-dashed border-ink"}`}
+        className={`h-3 w-3 rounded-[2px] border ${value == null ? "border-ink bg-ground" : has ? "border-ink bg-ink" : "border-dashed border-ink"}`}
       />
       <span className="text-secondary">{label}</span>
       <span className="min-w-0 text-right text-ink [overflow-wrap:anywhere]">

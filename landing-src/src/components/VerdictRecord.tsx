@@ -37,7 +37,7 @@ import { short, shortenHex, utc } from "../registryFeed";
 //                 key) to replay.
 export interface VerdictRecordProps {
   chip: { verdict: Verdict; label: string };
-  coverage?: Partial<Record<string, number | boolean>>;
+  coverage?: Partial<Record<string, number | boolean | null>>;
   reasons?: Partial<Record<string, string | null>> | null;
   reason?: string | null;
   recordedAt?: string | null;

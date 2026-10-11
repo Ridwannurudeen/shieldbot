@@ -7,7 +7,7 @@ export interface ScanReply {
   risk_level?: string;
   classification?: string;
   risk_score?: number;
-  coverage?: Record<string, number | boolean>;
+  coverage?: Record<string, number | boolean | null>;
   coverage_reasons?: Record<string, string | null>;
   evidence_url?: string | null;
 }

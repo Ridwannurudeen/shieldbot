@@ -16,17 +16,19 @@ export const CHECK_ORDER = [
 export type CheckKey = (typeof CHECK_ORDER)[number];
 
 // A coverage value of 1 means the check ran fully; between 0 and 1 it ran in part; 0 it did not run. A key
-// the reply does not carry reads Unavailable. Booleans count as 1 or 0, as in the overlay's rule.
+// the reply does not carry, or carries as null, reads Unavailable, never 0. Booleans count as 1 or 0, as in the
+// overlay's rule.
 type CellState = "ran" | "partial" | "none" | "absent";
+type Value = number | boolean | null | undefined;
 
-function stateOf(value: number | boolean | undefined): CellState {
-  if (value === undefined) return "absent";
+function stateOf(value: Value): CellState {
+  if (value === undefined || value === null) return "absent";
   const n = Number(value);
   if (n >= 1) return "ran";
   return n > 0 ? "partial" : "none";
 }
 
-function stateText(state: CellState, value: number | boolean | undefined) {
+function stateText(state: CellState, value: Value) {
   if (state === "ran") return "ran";
   if (state === "partial") return `ran in part (${Number(value)})`;
   if (state === "none") return "did not run (0)";
@@ -66,7 +68,7 @@ export default function CheckRow({
   reasons,
   variant,
 }: {
-  coverage: Partial<Record<string, number | boolean>>;
+  coverage: Partial<Record<string, number | boolean | null>>;
   reasons?: Partial<Record<string, string | null>> | null;
   variant: "full" | "compact";
 }) {
@@ -103,7 +105,12 @@ export default function CheckRow({
             <span
               aria-hidden="true"
               className={[
-                "relative block flex-none rounded-[2px] border border-hairline-strong",
+                "relative block flex-none rounded-[2px] border",
+                // Unavailable is the ink outline of the legend (Mechanism.tsx); the other states draw their own edge
+                // over a hairline.
+                state === "absent"
+                  ? "border-ink bg-ground"
+                  : "border-hairline-strong",
                 full ? "h-7 w-7 sm:h-8 sm:w-8" : "h-3 w-3",
               ].join(" ")}
             >
