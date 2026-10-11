@@ -120,7 +120,7 @@
   }
   .vr-animate .vr-why dt,
   .vr-animate .vr-why dd {
-    animation: vr-settle 420ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-s) + max(var(--i), 0) * var(--vr-g) + var(--vr-n)) both;
+    animation: vr-settle-legible 420ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-s) + max(var(--i), 0) * var(--vr-g) + var(--vr-n)) both;
   }
 
   .vr-animate .vr-rule { position: relative; border-left-color: transparent; }
@@ -136,17 +136,17 @@
     animation: vr-draw 700ms var(--e-draw) calc(var(--vr-d, 0ms) + var(--vr-r)) both;
   }
   .vr-animate .vr-chip { animation: vr-wipe 450ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 250ms) both; }
-  .vr-animate .vr-body > p { animation: vr-settle 450ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 400ms) both; }
+  .vr-animate .vr-body > p { animation: vr-settle-legible 450ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 400ms) both; }
   .vr-animate .vr-body dt,
   .vr-animate .vr-body dd {
-    animation: vr-settle 420ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 520ms + var(--j) * 120ms) both;
+    animation: vr-settle-legible 420ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 520ms + var(--j) * 120ms) both;
   }
   .vr-animate .vr-body dt::before {
     transform-origin: left;
     animation: vr-tick 360ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 520ms + var(--j) * 120ms) both;
   }
   .vr-animate .vr-src {
-    animation: story-fade-in 400ms ease-out calc(var(--vr-d, 0ms) + var(--vr-r) + 640ms + var(--n) * 120ms) both;
+    animation: vr-legible 400ms ease-out calc(var(--vr-d, 0ms) + var(--vr-r) + 640ms + var(--n) * 120ms) both;
   }
 }
 
@@ -181,17 +181,12 @@
   .rd-label { animation: rd-dim 420ms ease-out var(--t) both; }
 }
 
-/* A record inside a section read on view (registry records, the process track's record) keeps its text readable from
-   the first frame: chip, reason, evidence lines and source rise from 0.6 opacity; only the rule, the needle, the cell
-   fills and the dt ticks draw from nothing. */
+/* A record inside a section read on view (registry records, the process track's record) waits on its first frame, so
+   its chip rises from 0.6 opacity instead of wiping in from nothing. Text never animates from below 0.6 anywhere:
+   reasons, evidence lines and source rise from 0.6 in every record; only the rule, the needle, the cell fills and the
+   dt ticks draw from nothing. */
 @media (prefers-reduced-motion: no-preference) {
-  [data-read] .vr-animate .vr-chip,
-  [data-read] .vr-animate .vr-src { animation-name: vr-legible; }
-  [data-read] .vr-animate .vr-body > p,
-  [data-read] .vr-animate .vr-body dt,
-  [data-read] .vr-animate .vr-body dd,
-  [data-read] .vr-animate .vr-why dt,
-  [data-read] .vr-animate .vr-why dd { animation-name: vr-settle-legible; }
+  [data-read] .vr-animate .vr-chip { animation-name: vr-legible; }
 }
 
 /* Process track (HowItWorks.tsx): the rule draws one segment per step, 600 ms each; as a segment starts its node
@@ -234,12 +229,11 @@
 @keyframes vr-rise { from { transform: scaleY(0); } }
 @keyframes vr-draw { from { transform: scaleY(0); } }
 @keyframes vr-tick { from { transform: scaleX(0); } }
-@keyframes vr-settle { from { opacity: 0; transform: translateX(-6px); } }
 @keyframes rd-mark { 30% { opacity: 1; } }
 @keyframes rd-dim { from { opacity: 0.35; } }
 @keyframes pt-draw-x { from { transform: scaleX(0); } }
 @keyframes pt-node { from { opacity: 0; transform: scale(0.4); } }
-@keyframes pt-rise { from { opacity: 0.35; transform: translateY(6px); } }
+@keyframes pt-rise { from { opacity: 0.6; transform: translateY(6px); } }
 @keyframes vr-legible { from { opacity: 0.6; } }
 @keyframes vr-settle-legible { from { opacity: 0.6; transform: translateX(-6px); } }
 @keyframes story-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -268,7 +262,7 @@
   .acc-panel > div { overflow: hidden; }
 }
 
-/* Feature tabs (FeatureTabs.tsx): the panel that appears fades in over 150 ms. */
+/* Feature tabs (FeatureTabs.tsx): the panel that appears rises from 0.6 opacity over 150 ms. */
 @media (prefers-reduced-motion: no-preference) {
-  .tab-fade { animation: story-fade-in 150ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+  .tab-fade { animation: vr-legible 150ms cubic-bezier(0.4, 0, 0.2, 1) both; }
 }
