@@ -7,9 +7,12 @@ All external requests are aborted and extension/locale files are served locally.
 The single Playwright Chrome browser is closed after all captures.
 
 Run:
-  C:\Users\gudma\AppData\Local\Programs\Python\Python312\python.exe landing-src/scripts/capture-store-shots.py
+  python landing-src/scripts/capture-store-shots.py --design-dir <design-folder>
+
 """
 
+import argparse
+import io
 import json
 import mimetypes
 from pathlib import Path
@@ -21,56 +24,19 @@ from playwright.sync_api import BrowserContext, Page, Route, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
 EXT = ROOT / "extension"
-DESIGN = Path(r"C:\Users\gudma\OneDrive\Desktop\GITHUB-FILES\shieldbot-handoff\briefs\design")
-STORE = DESIGN / "store-shots-3.2.0"
-SHOTS = DESIGN / "shots-F2"
+DEFAULT_DESIGN = ROOT / "artifacts" / "design"
 SIZE = {"width": 1280, "height": 800}
-PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Swap confirmation</title>
-<style>
-*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:40px 64px;color:#f1f2f3;background:#121316;font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-header{display:flex;align-items:center;gap:22px;color:#b8bac1}.brand{color:#fff;font-size:18px;font-weight:600}
-main{width:420px;margin:100px auto;padding:24px;border:1px solid #303138;border-radius:12px;background:#1b1c21}
-h1{margin:0 0 8px;color:#fff;font-size:22px}p{color:#b8bac1;line-height:1.5}
-.token{display:flex;justify-content:space-between;margin:22px 0;padding:16px;border:1px solid #303138;border-radius:8px}
-button{width:100%;padding:13px;border:0;border-radius:7px;background:#6d5ce7;color:white;font:600 14px sans-serif}
-</style></head><body><header><span class="brand">NORTHSTAR</span><span>Swap</span><span>Explore</span><span>Portfolio</span></header>
-<main><h1>Review swap</h1><p>Confirm the details before submitting this transaction.</p>
-<div class="token"><span>Pay</span><strong>1.00 ETH</strong></div><div class="token"><span>Receive</span><strong>2,840.00 USDC</strong></div>
-<button>Confirm swap</button></main></body></html>"""
-
-FIXTURE = {
-    "block": {
-        "status": "ok", "partial": False, "classification": "BLOCK_RECOMMENDED",
-        "risk_score": 94, "coverage": {"honeypot": 1, "goplus": 1},
-        "coverage_reasons": {}, "verdict": "Block Recommended",
-        "plain_english": "This approval could give a malicious contract access to your tokens.",
-        "transaction_impact": {
-            "sending": "0.01 ETH", "granting_access": "Unlimited USDC",
-            "recipient": "0x7A250d5630B4cF539739dF2C5dAcb4c659F2488D",
-            "post_tx_state": "The contract can move your USDC.",
-        },
-        "danger_signals": ["Unlimited token approval"], "notes": [],
-    },
-    "unknown": {
-        "status": "unknown", "partial": False, "classification": "UNKNOWN",
-        "risk_score": None, "coverage": {"honeypot": 0},
-        "coverage_reasons": {"honeypot": "No provider returned a result."},
-        "verdict": "Unknown", "plain_english": "The transaction could not be fully checked.",
-        "transaction_impact": {
-            "sending": "0.01 ETH", "granting_access": "Unknown",
-            "recipient": "0x7A250d5630B4cF539739dF2C5dAcb4c659F2488D",
-            "post_tx_state": "Unknown",
-        },
-        "danger_signals": [], "notes": [],
-    },
-}
+PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title></title>
+<style>html,body{margin:0;min-height:100%;background:#F7F6F2}</style></head><body></body></html>"""
 
 STUB = r"""
 (() => {
   const language = __LANGUAGE__;
   const fixture = __FIXTURE__;
+  const history = __HISTORY__;
+  const chainId = __CHAIN_ID__;
   const data = {apiUrl:"https://api.shieldbotsecurity.online",enabled:true,policyMode:"BALANCED",
-    language,selectedChainId:56,healthWallet:"",chatMessages:[],scanHistory:[]};
+    language,selectedChainId:chainId,healthWallet:"",chatMessages:[],scanHistory:history};
   const listeners = [];
   const storage = {
     get(keys, cb) {
@@ -97,8 +63,12 @@ STUB = r"""
     onMessage:{addListener(){}},
     sendMessage(message, cb) {
       let result = {};
-      if (message && message.type === "SHIELDAI_ANALYZE") result = {result:fixture};
-      if (message && message.type === "SHIELDAI_GET_HISTORY") result = {history:[]};
+      if (message && message.type === "SHIELDAI_ANALYZE") {
+        globalThis.__analysisTx = message.tx;
+        globalThis.__analysisResult = fixture;
+        result = {result:fixture};
+      }
+      if (message && message.type === "SHIELDAI_GET_HISTORY") result = {history};
       const promise = Promise.resolve(result);
       if (cb) promise.then(cb);
       return promise;
@@ -112,7 +82,7 @@ STUB = r"""
     i18n:{getMessage(k){return k;},getUILanguage(){return language;}},
   }});
   Object.defineProperty(window,"ethereum",{configurable:true,writable:true,value:{
-    on(){},request(args){if(args && args.method==="eth_chainId") return Promise.resolve("0x1");return new Promise(()=>{});}
+    on(){},request(args){if(args && args.method==="eth_chainId") return Promise.resolve("0x"+chainId.toString(16));return new Promise(()=>{});}
   }});
 })();
 """
@@ -174,9 +144,36 @@ def audit_pairs(result: dict) -> dict:
     return result
 
 
-def stub(locale: str, fixture: dict) -> str:
-    return STUB.replace("__LANGUAGE__", json.dumps(locale)).replace(
-        "__FIXTURE__", json.dumps(fixture, ensure_ascii=True)
+def load_fixtures() -> dict[str, dict]:
+    fixture_files = {
+        "block": ("hero-overlay-request.json", "hero-overlay-response.json"),
+        "unknown": ("hero-overlay-unknown-request.json", "hero-overlay-unknown-response.json"),
+    }
+    fixtures = {}
+    for name, filenames in fixture_files.items():
+        pair = {}
+        for key, filename in zip(("request", "response"), filenames):
+            path = Path(__file__).resolve().parent / filename
+            with path.open("r", encoding="utf-8", newline="") as source:
+                pair[key] = json.load(source)
+        fixtures[name] = pair
+    return fixtures
+
+
+def history_record(request: dict, response: dict) -> dict:
+    return {
+        **response,
+        "to": request["to"],
+        "recipient": response["transaction_impact"]["recipient"],
+    }
+
+
+def stub(locale: str, fixture: dict | None = None, history: list[dict] | None = None, chain_id: int = 56) -> str:
+    return (
+        STUB.replace("__LANGUAGE__", json.dumps(locale))
+        .replace("__FIXTURE__", json.dumps(fixture, ensure_ascii=True))
+        .replace("__HISTORY__", json.dumps(history or [], ensure_ascii=True))
+        .replace("__CHAIN_ID__", str(chain_id))
     )
 
 
@@ -195,29 +192,29 @@ def route_local(route: Route) -> None:
             return
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if mime.startswith("text/") or mime in {"application/javascript", "application/json"}:
-            body = path.read_text(encoding="utf-8").encode("utf-8")
+            with path.open("r", encoding="utf-8", newline="") as source:
+                body = source.read().encode("utf-8")
             if mime in {"text/html", "text/css", "application/javascript"}:
                 mime += "; charset=utf-8"
         else:
             body = path.read_bytes()
         route.fulfill(status=200, content_type=mime, body=body)
-    elif url.netloc == "api.shieldbotsecurity.online" and url.path == "/api/health":
-        route.fulfill(status=200, content_type="application/json", body='{"status":"ok"}')
     else:
         route.abort()
 
 
 def watch(page: Page) -> list[str]:
     errors: list[str] = []
-    page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
+    page.on("console", lambda msg: errors.append(msg.text)
+            if msg.type == "error" and "Failed to load resource: net::ERR_FAILED" not in msg.text else None)
     page.on("pageerror", lambda exc: errors.append(str(exc)))
     return errors
 
 
-def context_for(browser, locale: str, fixture: dict) -> BrowserContext:
+def context_for(browser, locale: str, history: list[dict] | None = None, chain_id: int = 56) -> BrowserContext:
     context = browser.new_context(viewport=SIZE, device_scale_factor=1)
     context.route("**/*", route_local)
-    context.add_init_script(stub(locale, fixture))
+    context.add_init_script(stub(locale, history=history, chain_id=chain_id))
     return context
 
 
@@ -262,43 +259,52 @@ def closed_shadow_text(page: Page) -> list[dict]:
     return pairs
 
 
-def render_overlay(browser, name: str, report: dict) -> None:
+def render_overlay(browser, name: str, pair: dict, store_dir: Path, render_dir: Path, report: dict) -> None:
+    request = pair["request"]
+    response = pair["response"]
     context = browser.new_context(viewport=SIZE, device_scale_factor=1)
     context.route("**/*", route_local)
-    context.add_init_script(
-        stub("en", FIXTURE[name]) + "\n"
-        + (EXT / "content.js").read_text(encoding="utf-8") + "\n"
-        + (EXT / "inject.js").read_text(encoding="utf-8")
-    )
+    sources = []
+    for filename in ("content.js", "inject.js"):
+        with (EXT / filename).open("r", encoding="utf-8", newline="") as source:
+            sources.append(source.read())
+    context.add_init_script(stub("en", response, chain_id=request["chainId"]) + "\n" + "\n".join(sources))
     page = context.new_page()
     page.set_viewport_size(SIZE)
     errors = watch(page)
     page.goto("http://localhost/", wait_until="domcontentloaded")
     page.evaluate("""() => { window.__overlayShown = false; window.addEventListener("message", event => { if (event.data && event.data.type === "SHIELDAI_TX_SHOWN") window.__overlayShown = true; }); }""")
-    page.evaluate("""() => { void window.ethereum.request({method:"eth_sendTransaction",params:[{
-      from:"0x1111111111111111111111111111111111111111",
-      to:"0x7A250d5630B4cF539739dF2C5dAcb4c659F2488D",
-      value:"0x2386f26fc10000",data:"0x",chainId:"0x1"
-    }]}); }""")
-    page.wait_for_timeout(500)
-    page.wait_for_function('window.__overlayShown === true', timeout=15_000)
+    tx = {key: request[key] for key in ("from", "to", "value", "data")}
+    page.evaluate("""tx => { void window.ethereum.request({method:"eth_sendTransaction",params:[tx]}); }""", tx)
+    page.wait_for_function("window.__overlayShown === true && window.__analysisTx && window.__analysisResult", timeout=15_000)
     page.wait_for_timeout(900)
+    actual_tx = page.evaluate("() => window.__analysisTx")
+    if any(actual_tx.get(key) != value for key, value in tx.items()):
+        raise RuntimeError(name + " overlay request did not match its recorded fixture: " + repr(actual_tx))
+    if page.evaluate("() => window.__analysisResult") != response:
+        raise RuntimeError(name + " overlay did not use its recorded response")
     pairs = closed_shadow_text(page)
     audit = audit_pairs({"visibleText": pairs})
     audit["horizontalOverflow"] = page.evaluate(
         "() => Math.max(document.documentElement.scrollWidth,document.body.scrollWidth)>document.documentElement.clientWidth"
     )
     audit["consoleErrors"] = errors
-    if not pairs or errors or audit["contrastFailures"] or audit["horizontalOverflow"]:
+    all_text = "\n".join(item["text"] for item in pairs)
+    markers = list(response.get("coverage_reasons", {}).values()) + response.get("danger_signals", [])
+    markers.extend(response["transaction_impact"].values())
+    if not any(marker and marker in all_text for marker in markers) or not pairs or errors or audit["contrastFailures"] or audit["horizontalOverflow"]:
         raise RuntimeError(name + " overlay audit failed: " + repr(audit))
-    page.screenshot(path=str(STORE / ("01-block-overlay.png" if name == "block" else "02-unknown-overlay.png")))
+    filename = "01-block-overlay.png" if name == "block" else "02-unknown-overlay.png"
+    image = page.screenshot()
+    for output_dir in (store_dir, render_dir):
+        (output_dir / filename).write_bytes(image)
     report["overlays"][name] = audit
     page.close()
     context.close()
 
 
-def render_surface(browser, report: dict, locale: str, name: str, path: str, size: dict, output: Path | None = None) -> None:
-    context = context_for(browser, locale, {})
+def render_surface(browser, report: dict, locale: str, name: str, path: str, size: dict, history: list[dict], chain_id: int, output: Path | None = None) -> None:
+    context = context_for(browser, locale, history, chain_id)
     page, errors = page_for(context, path, size["width"], size["height"])
     audit = audit_pairs(page.evaluate(AUDIT))
     audit["consoleErrors"] = errors
@@ -311,11 +317,9 @@ def render_surface(browser, report: dict, locale: str, name: str, path: str, siz
     context.close()
 
 
-def store_canvas(browser, path: str, output: Path, body_width: int | None = None) -> dict:
-    context = context_for(browser, "en", {})
+def store_canvas(browser, path: str, output: Path, history: list[dict], chain_id: int) -> dict:
+    context = context_for(browser, "en", history, chain_id)
     page, errors = page_for(context, path, 1280, 800)
-    if body_width:
-        page.add_style_tag(content="body{width:"+str(body_width)+"px!important;margin-left:auto!important;margin-right:0!important}")
     audit = audit_pairs(page.evaluate(AUDIT))
     audit["consoleErrors"] = errors
     if errors or audit["horizontalOverflow"] or audit["contrastFailures"]:
@@ -326,56 +330,101 @@ def store_canvas(browser, path: str, output: Path, body_width: int | None = None
     return audit
 
 
+def render_welcome_crop(browser, outputs: list[Path]) -> dict:
+    context = browser.new_context(viewport={"width": 960, "height": 1000}, device_scale_factor=2)
+    context.route("**/*", route_local)
+    context.add_init_script(stub("en"))
+    page = context.new_page()
+    errors = watch(page)
+    page.goto("http://localhost/extension/welcome.html", wait_until="domcontentloaded")
+    page.wait_for_timeout(100)
+    card = page.locator(".card").bounding_box()
+    simulate = page.locator(".steps .step").nth(1).bounding_box()
+    if not card or not simulate or errors:
+        raise RuntimeError("welcome capture could not find its first-step crop boundary: " + repr(errors))
+    crop = page.screenshot(clip={
+        "x": card["x"], "y": card["y"], "width": card["width"], "height": simulate["y"] - card["y"],
+    })
+    with Image.open(io.BytesIO(crop)) as source:
+        panel = source.convert("RGB")
+    max_size = (1280, 752)
+    if panel.width > max_size[0] or panel.height > max_size[1]:
+        panel.thumbnail(max_size, Image.Resampling.LANCZOS)
+    canvas = Image.new("RGB", (1280, 800), (247, 246, 242))
+    canvas.paste(panel, ((canvas.width - panel.width) // 2, (canvas.height - panel.height) // 2))
+    for output in outputs:
+        canvas.save(output, "PNG")
+    result = {"dimensions": list(canvas.size), "croppedBeforeStep": "Simulate", "panelDimensions": list(panel.size)}
+    page.close()
+    context.close()
+    return result
+
+
 def main() -> None:
-    STORE.mkdir(parents=True, exist_ok=True)
-    SHOTS.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--design-dir", type=Path, default=DEFAULT_DESIGN)
+    args = parser.parse_args()
+    design_dir = args.design_dir.resolve()
+    store_dir = design_dir / "store-shots-3.2.0"
+    shots_dir = design_dir / "shots-F2" / "fix"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    shots_dir.mkdir(parents=True, exist_ok=True)
+    store_files = ("01-block-overlay.png", "02-unknown-overlay.png", "03-popup-expanded.png", "05-welcome.png")
+    stale_store_files = store_files + ("03-popup-compact.png", "04-sidepanel.png")
+    render_files = ("01-block-overlay.png", "02-unknown-overlay.png", "popup-history.png", "popup-expanded.png", "welcome-cropped.png", "sidepanel.png", "report.json")
+    for filename in stale_store_files:
+        stale = store_dir / filename
+        if stale.exists():
+            stale.unlink()
+    for filename in render_files:
+        stale = shots_dir / filename
+        if stale.exists():
+            stale.unlink()
+    fixtures = load_fixtures()
+    block_history = [history_record(fixtures["block"]["request"], fixtures["block"]["response"])]
+    chain_id = fixtures["block"]["request"]["chainId"]
     report = {"chromeChannel":"chrome","headless":True,"browserLaunchCount":1,
               "storeCaptures":[],"actualSizeRenders":{},"surfaces":{},"overlays":{}}
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel="chrome", headless=True)
         try:
-            render_overlay(browser, "block", report)
-            render_overlay(browser, "unknown", report)
-            sizes = {
-                "popup-compact": ({"width":360,"height":800}, "popup.html"),
-                "popup-expanded": ({"width":1280,"height":800}, "popup.html?tab=1"),
-                "sidepanel": ({"width":400,"height":800}, "sidepanel.html"),
-                "welcome": ({"width":1280,"height":800}, "welcome.html"),
-            }
+            for name in ("block", "unknown"):
+                render_overlay(browser, name, fixtures[name], store_dir, shots_dir, report)
             for locale in ("en", "zh", "vi"):
-                for name, (size, path) in sizes.items():
-                    output = SHOTS / (name + ".png") if locale == "en" else None
-                    render_surface(browser, report, locale, name, path, size, output)
-            for filename, kind, path, width in (
-                ("03-popup-compact.png","popup-compact","popup.html",None),
-                ("04-sidepanel.png","sidepanel","sidepanel.html",400),
-                ("05-welcome.png","welcome","welcome.html",None),
-            ):
-                report["storeCaptures"].append({
-                    "file":filename,"audit":store_canvas(browser,path,STORE/filename,width)
-                })
+                expanded_output = shots_dir / "popup-expanded.png" if locale == "en" else None
+                render_surface(browser, report, locale, "popup-expanded", "popup.html?tab=1", SIZE,
+                               block_history, chain_id, expanded_output)
+                render_surface(browser, report, locale, "welcome", "welcome.html", SIZE, [], chain_id)
+            expanded_audit = store_canvas(browser, "popup.html?tab=1", store_dir / "03-popup-expanded.png", block_history, chain_id)
+            report["storeCaptures"].append({"file":"03-popup-expanded.png","audit":expanded_audit})
+            welcome_outputs = [store_dir / "05-welcome.png", shots_dir / "welcome-cropped.png"]
+            report["welcomeCrop"] = render_welcome_crop(browser, welcome_outputs)
         finally:
             browser.close()
-    for name in ("01-block-overlay.png","02-unknown-overlay.png"):
-        report["storeCaptures"].append({
-            "file":name,"audit":report["overlays"]["block" if name.startswith("01") else "unknown"]
-        })
+    for filename, name in (("01-block-overlay.png", "block"), ("02-unknown-overlay.png", "unknown")):
+        report["storeCaptures"].append({"file":filename,"audit":report["overlays"][name]})
+    report["storeCaptures"].append({"file":"05-welcome.png","audit":report["surfaces"]["en"]["welcome"]})
     report["storeCaptures"].sort(key=lambda item:item["file"])
-    for path in STORE.glob("*.png"):
+    for filename in store_files:
+        path = store_dir / filename
         with Image.open(path) as image:
             if image.size != (1280,800):
                 raise RuntimeError(path.name + " has wrong dimensions: " + repr(image.size))
     report["actualSizeRenders"] = {
-        name:str(SHOTS/(name+".png")) for name in
-        ("popup-compact","popup-expanded","sidepanel","welcome")
+        name:str(shots_dir / filename) for name, filename in (
+            ("overlay-block", "01-block-overlay.png"),
+            ("overlay-unknown", "02-unknown-overlay.png"),
+            ("popup-expanded", "popup-expanded.png"),
+            ("welcome-cropped", "welcome-cropped.png"),
+        )
     }
-    report["storeCapturePaths"] = [str(STORE/item["file"]) for item in report["storeCaptures"]]
+    report["storeCapturePaths"] = [str(store_dir / item["file"]) for item in report["storeCaptures"]]
     report["renderPaths"] = list(report["actualSizeRenders"].values())
     report["allContrastPairsMeet4_5"] = all(
         not item["audit"]["contrastFailures"] for item in report["storeCaptures"]
     ) and all(not item["contrastFailures"] for group in report["surfaces"].values() for item in group.values())
     report["noHorizontalOverflow"] = all(
-        not item["audit"]["horizontalOverflow"] for item in report["storeCaptures"]
+        not item["audit"].get("horizontalOverflow", False) for item in report["storeCaptures"]
     ) and all(not item["horizontalOverflow"] for group in report["surfaces"].values() for item in group.values())
     report["weightsAbove600"] = [
         {"locale":locale,"surface":name,"pairs":audit["fontWeightsAbove600"]}
@@ -385,14 +434,14 @@ def main() -> None:
         {"surface":"overlay-"+name,"pairs":audit["fontWeightsAbove600"]}
         for name,audit in report["overlays"].items() if audit["fontWeightsAbove600"]
     ]
-    report_path = SHOTS / "report.json"
-    report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8",newline="")
+    report_path = shots_dir / "report.json"
+    with report_path.open("w", encoding="utf-8", newline="") as output:
+        output.write(json.dumps(report,ensure_ascii=False,indent=2)+"\n")
     print(json.dumps({
         "storeCaptures":report["storeCapturePaths"],"renderPaths":report["renderPaths"],
         "report":str(report_path),"contrastPass":report["allContrastPairsMeet4_5"],
         "horizontalOverflow":not report["noHorizontalOverflow"],"weightsAbove600":report["weightsAbove600"],
     },ensure_ascii=False,indent=2))
-
 
 if __name__ == "__main__":
     main()

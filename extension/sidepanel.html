@@ -13,10 +13,10 @@
       --accent: #A3168F;
       --accent-hover: #8A1279;
       --safe: #176E48;
-      --caution: #775B08;
-      --high: #8B4A1F;
-      --block: #A81A29;
-      --unknown: #575750;
+      --caution: #141414;
+      --high: #C21F30;
+      --block: #C21F30;
+      --unknown: #141414;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -75,6 +75,13 @@
     .risk-card-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
     .risk-score-badge { order: 1; width: auto; height: auto; padding: 0; border: 0; border-radius: 0; background: transparent !important; color: var(--muted) !important; font-size: 12px; font-weight: 500; }
     .risk-card-title { order: 0; max-width: 100%; padding: 3px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+    .risk-card:has(.risk-score-badge.high) .risk-card-title { border: 2px solid #C21F30; background: transparent; color: #C21F30; }
+    .risk-card:has(.risk-score-badge.high) .risk-card-title::before { content: "! "; }
+    .risk-card:has(.risk-score-badge.medium) .risk-card-title { border-color: #8B8B86; background: transparent; color: #141414; }
+    .risk-card:has(.risk-score-badge.medium) .risk-card-title::before { content: "! "; }
+    .risk-card:has(.risk-score-badge.low) .risk-card-title { padding: 3px 0; border: 0; background: transparent; color: var(--ink); }
+    .risk-card:has(.risk-score-badge.unknown) .risk-card-title { border: 1px dashed #141414; background: #8B8B86; color: #141414; }
+    .risk-card:has(.risk-score-badge.unknown) .risk-card-title::before { content: "? "; }
     .risk-card-subtitle { margin-top: 1px; color: var(--muted); font-size: 11px; }
     .risk-flag { display: inline-block; margin: 2px 2px 2px 0; padding: 2px 8px; border: 1px solid #E9C5C8; border-radius: 4px; background: #FBEDEF; color: var(--block); font-size: 11px; }
     .risk-card-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; color: var(--muted); font-size: 11px; }
@@ -100,10 +107,12 @@
     .health-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
     .health-score { color: var(--ink) !important; font-size: 28px; font-weight: 500; }
     .health-level { padding: 3px 8px; border: 1px solid transparent; border-radius: 4px; font-size: 12px; font-weight: 500; letter-spacing: .02em; text-transform: uppercase; }
-    .health-level.excellent, .health-level.good { border-color: #C8DDD0; background: #EDF5F0; color: var(--safe); }
-    .health-level.fair { border-color: #E8DDB8; background: #FBF5E5; color: var(--caution); }
-    .health-level.poor, .health-level.critical { border-color: #E9C5C8; background: #FBEDEF; color: var(--block); }
-    .health-level.unknown { border-color: #D7D6D0; background: #EFEEE9; color: var(--unknown); }
+    .health-level.excellent, .health-level.good { border-color: #176E48; background: transparent; color: #176E48; }
+    .health-level.fair { border-color: #8B8B86; background: transparent; color: #141414; }
+    .health-level.poor, .health-level.critical { border: 2px solid #C21F30; background: transparent; color: #C21F30; }
+    .health-level.unknown { border: 1px dashed #141414; background: #8B8B86; color: #141414; }
+    .health-level.fair::before, .health-level.poor::before, .health-level.critical::before { content: "! "; }
+    .health-level.unknown::before { content: "? "; }
     .health-stats { display: flex; justify-content: space-around; margin-bottom: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
     .health-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
     .health-stat-val { color: var(--ink) !important; font-size: 18px; font-weight: 500; }
@@ -117,10 +126,11 @@
     .alert-card { padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
     .alert-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
     .severity-badge { flex-shrink: 0; padding: 2px 8px; border: 1px solid transparent; border-radius: 4px; color: var(--ink); font-size: 11px; font-weight: 600; text-transform: uppercase; }
-    .severity-badge.critical, .severity-badge.high { border-color: #E9C5C8; background: #FBEDEF; color: var(--block); }
-    .severity-badge.medium { border-color: #E8DDB8; background: #FBF5E5; color: var(--caution); }
-    .severity-badge.low { border-color: #C8DDD0; background: #EDF5F0; color: var(--safe); }
-    .severity-badge.info { border-color: var(--line); background: var(--panel); color: var(--unknown); }
+    .severity-badge.critical, .severity-badge.high { border: 2px solid #C21F30; background: transparent; color: #C21F30; }
+    .severity-badge.medium { border-color: #8B8B86; background: transparent; color: #141414; }
+    .severity-badge.low { padding: 2px 0; border: 0; background: transparent; color: var(--ink); }
+    .severity-badge.info { border-color: var(--line); background: transparent; color: var(--ink); }
+    .severity-badge.critical::before, .severity-badge.high::before, .severity-badge.medium::before { content: "! "; }
     .alert-card-title { color: var(--ink); font-size: 13px; font-weight: 500; }
     .alert-card-wallet, .alert-card-time { color: var(--muted); font-size: 11px; }
     .alert-card-wallet { margin-bottom: 8px; }
@@ -135,8 +145,9 @@
     .scan-result-card { padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
     .scan-result-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
     .scan-score-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; height: 34px; padding: 0 6px; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); color: var(--ink); font-size: 13px; font-weight: 500; flex-shrink: 0; }
-    .scan-score-badge.danger { border-color: #E9C5C8; background: #FBEDEF; color: var(--block); }
-    .scan-score-badge.neutral, .scan-score-badge.unknown { border-color: #D7D6D0; background: #EFEEE9; color: var(--unknown); }
+    .scan-score-badge.danger { border: 2px solid #C21F30; border-radius: 4px; background: transparent; color: #C21F30; }
+    .scan-score-badge.neutral { border-color: #8B8B86; background: transparent; color: #141414; }
+    .scan-score-badge.unknown { border: 1px dashed #141414; background: #8B8B86; color: #141414; }
     .scan-result-label { color: var(--ink); font-size: 13px; font-weight: 500; }
     .scan-result-sublabel { margin-top: 1px; color: var(--muted); font-size: 11px; }
     .pattern-list { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 0; padding: 0; list-style: none; }

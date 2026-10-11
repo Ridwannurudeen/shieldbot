@@ -137,7 +137,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       scanData.risk_level === "UNKNOWN" || !Number.isFinite(scanData.risk_score) ||
       Object.values(scanData.coverage || {}).some(value => Number(value) < 1);
     const score = scanData.risk_score;
-    let level = incomplete ? "medium" : "low";
+    let level = incomplete ? "unknown" : "low";
     if (!incomplete && score >= 70) level = "high";
     else if (!incomplete && score >= 40) level = "medium";
 
@@ -498,8 +498,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     };
     let statsHtml = `<div class="health-stats">
       <div class="health-stat"><span class="health-stat-val">${totalApprovals}</span><span class="health-stat-label">Approvals</span></div>
-      <div class="health-stat"><span class="health-stat-val" style="color:#fca5a5">${dangerousCount}</span><span class="health-stat-label">High Risk</span></div>
-      <div class="health-stat"><span class="health-stat-val" style="color:#fcd34d">${valueText}</span><span class="health-stat-label">At Risk</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:#C21F30">${dangerousCount}</span><span class="health-stat-label">High Risk</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:#141414">${valueText}</span><span class="health-stat-label">At Risk</span></div>
     </div>`;
     let compHtml = "";
     for (const [key, val] of Object.entries(components)) {
@@ -511,7 +511,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     guardianHealthEl.innerHTML = `<div class="health-card">
       <div class="health-header">
-        <span class="health-score" style="color:${incomplete ? '#fcd34d' : score >= 70 ? '#6ee7b7' : score >= 40 ? '#fcd34d' : '#fca5a5'}">${incomplete ? "?" : score}</span>
+        <span class="health-score" style="color:${incomplete ? '#141414' : score >= 70 ? '#176E48' : score >= 40 ? '#141414' : '#C21F30'}">${incomplete ? "?" : score}</span>
         <span class="health-level ${escapeHtml(level)}">${escapeHtml(level)}</span>
       </div>
       ${statsHtml}
