@@ -2297,6 +2297,44 @@ async def verdict_permalink(chain_id: int, address: str):
     }
 
 
+@app.get("/api/verdicts/recent")
+async def recent_verdicts(chain_id: int, limit: int = 10):
+    """List confirmed on-chain records for a chain, newest first.
+
+    `limit` defaults to 10 and is clamped to 1..50. The response contains
+    `chain_id`, `count`, and `records`; each record contains `subject`, `verdict`,
+    `verdict_code`, `evidence_hash`, `observed_block`, `published_at`,
+    `onchain_status`, `registry`, `tx_hash`, and `verdict_url`. The `verdict_url`
+    points to the subject's permalink, which shows that subject's newest record.
+    """
+    from core.verdict_evidence import Verdict
+
+    _validate_chain_id(chain_id)
+    if not container or not container.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+    limit = max(1, min(limit, 50))
+    rows = await container.db.get_recent_confirmed_verdicts(chain_id, limit)
+    return {
+        "chain_id": chain_id,
+        "count": len(rows),
+        "records": [
+            {
+                "subject": row["subject"],
+                "verdict": row["verdict"],
+                "verdict_code": int(Verdict[row["verdict"]]),
+                "evidence_hash": row["evidence_hash"],
+                "observed_block": row["observed_block"],
+                "published_at": row["created_at"],
+                "onchain_status": row["onchain_status"],
+                "registry": row["registry"],
+                "tx_hash": row["tx_hash"],
+                "verdict_url": f"/api/verdict/{chain_id}/{row['subject']}",
+            }
+            for row in rows
+        ],
+    }
+
+
 async def _stored_scan_evidence(evidence_hash: str) -> Dict:
     if not re.fullmatch(r"0x[0-9a-fA-F]{64}", evidence_hash):
         raise HTTPException(status_code=404, detail="No evidence document with this hash")
