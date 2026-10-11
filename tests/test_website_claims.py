@@ -658,22 +658,22 @@ def test_fonts_are_self_hosted_and_the_build_copies_them():
         assert "fonts.googleapis.com" not in html and "fonts.gstatic.com" not in html, page.name
     fonts = sorted(path.name for path in (LANDING_SRC / "public" / "fonts").glob("*.woff2"))
     assert fonts == [
-        "jetbrains-mono-latin-400-normal.woff2",
-        "jetbrains-mono-latin-700-normal.woff2",
-        "manrope-latin-wght-normal.woff2",
+        "geist-latin-400-normal.woff2",
+        "geist-latin-500-normal.woff2",
+        "ibm-plex-mono-latin-400-normal.woff2",
     ]
     for name in fonts:
         built = (ROOT / "landing" / "fonts" / name).read_bytes()
         assert built == (LANDING_SRC / "public" / "fonts" / name).read_bytes(), f"landing/fonts/{name} is stale"
-    assert 'href="/fonts/manrope-latin-wght-normal.woff2" as="font"' in read(LANDING_SRC / "index.html")
+    assert 'href="/fonts/geist-latin-400-normal.woff2" as="font"' in read(LANDING_SRC / "index.html")
 
 
-def test_every_static_page_declares_its_manrope_face():
+def test_every_static_page_declares_its_geist_face():
     for name in ("404.html", "about.html", "privacy.html", "terms.html", "security.html"):
         for page in (LANDING_SRC / "public" / name, ROOT / "landing" / name):
             html = read(page)
             assert not any(line.startswith("+") for line in html.splitlines()), page
-            assert re.search(r"^\s*@font-face\s*\{[^}]*Manrope Variable", html, re.MULTILINE), page
+            assert re.search(r"^\s*@font-face\s*\{[^}]*Geist", html, re.MULTILINE), page
 
 
 def test_the_site_describes_the_quick_scan_as_the_readme_does():
