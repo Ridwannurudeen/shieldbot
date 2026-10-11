@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { verdictOf, type ScanReply } from "../firewallVerdict";
 import VerdictRecord from "./VerdictRecord";
 
@@ -80,6 +80,7 @@ function Result({ state }: { state: State }) {
       )}
       <VerdictRecord
         chip={{ verdict: label.verdict, label: label.text }}
+        reasons={reply.coverage_reasons}
         chain={chain}
         evidenceHash={reply.evidence_hash}
         variant="full"
@@ -102,6 +103,9 @@ export default function TryIt() {
   const [chainId, setChainId] = useState(1);
   const [address, setAddress] = useState("");
   const [state, setState] = useState<State>({ kind: "idle" });
+  // The scan in flight, aborted if the section unmounts before it answers.
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => () => request.current?.abort(), []);
 
   async function check(event: FormEvent) {
     event.preventDefault();
@@ -112,12 +116,15 @@ export default function TryIt() {
       return;
     }
     setState({ kind: "loading" });
+    const controller = new AbortController();
+    request.current = controller;
+    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
       const response = await fetch(SCAN_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address: value, chainId }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: controller.signal,
       });
       if (response.status === 400) setState({ kind: "bad-request" });
       else if (response.status === 429) setState({ kind: "rate-limited" });
@@ -130,6 +137,8 @@ export default function TryIt() {
     } catch {
       // A timeout, a network failure or a body that is not JSON all read the same to a visitor.
       setState({ kind: "unavailable" });
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

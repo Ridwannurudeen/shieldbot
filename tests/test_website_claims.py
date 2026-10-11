@@ -961,8 +961,37 @@ def test_try_it_uses_a_verdict_record_without_repeated_hero_captures():
     for kind in ("idle", "invalid", "loading", "result", "bad-request", "rate-limited", "unavailable"):
         assert f'kind: "{kind}"' in try_it
     assert "const TIMEOUT_MS = 30_000;" in try_it
-    assert "AbortSignal.timeout(TIMEOUT_MS)" in try_it
+    assert "setTimeout(() => controller.abort(), TIMEOUT_MS)" in try_it
+    assert "useEffect(() => () => request.current?.abort(), [])" in try_it
+    assert "signal: controller.signal," in try_it
+    # An Unknown from /api/scan says which check did not run: its coverage keys are not the six checks, so the
+    # reasons are printed on their own.
+    assert "reasons={reply.coverage_reasons}" in try_it
+    assert "coverage={reply.coverage}" not in try_it
     assert 'if (!/^0x[0-9a-fA-F]{40}$/.test(value))' in try_it
+
+
+def test_a_verdict_record_with_reasons_and_no_coverage_prints_each_reason():
+    # The shape of an /api/scan Unknown: coverage keys outside the six checks, reasons for those not run.
+    script = r"""
+const React = require(path.join(root, "node_modules", "react"));
+const {renderToStaticMarkup} = require(path.join(root, "node_modules", "react-dom", "server"));
+const VerdictRecord = require(path.join(root, "src", "components", "VerdictRecord.tsx")).default;
+const props = JSON.parse(process.argv[2]);
+process.stdout.write(renderToStaticMarkup(React.createElement(VerdictRecord, props)));
+"""
+    reason = "Sellability unknown: this quick scan does not simulate a sell; /api/firewall runs the full token check"
+    assert f'"{reason}"' in " ".join(read(ROOT / "api.py").split())
+    props = {
+        "chip": {"verdict": "unknown", "label": "UNKNOWN"},
+        "reasons": {"is_verified": None, "sellability": reason},
+        "variant": "full",
+    }
+    markup = run_typescript(script, json.dumps(props))
+    assert ">Not checked</p>" in markup
+    assert ">sellability</dt>" in markup and reason in markup
+    assert "is_verified" not in markup
+    assert "<ol" not in markup
 
 
 def test_built_dashboard_contains_the_current_source_strings():

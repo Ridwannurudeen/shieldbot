@@ -1,5 +1,5 @@
 import Badge, { type Verdict } from "./Badge";
-import CheckRow from "./CheckRow";
+import CheckRow, { CheckReasons } from "./CheckRow";
 import { short, shortenHex, utc } from "../registryFeed";
 
 // VerdictRecord: the page's one way of drawing a verdict. Top to bottom:
@@ -20,7 +20,9 @@ import { short, shortenHex, utc } from "../registryFeed";
 //                 /api/firewall or /api/scan reply through verdictOf (src/firewallVerdict.ts); a registry
 //                 record (LOW, MEDIUM, HIGH, HONEYPOT, UNKNOWN) through registryChip (src/registryVerdict.ts).
 //   coverage      reply.coverage. Leave it out for a source with no coverage (a registry record): no row.
-//   reasons       reply.coverage_reasons, printed verbatim under the row for each cell not fully run.
+//   reasons       reply.coverage_reasons, printed verbatim under the row for each cell not fully run. With no
+//                 coverage (an /api/scan reply, whose coverage keys are not the six checks), each served
+//                 reason is printed on its own under "Not checked", so an Unknown still says why.
 //   reason        reply.plain_english, or the registry's served reason.
 //   recordedAt    ISO time a recorded call was sent (hero-overlay-recordings.json sent_at).
 //   chain         { id, name } of the reply or record.
@@ -94,6 +96,11 @@ export default function VerdictRecord({
     ["Guard", guard && shortenHex(guard)],
   ];
   const lines = evidence.filter(([, value]) => value !== undefined);
+  const served = coverage
+    ? []
+    : Object.entries(reasons ?? {}).flatMap(([key, text]) =>
+        text ? [{ key, reason: text }] : [],
+      );
 
   return (
     <article
@@ -118,6 +125,20 @@ export default function VerdictRecord({
             </p>
           )}
           <CheckRow coverage={coverage} reasons={reasons} variant={variant} />
+        </div>
+      )}
+      {served.length > 0 && (
+        <div
+          className={
+            full
+              ? "border-b border-hairline px-5 py-5 sm:px-7"
+              : "border-b border-hairline px-4 py-3"
+          }
+        >
+          <p className="mb-3 font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-secondary">
+            Not checked
+          </p>
+          <CheckReasons entries={served} full={full} />
         </div>
       )}
       <div className={full ? "px-5 py-5 sm:px-7 sm:py-6" : "px-4 py-3"}>

@@ -33,6 +33,34 @@ function stateText(state: CellState, value: number | boolean | undefined) {
   return "Unavailable";
 }
 
+// The served reason for each check that did not fully run, verbatim, with long hex shortened.
+export function CheckReasons({
+  entries,
+  full,
+}: {
+  entries: { key: string; reason: string }[];
+  full: boolean;
+}) {
+  return (
+    <dl
+      className={
+        full
+          ? "vr-body grid gap-y-1.5 font-mono text-xs leading-[18px] sm:grid-cols-[max-content_1fr] sm:gap-x-4"
+          : "vr-body grid gap-y-1 font-mono text-[11px] leading-4 sm:grid-cols-[max-content_1fr] sm:gap-x-3"
+      }
+    >
+      {entries.map(({ key, reason }) => (
+        <div key={key} className="contents">
+          <dt className="text-secondary">{key}</dt>
+          <dd className="min-w-0 text-ink [overflow-wrap:anywhere]">
+            {shortenHex(reason)}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 export default function CheckRow({
   coverage,
   reasons,
@@ -124,22 +152,9 @@ export default function CheckRow({
         ))}
       </ol>
       {unfilled.length > 0 && (
-        <dl
-          className={
-            full
-              ? "vr-body mt-4 grid gap-y-1.5 font-mono text-xs leading-[18px] sm:grid-cols-[max-content_1fr] sm:gap-x-4"
-              : "vr-body mt-2 grid gap-y-1 font-mono text-[11px] leading-4 sm:grid-cols-[max-content_1fr] sm:gap-x-3"
-          }
-        >
-          {unfilled.map(({ key, reason }) => (
-            <div key={key} className="contents">
-              <dt className="text-secondary">{key}</dt>
-              <dd className="min-w-0 text-ink [overflow-wrap:anywhere]">
-                {shortenHex(reason)}
-              </dd>
-            </div>
-          ))}
-        </dl>
+        <div className={full ? "mt-4" : "mt-2"}>
+          <CheckReasons entries={unfilled} full={full} />
+        </div>
       )}
     </div>
   );
