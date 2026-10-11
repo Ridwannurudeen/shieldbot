@@ -4,59 +4,145 @@ import type { Config } from "tailwindcss";
 // Values are channel triplets so opacity modifiers work.
 const token = (name: string) => `rgb(var(--c-${name}) / <alpha-value>)`;
 
+// The sections not yet rebuilt still use the old names (and index.css used them in @apply, where an
+// unknown class fails the build; elsewhere an unknown utility is silently dropped). Each old name is an
+// alias of a new token until nothing references it.
+const unknownFill =
+  "linear-gradient(rgb(var(--c-unknown)), rgb(var(--c-unknown)))";
+
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  darkMode: ["selector", '[data-theme="dark"]'],
   theme: {
     colors: {
       transparent: "transparent",
       current: "currentColor",
       white: "#FFFFFF",
+      ground: { DEFAULT: token("ground"), alt: token("ground-alt") },
       ink: token("ink"),
-      body: token("body"),
-      muted: token("muted"),
-      faint: token("faint"),
-      surface: { DEFAULT: token("surface"), 2: token("surface-2"), 3: token("surface-3") },
-      panel: token("panel"),
-      field: token("field"),
-      line: { DEFAULT: token("line"), strong: token("line-strong") },
-      emerald: {
-        DEFAULT: token("emerald"),
-        deep: token("emerald-deep"),
-        bright: token("emerald-bright"),
-        tint: token("emerald-tint"),
-        line: token("emerald-line"),
-        onink: token("emerald-onink"),
+      secondary: token("secondary"),
+      hairline: {
+        DEFAULT: token("hairline"),
+        strong: token("hairline-strong"),
       },
-      onink: { DEFAULT: token("onink"), muted: token("onink-muted"), error: token("onink-error") },
-      onfill: token("onfill"),
-      safe: { fg: token("safe-fg"), tint: token("safe-tint"), line: token("safe-line") },
-      caution: { fg: token("caution-fg"), tint: token("caution-tint"), line: token("caution-line") },
-      high: { fg: token("high-fg"), tint: token("high-tint"), line: token("high-line") },
-      block: { fg: token("block-fg"), tint: token("block-tint"), line: token("block-line") },
-      unknown: { fg: token("unknown-fg"), tint: token("unknown-tint"), stripe: token("unknown-stripe"), line: token("unknown-line"), deep: "#3F4B5E" },
+      accent: {
+        DEFAULT: token("accent"),
+        hover: token("accent-hover"),
+        tint: token("accent-tint"),
+        "on-panel": token("accent-on-panel"),
+      },
+      "on-accent": token("on-accent"),
+      panel: token("panel"),
+      "on-panel": { DEFAULT: token("on-panel"), 2: token("on-panel-2") },
+
+      body: token("ink"),
+      muted: token("secondary"),
+      faint: token("secondary"),
+      surface: {
+        DEFAULT: token("ground"),
+        2: token("ground-alt"),
+        3: token("ground-alt"),
+      },
+      field: token("ground"),
+      line: { DEFAULT: token("hairline"), strong: token("hairline-strong") },
+      emerald: {
+        DEFAULT: token("accent"),
+        deep: token("accent-hover"),
+        bright: token("accent"),
+        tint: token("accent-tint"),
+        line: token("accent-tint"),
+        onink: token("accent-on-panel"),
+      },
+      onink: {
+        DEFAULT: token("on-panel"),
+        muted: token("on-panel-2"),
+        error: token("block-on-panel"),
+      },
+      onfill: token("on-accent"),
+
+      safe: {
+        DEFAULT: token("safe"),
+        text: token("safe-text"),
+        fg: token("safe-text"),
+        tint: token("ground-alt"),
+        line: token("safe"),
+      },
+      caution: {
+        fg: token("ink"),
+        tint: token("ground-alt"),
+        line: token("unknown"),
+      },
+      high: {
+        fg: token("block-text"),
+        tint: token("ground-alt"),
+        line: token("block"),
+      },
+      block: {
+        DEFAULT: token("block"),
+        text: token("block-text"),
+        "on-panel": token("block-on-panel"),
+        fg: token("block-text"),
+        tint: token("ground-alt"),
+        line: token("block"),
+      },
+      unknown: {
+        DEFAULT: token("unknown"),
+        fg: token("ink"),
+        tint: token("unknown"),
+        stripe: token("unknown"),
+        line: token("ink"),
+        deep: token("unknown"),
+      },
     },
     extend: {
       fontFamily: {
-        sans: ['"Manrope Variable"', '"Manrope Fallback"', "Arial", "Helvetica", "sans-serif"],
-        mono: ['"JetBrains Mono"', "ui-monospace", "SFMono-Regular", "Menlo", "Consolas", '"Liberation Mono"', "monospace"],
+        sans: [
+          '"Geist"',
+          '"Geist Fallback"',
+          "Arial",
+          "Helvetica",
+          "sans-serif",
+        ],
+        mono: [
+          '"IBM Plex Mono"',
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "Consolas",
+          '"Liberation Mono"',
+          "monospace",
+        ],
       },
+      // Geist ships 400 and 500 only; heavier classes in the old sections render the real 500.
+      fontWeight: { semibold: "500", bold: "500", extrabold: "500" },
       fontSize: {
-        display: ["4rem", { lineHeight: "1.04", letterSpacing: "-0.03em", fontWeight: "800" }],
-        "display-sm": ["2.5rem", { lineHeight: "1.04", letterSpacing: "-0.03em", fontWeight: "800" }],
-        h2: ["2.5rem", { lineHeight: "1.1", letterSpacing: "-0.025em", fontWeight: "700" }],
-        "h2-sm": ["1.875rem", { lineHeight: "1.1", letterSpacing: "-0.025em", fontWeight: "700" }],
+        display: [
+          "4rem",
+          { lineHeight: "1.04", letterSpacing: "-0.03em", fontWeight: "500" },
+        ],
+        "display-sm": [
+          "2.5rem",
+          { lineHeight: "1.04", letterSpacing: "-0.03em", fontWeight: "500" },
+        ],
+        h2: [
+          "2.5rem",
+          { lineHeight: "1.125", letterSpacing: "-0.025em", fontWeight: "500" },
+        ],
+        "h2-sm": [
+          "1.875rem",
+          { lineHeight: "1.125", letterSpacing: "-0.025em", fontWeight: "500" },
+        ],
       },
-      borderRadius: { lg: "10px" },
+      borderRadius: { lg: "6px" },
       boxShadow: {
-        sm: "var(--shadow-sm)",
-        md: "var(--shadow-md)",
-        lg: "var(--shadow-lg)",
-        button: "var(--shadow-button)",
+        sm: "0 1px 2px rgba(20, 20, 20, 0.06)",
+        md: "0 1px 2px rgba(20, 20, 20, 0.04), 0 4px 16px rgba(20, 20, 20, 0.06)",
+        lg: "0 2px 8px rgba(20, 20, 20, 0.18)",
+        button:
+          "inset 0 2px 0 rgba(255, 255, 255, 0.2), 0 1px 3px rgba(0, 0, 0, 0.12)",
       },
       backgroundImage: {
-        "unknown-hatch": "repeating-linear-gradient(135deg, rgb(var(--c-unknown-tint)) 0 6px, rgb(var(--c-unknown-stripe)) 6px 12px)",
-        "unknown-hatch-solid": "repeating-linear-gradient(135deg, #475569 0 6px, #3F4B5E 6px 12px)",
+        "unknown-hatch": unknownFill,
+        "unknown-hatch-solid": unknownFill,
       },
       transitionTimingFunction: { out: "cubic-bezier(0.2, 0, 0, 1)" },
     },

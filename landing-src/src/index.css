@@ -3,94 +3,53 @@
 @tailwind utilities;
 
 @layer base {
+  /* One white theme. Text/ground pairs, WCAG contrast (4.5:1 floor):
+     ink on ground 18.42, on ground-alt 17.04, on accent-tint 16.51, on unknown 5.38
+     secondary on ground 5.36, on ground-alt 4.95
+     accent on ground 6.84, on ground-alt 6.33; on-accent on accent 6.84, on accent-hover 8.60
+     safe-text on ground 6.25, on ground-alt 5.78; block-text on ground 7.38, on ground-alt 6.83
+     on-accent on block 5.94, on block-text 7.38
+     on-panel on panel 17.04, on-panel-2 5.38, accent-on-panel 6.48, block-on-panel 6.54 */
   :root {
-    --c-surface: 15 23 42;
-    --c-surface-2: 10 16 32;
-    --c-surface-3: 30 41 59;
-    --c-panel: 15 23 42;
-    --c-field: 30 41 59;
-    --c-line: 39 51 73;
-    --c-line-strong: 51 65 85;
-    --c-ink: 248 250 252;
-    --c-body: 203 213 225;
-    --c-muted: 148 163 184;
-    --c-faint: 139 154 177;
-    --c-emerald: 52 211 153;
-    --c-emerald-deep: 16 185 129;
-    --c-emerald-bright: 110 231 183;
-    --c-emerald-tint: 15 42 34;
-    --c-emerald-line: 31 95 71;
-    --c-emerald-onink: 52 211 153;
-    --c-onink: 203 213 225;
-    --c-onink-muted: 148 163 184;
-    --c-onink-error: 252 165 165;
-    --c-onfill: 15 23 42;
-    --c-safe-fg: 74 222 128;     --c-safe-tint: 15 46 29;      --c-safe-line: 22 101 52;
-    --c-caution-fg: 250 204 21;  --c-caution-tint: 48 39 8;    --c-caution-line: 133 77 14;
-    --c-high-fg: 251 146 60;     --c-high-tint: 53 26 11;      --c-high-line: 154 52 18;
-    --c-block-fg: 248 113 113;   --c-block-tint: 58 20 24;     --c-block-line: 185 28 28;
-    --c-unknown-fg: 226 232 240; --c-unknown-tint: 30 41 59;   --c-unknown-stripe: 40 52 71;  --c-unknown-line: 148 163 184;
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.40);
-    --shadow-md: 0 4px 12px rgba(0,0,0,0.45);
-    --shadow-lg: 0 24px 48px -12px rgba(0,0,0,0.60);
-    --shadow-button: inset 0 1px 0 0 rgba(255,255,255,0.25), 0 1px 3px 0 rgba(0,0,0,0.50);
-    color-scheme: dark;
-  }
-
-  :root[data-theme="light"] {
-    --c-surface: 255 255 255;
-    --c-surface-2: 246 248 250;
-    --c-surface-3: 238 242 246;
-    --c-panel: 11 18 32;
-    --c-field: 255 255 255;
-    --c-line: 227 232 239;
-    --c-line-strong: 203 213 225;
-    --c-ink: 11 18 32;
-    --c-body: 51 65 85;
-    --c-muted: 71 85 105;
-    --c-faint: 100 116 139;
-    --c-emerald: 4 120 87;
-    --c-emerald-deep: 6 95 70;
-    --c-emerald-bright: 16 185 129;
-    --c-emerald-tint: 236 253 245;
-    --c-emerald-line: 167 243 208;
-    --c-onfill: 255 255 255;
-    --c-safe-fg: 22 101 52;      --c-safe-tint: 220 252 231;   --c-safe-line: 134 239 172;
-    --c-caution-fg: 133 77 14;   --c-caution-tint: 254 249 195; --c-caution-line: 253 224 71;
-    --c-high-fg: 154 52 18;      --c-high-tint: 255 237 213;   --c-high-line: 253 186 116;
-    --c-block-fg: 185 28 28;     --c-block-tint: 254 226 226;  --c-block-line: 252 165 165;
-    --c-unknown-fg: 71 85 105;   --c-unknown-tint: 241 245 249; --c-unknown-stripe: 226 232 240;
-    --shadow-sm: 0 1px 2px rgba(11,18,32,0.06);
-    --shadow-md: 0 4px 12px rgba(11,18,32,0.08);
-    --shadow-lg: 0 24px 48px -12px rgba(11,18,32,0.18);
-    --shadow-button: inset 0 1px 0 0 rgba(255,255,255,0.20), 0 1px 3px 0 rgba(11,18,32,0.12);
+    --c-ground: 255 255 255;
+    --c-ground-alt: 247 246 242;
+    --c-ink: 20 20 20;
+    --c-secondary: 107 107 102;
+    --c-hairline: 230 229 225;
+    --c-hairline-strong: 214 213 208;
+    --c-accent: 163 22 143;
+    --c-accent-hover: 138 18 121;
+    --c-accent-tint: 251 239 249;
+    --c-on-accent: 255 255 255;
+    --c-panel: 20 20 20;
+    --c-on-panel: 247 246 242;
+    --c-on-panel-2: 139 139 134;
+    --c-accent-on-panel: 234 102 216;
+    --c-safe: 29 138 90;
+    --c-safe-text: 23 110 72;
+    --c-block: 194 31 48;
+    --c-block-text: 168 26 41;
+    --c-block-on-panel: 240 117 106;
+    --c-unknown: 139 139 134;
     color-scheme: light;
-  }
-
-  /* The switch sets this for one frame so no element fades between themes (buttons and links
-     carry transition-colors). */
-  :root[data-theme-switching] *,
-  :root[data-theme-switching] *::before,
-  :root[data-theme-switching] *::after {
-    transition: none !important;
   }
 
   html { scroll-padding-top: 80px; }
 
   body {
-    @apply bg-surface text-body font-sans antialiased;
+    @apply bg-ground text-ink font-sans antialiased;
     text-rendering: optimizeLegibility;
   }
 
   h1, h2, h3, h4 { @apply text-ink; text-wrap: balance; }
 
   :focus-visible {
-    outline: 2px solid rgb(var(--c-emerald));
+    outline: 2px solid rgb(var(--c-accent));
     outline-offset: 3px;
     border-radius: 4px;
   }
 
-  ::selection { background: rgb(var(--c-emerald-line)); color: rgb(var(--c-ink)); }
+  ::selection { background: rgb(var(--c-accent-tint)); color: rgb(var(--c-ink)); }
 }
 
 /* framer-motion follows the same setting through MotionConfig in App.tsx. */
