@@ -62,7 +62,7 @@ export default function CheckRow({
       <ol
         className={
           full
-            ? "grid grid-cols-3 gap-x-2 gap-y-3 sm:grid-cols-6"
+            ? "grid grid-cols-3 gap-x-2 gap-y-3 sm:grid-cols-[repeat(6,minmax(0,96px))] sm:gap-x-3"
             : "flex gap-1"
         }
       >

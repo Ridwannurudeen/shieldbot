@@ -8,7 +8,7 @@ export default function Hero() {
         <p className="font-mono text-xs uppercase tracking-[0.08em] text-secondary">
           Transaction firewall for wallets, contracts and agents
         </p>
-        <div className="mt-5 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-end lg:gap-12">
+        <div className="mt-5 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-start lg:gap-12">
           <h1 className="max-w-[13em] text-[36px] leading-[1.12] tracking-[-0.028em] font-medium text-ink md:text-[48px] md:tracking-[-0.032em] lg:text-[56px] lg:leading-[1.06]">
             Know before you sign. And know when we&nbsp;don't.
           </h1>
