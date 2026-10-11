@@ -1,10 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import CodeBlock from "./CodeBlock";
 import ContractCard from "./ContractCard";
 import SectionHeader from "./SectionHeader";
 import Icon from "./Icon";
+import type { CSSProperties } from "react";
 import VerdictRecord from "./VerdictRecord";
 import { registryChip } from "../registryVerdict";
+import { useReading } from "../reading";
 import {
   REGISTRY_CHAIN,
   loadRecentRecords,
@@ -109,10 +111,15 @@ const API = "https://api.shieldbotsecurity.online";
 
 type Row = { subject: string; record: RegistryRecord | null | undefined };
 
-function RecordRow({ subject, record }: Row) {
+// Each record reads itself as it arrives, once the list is in view, 120 ms after the row above it (index.css).
+
+function RecordRow({ subject, record, index }: Row & { index: number }) {
   const loading = record === undefined;
   return (
-    <li className="border-t border-hairline px-5 py-4 lg:py-5">
+    <li
+      className="border-t border-hairline px-5 py-4 lg:py-5"
+      style={{ "--vr-d": `${index * 120}ms` } as CSSProperties}
+    >
       <div className="grid gap-4 sm:grid-cols-[minmax(120px,0.7fr)_minmax(0,2.4fr)] lg:grid-cols-[minmax(140px,0.65fr)_minmax(0,2fr)] lg:items-start">
         <div className="min-w-0">
           <p className="text-xs text-secondary">Token</p>
@@ -130,6 +137,7 @@ function RecordRow({ subject, record }: Row) {
           {record ? (
             <>
               <VerdictRecord
+                animate
                 chip={registryChip(record.verdict, record.verdict_code)}
                 chain={REGISTRY_CHAIN}
                 block={record.observed_block}
@@ -179,7 +187,7 @@ function RecordRow({ subject, record }: Row) {
 
 function RecentRecords() {
   const { recent, launches, records, fetchedAt } = useFeed();
-  const strip = useRef<HTMLDivElement>(null);
+  const strip = useReading<HTMLDivElement>();
 
   // In the fallback each row needs its own record request; they are sent only once the strip is about a screen
   // away, so a visitor who never scrolls here does not spend the API's per-minute allowance on them.
@@ -210,6 +218,7 @@ function RecentRecords() {
   return (
     <div
       ref={strip}
+      data-read="wait"
       className="mt-10 overflow-hidden rounded-[14px] border border-hairline bg-ground shadow-md"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-5 py-4">
@@ -246,8 +255,8 @@ function RecentRecords() {
         </p>
       ) : (
         <ol>
-          {rows.map((row) => (
-            <RecordRow key={row.subject} {...row} />
+          {rows.map((row, index) => (
+            <RecordRow key={row.subject} {...row} index={index} />
           ))}
         </ol>
       )}

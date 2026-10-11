@@ -1,6 +1,7 @@
 import Icon from "./Icon";
 import VerdictRecord from "./VerdictRecord";
 import { registryChip } from "../registryVerdict";
+import { useReading } from "../reading";
 import {
   REGISTRY_CHAIN,
   short,
@@ -11,7 +12,9 @@ import {
 
 // The newest launch ShieldBot blocked on Robinhood Chain, told by its own scan: the two simulated transactions
 // are quoted from scan.coverage_reasons.honeypot as GET /api/launches serves it, and the record beside them is
-// GET /api/verdict/4663/{address}. Both are live; nothing on this section is baked into the page.
+// GET /api/verdict/4663/{address}. Both are live; nothing on this section is baked into the page. The record reads
+// itself once it has arrived and is in view: the rule draws, the chip lands, and the evidence settles line by line,
+// the observed block and the evidence hash with it (index.css).
 function simulations(reason: string) {
   const sell = /sell reverted: ([^;]+)/.exec(reason)?.[1];
   const transfer = /(a plain transfer [^;]+)/.exec(reason)?.[1];
@@ -29,6 +32,7 @@ export default function WorkedExample() {
   const recordLoading =
     launches === undefined || (!!launch && record === undefined);
   const score = launch?.scan?.risk_score;
+  const reading = useReading<HTMLDivElement>();
 
   return (
     <section
@@ -71,10 +75,11 @@ export default function WorkedExample() {
             )}
           </p>
 
-          <div className="mt-8">
+          <div ref={reading} data-read="wait" className="mt-8">
             {record ? (
               <>
                 <VerdictRecord
+                  animate
                   chip={registryChip(record.verdict, record.verdict_code)}
                   chain={REGISTRY_CHAIN}
                   block={record.observed_block}
