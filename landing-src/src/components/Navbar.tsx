@@ -12,17 +12,6 @@ const links = [
 
 const chromeStoreUrl = "https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk";
 
-function ChromeIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2a10 10 0 0 1 8.66 5H12a5 5 0 0 0-4.58 3H3.34A10 10 0 0 1 12 2z" opacity=".6" />
-      <path d="M12 22A10 10 0 0 1 3.34 17H7.42A5 5 0 0 0 12 19.92V22z" opacity=".6" />
-      <path d="M22 12a10 10 0 0 1-5.34 8.9l-2.08-3.6A5 5 0 0 0 17 12h5z" opacity=".6" />
-    </svg>
-  );
-}
-
 export default function Navbar() {
   const [open, setOpen] = useState(false);
 
@@ -56,7 +45,7 @@ export default function Navbar() {
               </a>
             ))}
           </div>
-          <Button href={chromeStoreUrl} variant="secondary" size="sm" className="hidden lg:inline-flex"><ChromeIcon />Add to Chrome</Button>
+          <Button href={chromeStoreUrl} variant="secondary" size="sm" className="hidden lg:inline-flex">Add to Chrome</Button>
           <Button variant="ghost" size="sm" className="lg:hidden h-11 w-11 min-w-11 !px-0" onClick={() => setOpen(!open)} ariaLabel="Menu" ariaExpanded={open} ariaControls="mobile-menu">
             <Icon name={open ? "close" : "menu"} size={24} />
           </Button>
@@ -71,7 +60,7 @@ export default function Navbar() {
                 {link.label}
               </a>
             ))}
-            <Button href={chromeStoreUrl} variant="secondary" className="w-full mt-2 mb-3" onClick={() => setOpen(false)}><ChromeIcon />Add to Chrome</Button>
+            <Button href={chromeStoreUrl} variant="secondary" className="w-full mt-2 mb-3" onClick={() => setOpen(false)}>Add to Chrome</Button>
           </div>
         </div>
       </div>
