@@ -140,7 +140,7 @@ export default function WhyUnknown() {
         </div>
 
         <div className="relative grid min-w-0 gap-4 lg:block lg:h-[520px]">
-          <div className="float-a rounded-[14px] border border-hairline bg-ground p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_16px_rgba(16,24,40,0.06)] lg:absolute lg:left-0 lg:top-2 lg:w-[360px]">
+          <div className="float-a rounded-[14px] border border-hairline bg-ground p-5 shadow-md lg:absolute lg:left-0 lg:top-2 lg:w-[360px]">
             <p className="text-[13px] font-medium text-secondary">
               Registry record, Robinhood Chain
             </p>
@@ -192,7 +192,7 @@ export default function WhyUnknown() {
             />
           </div>
 
-          <div className="float-b rounded-[14px] border border-hairline bg-ground p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_16px_rgba(16,24,40,0.06)] lg:absolute lg:bottom-2 lg:right-0 lg:w-[330px]">
+          <div className="float-b rounded-[14px] border border-hairline bg-ground p-5 shadow-md lg:absolute lg:bottom-2 lg:right-0 lg:w-[330px]">
             <p className="text-[13px] font-medium text-secondary">
               Coverage, Robinhood Chain
             </p>

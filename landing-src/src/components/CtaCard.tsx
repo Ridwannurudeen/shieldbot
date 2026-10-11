@@ -52,7 +52,7 @@ export default function CtaCard() {
               </a>
               <span className="text-sm text-white/90">Free, no account.</span>
             </div>
-            <p className="mt-auto pt-10 text-xs leading-[18px] text-white/90">
+            <p className="mt-auto hidden pt-10 text-xs sm:block leading-[18px] text-white/90">
               The dialog is a capture of the extension's overlay at unreleased
               commit 2b54a1b, fed the recorded reply of 26 September 2026, chain
               1, BLOCK RECOMMENDED.

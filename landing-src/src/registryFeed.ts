@@ -7,7 +7,7 @@ import { useSyncExternalStore } from "react";
 //   quotes the first one's sell simulation.
 // - GET /api/verdict/4663/{address}, one at a time (the API allows 10 requests in 5 seconds per visitor):
 //   the first launch's record, and in the fallback each other launch's record too.
-// undefined while loading, null when a route did not answer; nothing is filled in.
+// undefined while loading, null when a route did not answer in 10 seconds; nothing is filled in.
 const API = "https://api.shieldbotsecurity.online";
 const LIMIT = 5;
 
@@ -59,16 +59,24 @@ function setRecord(address: string, record: RegistryRecord | null | undefined) {
   update({ records: { ...feed.records, [address]: record } });
 }
 
+// A request that has not finished in 10 seconds is abandoned and its route reads as not answering, as in
+// WhyUnknown.tsx. Aborting after the reply has been read does nothing.
+function request(path: string): Promise<Response> {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 10_000);
+  return fetch(`${API}${path}`, { signal: controller.signal });
+}
+
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API}${path}`);
+  const response = await request(path);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json() as Promise<T>;
 }
 
 async function loadRecent(): Promise<boolean> {
   try {
-    const response = await fetch(
-      `${API}/api/verdicts/recent?chain_id=4663&limit=${LIMIT}`,
+    const response = await request(
+      `/api/verdicts/recent?chain_id=4663&limit=${LIMIT}`,
     );
     if (response.status === 404) {
       update({ recent: "fallback" });
