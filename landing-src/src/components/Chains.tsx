@@ -190,9 +190,11 @@ function mempoolCell(
   if (stats === undefined) return { state: "unknown", label: "Loading" };
   const observable = stats?.mempool_chains_observable;
   if (!observable) return { state: "unknown", label: "Unavailable" };
+  // A public mempool the monitor did not read on its last poll is a reading not taken, not a check that does not
+  // run here: the legend's outline, never the dashed cell.
   return observable.includes(chain.chainId)
     ? { state: "available", label: "Observed on last poll" }
-    : { state: "unavailable", label: "Not observable" };
+    : { state: "unknown", label: "Not read on last poll" };
 }
 
 function launchCell(chain: Chain): { state: CellState; label: string } {

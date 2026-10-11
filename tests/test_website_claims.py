@@ -826,7 +826,15 @@ def test_live_chain_matrix_and_check_definitions_use_reported_fields():
     assert "useStats()" in chains
     assert "**adapter.capabilities()," in read(ROOT / "api.py")
     assert "GoPlus flags only" in chains
-    assert 'label: "Not observable"' in chains
+    # Three mempool readings, kept apart as the API keeps them (public_mempool yes / unobservable / no): a public
+    # mempool the monitor did not read on its last poll is the legend's outline, not the dashed "does not run here".
+    assert '{ state: "unavailable", label: "No public mempool" }' in chains
+    assert '{ state: "available", label: "Observed on last poll" }' in chains
+    assert '{ state: "unknown", label: "Not read on last poll" }' in chains
+    assert "Not observable" not in chains
+    assert "Dashed: does not run on this chain" in chains and "Outline: Unavailable" in chains
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert "Not read on last poll" in bundle
     # /api/coverage serves sell simulation but no launch scan field: the footnote keeps the two sources apart.
     assert "Sell simulation: from the code, the chain adapters, the configuration GET /api/coverage/" in chains
     assert "Launch scans: from the code, services/launch_discovery.py, Robinhood Chain only." in chains
