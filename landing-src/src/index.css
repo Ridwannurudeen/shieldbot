@@ -70,7 +70,9 @@
    edge (a partial one then raises its grey level) and its served reason settles beside it. The evidence rule then
    draws down, the chip lands as it passes, and the evidence lines settle out of the rule one by one, the evidence
    hash last; the source line closes the record. Hero: about 3 s. The base style is the final frame and every rule
-   below exists only when motion is allowed, so reduced motion shows the final frame at once.
+   below exists only when motion is allowed, so reduced motion shows the final frame at once. Every animation fills
+   backwards only: it holds its first frame through its delay, and once it ends the base style takes over, so settled
+   text is not left on a compositor layer and renders as it does with reduced motion.
    Timeline, from --vr-d (a section's own delay): --vr-s first needle, --vr-g needle to needle, --vr-n one pass,
    --vr-r the rule starts (the chip lands 250 ms later). Easing: --e-read even-paced reading, --e-draw the rule,
    --e-out every settle (expo-out, no overshoot: a verdict settles, it does not bounce).
@@ -95,7 +97,7 @@
   .vr-compact { --vr-s: 0ms; --vr-g: 100ms; --vr-n: 200ms; --vr-r: 750ms; }
   .vr-bare { --vr-r: 0ms; }
 
-  .vr-animate .vr-req { animation: vr-wipe 450ms var(--e-out) var(--vr-d, 0ms) both; }
+  .vr-animate .vr-req { animation: vr-wipe 450ms var(--e-out) var(--vr-d, 0ms) backwards; }
 
   .vr-animate .vr-slot { clip-path: inset(-4px 0); }
   .vr-animate .vr-slot::after {
@@ -103,24 +105,25 @@
     position: absolute;
     inset: -4px -1px;
     background: linear-gradient(to left, rgb(var(--c-accent)) 2px, transparent 0);
-    animation: vr-needle var(--vr-n) var(--e-read) calc(var(--vr-d, 0ms) + var(--vr-s) + var(--i) * var(--vr-g)) both;
+    opacity: 0;
+    animation: vr-needle var(--vr-n) var(--e-read) calc(var(--vr-d, 0ms) + var(--vr-s) + var(--i) * var(--vr-g)) backwards;
   }
   .vr-compact .vr-slot { clip-path: inset(-2px 0); }
   .vr-compact .vr-slot::after { inset: -2px -1px; }
   .vr-animate .vr-ran {
-    animation: vr-wipe calc(var(--vr-n) * 0.75) var(--e-read) calc(var(--vr-d, 0ms) + var(--vr-s) + var(--i) * var(--vr-g)) both;
+    animation: vr-wipe calc(var(--vr-n) * 0.75) var(--e-read) calc(var(--vr-d, 0ms) + var(--vr-s) + var(--i) * var(--vr-g)) backwards;
   }
   .vr-animate .vr-partial,
   .vr-animate .vr-none {
-    animation: story-fade-in 200ms ease-out calc(var(--vr-d, 0ms) + var(--vr-s) + var(--i) * var(--vr-g) + var(--vr-n) * 0.6) both;
+    animation: story-fade-in 200ms ease-out calc(var(--vr-d, 0ms) + var(--vr-s) + var(--i) * var(--vr-g) + var(--vr-n) * 0.6) backwards;
   }
   .vr-animate .vr-partial > span {
     transform-origin: bottom;
-    animation: vr-rise 400ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-s) + var(--i) * var(--vr-g) + var(--vr-n) * 0.75) both;
+    animation: vr-rise 400ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-s) + var(--i) * var(--vr-g) + var(--vr-n) * 0.75) backwards;
   }
   .vr-animate .vr-why dt,
   .vr-animate .vr-why dd {
-    animation: vr-settle-legible 420ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-s) + max(var(--i), 0) * var(--vr-g) + var(--vr-n)) both;
+    animation: vr-settle-legible 420ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-s) + max(var(--i), 0) * var(--vr-g) + var(--vr-n)) backwards;
   }
 
   .vr-animate .vr-rule { position: relative; border-left-color: transparent; }
@@ -133,20 +136,20 @@
     width: 1px;
     background: rgb(var(--c-accent));
     transform-origin: top;
-    animation: vr-draw 700ms var(--e-draw) calc(var(--vr-d, 0ms) + var(--vr-r)) both;
+    animation: vr-draw 700ms var(--e-draw) calc(var(--vr-d, 0ms) + var(--vr-r)) backwards;
   }
-  .vr-animate .vr-chip { animation: vr-wipe 450ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 250ms) both; }
-  .vr-animate .vr-body > p { animation: vr-settle-legible 450ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 400ms) both; }
+  .vr-animate .vr-chip { animation: vr-wipe 450ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 250ms) backwards; }
+  .vr-animate .vr-body > p { animation: vr-settle-legible 450ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 400ms) backwards; }
   .vr-animate .vr-body dt,
   .vr-animate .vr-body dd {
-    animation: vr-settle-legible 420ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 520ms + var(--j) * 120ms) both;
+    animation: vr-settle-legible 420ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 520ms + var(--j) * 120ms) backwards;
   }
   .vr-animate .vr-body dt::before {
     transform-origin: left;
-    animation: vr-tick 360ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 520ms + var(--j) * 120ms) both;
+    animation: vr-tick 360ms var(--e-out) calc(var(--vr-d, 0ms) + var(--vr-r) + 520ms + var(--j) * 120ms) backwards;
   }
   .vr-animate .vr-src {
-    animation: vr-legible 400ms ease-out calc(var(--vr-d, 0ms) + var(--vr-r) + 640ms + var(--n) * 120ms) both;
+    animation: vr-legible 400ms ease-out calc(var(--vr-d, 0ms) + var(--vr-r) + 640ms + var(--n) * 120ms) backwards;
   }
 }
 
@@ -172,13 +175,13 @@
     width: 2px;
     background: rgb(var(--c-accent));
     opacity: 0;
-    animation: rd-mark 520ms var(--e-read) calc(var(--r) * 110ms) both;
+    animation: rd-mark 520ms var(--e-read) calc(var(--r) * 110ms) backwards;
   }
   .rd-cell {
     --t: calc(var(--r) * 110ms + 140ms + var(--c, 0) * 70ms);
-    animation: story-fade-in 240ms ease-out var(--t) both;
+    animation: story-fade-in 240ms ease-out var(--t) backwards;
   }
-  .rd-available { animation: vr-wipe 280ms var(--e-out) var(--t) both; }
+  .rd-available { animation: vr-wipe 280ms var(--e-out) var(--t) backwards; }
   .rd-cell.rd-late { animation: none; }
 }
 
@@ -204,20 +207,20 @@
     width: 1px;
     background: rgb(var(--c-hairline-strong));
     transform-origin: top;
-    animation: vr-draw 600ms var(--e-draw) calc(var(--s) * 600ms) both;
+    animation: vr-draw 600ms var(--e-draw) calc(var(--s) * 600ms) backwards;
   }
   .pt-last::after { background: rgb(var(--c-accent)); }
-  .pt-node { animation: pt-node 360ms var(--e-out) calc(var(--s) * 600ms) both; }
+  .pt-node { animation: pt-node 360ms var(--e-out) calc(var(--s) * 600ms) backwards; }
   .pt-step > p,
-  .pt-step > h3 { animation: pt-rise 520ms var(--e-out) calc(var(--s) * 600ms + 120ms) both; }
+  .pt-step > h3 { animation: pt-rise 520ms var(--e-out) calc(var(--s) * 600ms + 120ms) backwards; }
 }
 @media (prefers-reduced-motion: no-preference) and (min-width: 1024px) {
   .pt-step::after { top: -1px; bottom: auto; left: 0; right: 0; width: auto; height: 1px; transform-origin: left; animation-name: pt-draw-x; }
 }
 
 @media (prefers-reduced-motion: no-preference) and (min-width: 640px) {
-  .hero-loading { animation: hero-loading 2000ms linear both; }
-  .hero-verdict { animation: story-fade-in 350ms ease-out 1800ms both; }
+  .hero-loading { animation: hero-loading 2000ms linear backwards; }
+  .hero-verdict { animation: story-fade-in 350ms ease-out 1800ms backwards; }
 }
 
 @keyframes vr-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
@@ -264,5 +267,5 @@
 
 /* Feature tabs (FeatureTabs.tsx): the panel that appears rises from 0.6 opacity over 150 ms. */
 @media (prefers-reduced-motion: no-preference) {
-  .tab-fade { animation: vr-legible 150ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+  .tab-fade { animation: vr-legible 150ms cubic-bezier(0.4, 0, 0.2, 1) backwards; }
 }
