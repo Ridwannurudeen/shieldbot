@@ -1247,3 +1247,14 @@ def test_every_animation_runs_only_when_motion_is_allowed():
     assert animated >= 10
     source = read(LANDING_SRC / "src" / "index.css")
     assert "animation-duration: 0.01ms !important;" in source
+
+
+def test_the_footer_legend_explains_the_registry_chip():
+    # The five firewall verdicts stay the legend; one sentence keys the neutral registry shape LOW and MEDIUM take.
+    footer = " ".join(read(COMPONENTS / "Footer.tsx").split())
+    text = "Registry records keep their own words: LOW, MEDIUM, HIGH, HONEYPOT, UNKNOWN. LOW and MEDIUM are drawn plain,"
+    assert text in footer
+    assert '<Badge verdict="registry">LOW</Badge>; the guard allows both while fresh.' in footer
+    assert "Object.values(labels).map(" in footer
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert text in bundle

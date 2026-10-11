@@ -204,6 +204,10 @@ export default function Footer() {
               ))}
             </ul>
             <p className="mt-3 text-[13px] leading-5 text-secondary">When a check cannot run, the verdict is Unknown, never Safe.</p>
+            <p className="mt-2 text-[13px] leading-5 text-secondary">
+              Registry records keep their own words: LOW, MEDIUM, HIGH, HONEYPOT, UNKNOWN. LOW and MEDIUM are drawn plain,{" "}
+              <Badge verdict="registry">LOW</Badge>; the guard allows both while fresh.
+            </p>
           </div>
           <div className="min-w-0">
             <h2 className={docHeadingClass}>API</h2>
