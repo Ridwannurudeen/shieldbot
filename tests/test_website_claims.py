@@ -1232,20 +1232,27 @@ def media_blocks(css: str):
             start = i + 1
 
 
-def test_every_animation_runs_only_when_motion_is_allowed():
-    # Reduced motion shows every final frame at once: in the built CSS, each animation declaration sits inside
-    # @media (prefers-reduced-motion: no-preference), so with reduce no element starts hidden or waits for a reading.
-    css = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.css"))
-    assert css
-    animated = 0
+def animated_rules(css: str):
+    # Yield (selector, inside @media (prefers-reduced-motion: no-preference)) for every rule that declares an animation.
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
     for media, selector, body in media_blocks(css):
         if selector.startswith("@keyframes") or selector.startswith("from") or selector.startswith("to") or "%" in selector:
             continue
         if re.search(r"(^|;)\s*animation(-name)?:", body) and not re.search(r"(^|;)\s*animation(-name)?:\s*none", body):
-            assert any("prefers-reduced-motion:no-preference" in m.replace(" ", "") for m in media), selector
-            animated += 1
-    assert animated >= 10
+            yield selector, any("prefers-reduced-motion:no-preference" in m.replace(" ", "") for m in media)
+
+
+def test_every_animation_runs_only_when_motion_is_allowed():
+    # Reduced motion shows every final frame at once: in the source CSS and in the built CSS, each animation
+    # declaration sits inside @media (prefers-reduced-motion: no-preference), so with reduce no element starts hidden
+    # or waits for a reading. Checking the source too catches a violation even while landing/ is stale.
+    built = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.css"))
     source = read(LANDING_SRC / "src" / "index.css")
+    for css in (built, source):
+        rules = list(animated_rules(css))
+        assert len(rules) >= 10
+        for selector, allowed in rules:
+            assert allowed, selector
     assert "animation-duration: 0.01ms !important;" in source
 
 
