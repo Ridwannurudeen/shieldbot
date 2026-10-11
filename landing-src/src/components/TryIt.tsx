@@ -264,26 +264,26 @@ export default function TryIt() {
           <img
             src="/hero-overlay-safe.webp"
             width={490}
-            height={300}
+            height={480}
             loading="lazy"
             alt="The ShieldBot extension's dialog for a 250 ARB approval to Uniswap's SwapRouter02 on Arbitrum One. The verdict badge reads SAFE — Safety: 93.6/100. The danger signals include Proxy/upgradeable contract."
             className="w-full h-auto rounded-md ring-1 ring-hairline"
           />
           <figcaption className="mt-1.5 text-xs leading-[18px] text-secondary">
-            Recorded /api/firewall reply of 11 October 2026, chain 42161, SAFE. Top of the dialog, overlay at unreleased commit 2b54a1b.
+            Recorded /api/firewall reply of 11 October 2026, chain 42161, SAFE. Upper part of the dialog, overlay at unreleased commit 2b54a1b.
           </figcaption>
         </figure>
         <figure className="min-w-0">
           <img
             src="/hero-overlay-unknown.webp"
             width={490}
-            height={300}
+            height={480}
             loading="lazy"
             alt="The ShieldBot extension's dialog for a token approval on Robinhood Chain whose token has no supported pool. The verdict badge reads UNKNOWN. Why: No DexScreener pairs on requested chain (robinhood); Initialize logs scanned over blocks 85694876-85724875; No supported pool found; Unknown fields: buy_tax, sell_tax, can_sell. The danger signals include Top 10 holders own 100.0% of supply (burn, locked, pool and locker addresses excluded)."
             className="w-full h-auto rounded-md ring-1 ring-hairline"
           />
           <figcaption className="mt-1.5 text-xs leading-[18px] text-secondary">
-            Recorded /api/firewall reply of 11 October 2026, chain 4663, UNKNOWN. Top of the dialog, same overlay.
+            Recorded /api/firewall reply of 11 October 2026, chain 4663, UNKNOWN. Upper part of the dialog, same overlay.
           </figcaption>
         </figure>
       </div>

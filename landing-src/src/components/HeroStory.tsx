@@ -101,7 +101,6 @@ export default function HeroStory() {
                 src="/hero-overlay-loading.webp"
                 width={490}
                 height={246}
-                loading="lazy"
                 alt="The ShieldBot extension's dialog while it checks the request. It reads Analyzing transaction..."
                 className="w-[380px] h-auto rounded"
               />

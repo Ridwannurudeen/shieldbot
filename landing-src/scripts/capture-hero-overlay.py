@@ -20,8 +20,8 @@ The landing page's images:
     hero-overlay.webp          --request hero-overlay-request.json --response hero-overlay-response.json
     hero-overlay-mobile.webp   the same, --width 390 --keep-height 496
     hero-overlay-loading.webp  the same, --state loading
-    hero-overlay-safe.webp     --request hero-overlay-safe-request.json --response hero-overlay-safe-response.json --keep-height 300
-    hero-overlay-unknown.webp  --request hero-overlay-unknown-request.json --response hero-overlay-unknown-response.json --keep-height 300
+    hero-overlay-safe.webp     --request hero-overlay-safe-request.json --response hero-overlay-safe-response.json --keep-height 480
+    hero-overlay-unknown.webp  --request hero-overlay-unknown-request.json --response hero-overlay-unknown-response.json --keep-height 480
 Needs Python with playwright, Google Chrome and Pillow. Not run in CI.
 """
 
