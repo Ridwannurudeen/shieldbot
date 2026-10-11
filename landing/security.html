@@ -24,13 +24,20 @@
   <link rel="shortcut icon" href="/favicon.png">
   <style>
     :root {
-      --c-surface: 255 255 255; --c-surface-2: 247 246 242; --c-surface-3: 247 246 242;
-      --c-line: 230 229 225; --c-ink: 20 20 20; --c-body: 20 20 20; --c-muted: 107 107 102;
-      --c-emerald: 163 22 143; --c-emerald-tint: 251 239 249; --c-emerald-line: 214 213 208;
-      --c-safe-fg: 22 101 52; --c-safe-tint: 220 252 231;
-      --c-caution-fg: 133 77 14; --c-caution-tint: 254 249 195;
-      --c-high-fg: 154 52 18; --c-high-tint: 255 237 213;
-      --c-block-fg: 185 28 28; --c-block-tint: 254 226 226;
+      --ground: #FFFFFF;
+      --ground-alt: #F7F6F2;
+      --ink: #141414;
+      --secondary: #6B6B66;
+      --hairline: #E6E5E1;
+      --hairline-strong: #D6D5D0;
+      --accent: #A3168F;
+      --accent-hover: #8A1279;
+      --accent-tint: #FBEFF9;
+      --block: #C21F30;
+      --block-text: #A81A29;
+      --safe: #1D8A5A;
+      --safe-text: #176E48;
+      --unknown: #8B8B86;
       color-scheme: light;
     }
     @font-face {
@@ -47,7 +54,15 @@
       font-weight: 500;
       font-display: swap;
       src: url("/fonts/geist-latin-500-normal.woff2") format("woff2");
-      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: "IBM Plex Mono";
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: url("/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
     }
     @font-face {
       font-family: "Geist Fallback";
@@ -57,78 +72,331 @@
       descent-override: 21.88%;
       line-gap-override: 0%;
     }
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { color-scheme: light; }
     body {
-      font-family: "Geist", "Geist Fallback", Arial, Helvetica, sans-serif;
-      background: rgb(var(--c-surface));
-      color: rgb(var(--c-body));
-      line-height: 1.7;
+      min-width: 320px;
+      margin: 0;
+      background: var(--ground);
+      color: var(--ink);
+      font: 400 16px/1.65 "Geist", "Geist Fallback", Arial, Helvetica, sans-serif;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+    a:hover { color: var(--accent-hover); }
+    a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    b, strong, th, h1, h2, h3 { font-weight: 500; }
+    code { font: 400 0.92em/1.6 "IBM Plex Mono", ui-monospace, monospace; overflow-wrap: anywhere; }
+    p { margin: 0 0 14px; font-size: 15px; overflow-wrap: anywhere; }
+    ul { margin: 8px 0 16px 20px; padding: 0; }
+    li { margin-bottom: 8px; font-size: 15px; overflow-wrap: anywhere; }
+    li strong { color: var(--ink); }
+    .site-nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid var(--hairline);
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: saturate(1.4) blur(10px);
+      -webkit-backdrop-filter: saturate(1.4) blur(10px);
+    }
+    .nav-inner {
+      width: calc(100% - 32px);
+      max-width: 1152px;
+      height: 64px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .wordmark {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .nav-actions { display: flex; align-items: center; gap: 24px; }
+    .nav-links { display: flex; align-items: center; gap: 24px; }
+    .nav-links a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 500;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .nav-links a:hover { color: var(--accent); }
+    .nav-cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
       padding: 0 16px;
+      border: 1px solid var(--hairline-strong);
+      border-radius: 6px;
+      background: var(--ground);
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 500;
+      text-decoration: none;
+      white-space: nowrap;
     }
-    a { color: rgb(var(--c-emerald)); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    p a { text-decoration: underline; }
-
-    .nav {
-      max-width: 760px; margin: 0 auto;
-      padding: 20px 0;
-      display: flex; align-items: center; gap: 10px;
-      border-bottom: 1px solid rgb(var(--c-line));
-      margin-bottom: 48px;
+    .nav-cta:hover { background: var(--ground-alt); color: var(--ink); }
+    .mobile-menu { display: none; }
+    .mobile-menu summary { cursor: pointer; list-style: none; }
+    .mobile-menu summary::-webkit-details-marker { display: none; }
+    .mobile-panel { display: none; }
+    .wrap {
+      width: calc(100% - 32px);
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 48px 0 88px;
     }
-    .nav-logo { font-size: 22px; }
-    .nav-name { font-size: 15px; font-weight: 700; color: rgb(var(--c-ink)); }
-    .nav-back { margin-left: auto; font-size: 13px; color: rgb(var(--c-muted)); }
-    .nav-back:hover { color: rgb(var(--c-emerald)); text-decoration: none; }
-
-    .wrap { max-width: 680px; margin: 0 auto; padding-bottom: 80px; }
-
     .hero { margin-bottom: 40px; }
     .hero h1 {
-      font-size: 32px; font-weight: 800; color: rgb(var(--c-ink));
-      letter-spacing: -0.02em; margin-bottom: 10px;
+      margin: 0 0 12px;
+      color: var(--ink);
+      font-size: clamp(32px, 5vw, 40px);
+      font-weight: 500;
+      letter-spacing: -0.03em;
+      line-height: 1.12;
+      overflow-wrap: anywhere;
     }
-    .hero-meta { font-size: 13px; color: rgb(var(--c-muted)); }
-
+    .hero p { max-width: 600px; font-size: 16px; }
+    .hero-meta { color: var(--secondary); font-size: 13px; }
     h2 {
-      font-size: 20px; font-weight: 700; color: rgb(var(--c-ink));
       margin: 40px 0 10px;
       padding-bottom: 8px;
-      border-bottom: 1px solid rgb(var(--c-line));
+      border-bottom: 1px solid var(--hairline);
+      color: var(--ink);
+      font-size: 21px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
     }
-    h3 { font-size: 17px; }
-    p { margin-bottom: 12px; font-size: 15px; color: rgb(var(--c-body)); }
-    ul { margin: 8px 0 14px 20px; }
-    li { font-size: 15px; color: rgb(var(--c-body)); margin-bottom: 6px; }
-    li strong { color: rgb(var(--c-ink)); }
-
+    h3 { margin: 24px 0 8px; color: var(--ink); font-size: 17px; }
     .callout {
-      background: rgb(var(--c-emerald-tint));
-      border: 1px solid rgb(var(--c-emerald-line));
-      border-left: 3px solid rgb(var(--c-emerald));
-      border-radius: 8px;
-      padding: 14px 16px;
       margin: 20px 0;
-      font-size: 13px; color: rgb(var(--c-body));
+      padding: 14px 16px;
+      border: 1px solid var(--hairline-strong);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px;
+      background: var(--accent-tint);
+      color: var(--ink);
+      font-size: 14px;
+      overflow-wrap: anywhere;
     }
-
-    .footer {
-      max-width: 760px; margin: 48px auto 0;
-      padding-top: 24px;
-      border-top: 1px solid rgb(var(--c-line));
-      font-size: 12px; color: rgb(var(--c-muted));
-      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    .callout p:last-child { margin-bottom: 0; }
+    .score-table {
+      width: 100%;
+      margin: 16px 0;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    .score-table th {
+      color: var(--secondary);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-align: left;
+      text-transform: uppercase;
+    }
+    .score-table th:first-child, .score-table td:first-child { width: 19%; }
+    .score-table th:nth-child(2), .score-table td:nth-child(2) { width: 30%; }
+    .score-table th:nth-child(3), .score-table td:nth-child(3) { width: 51%; }
+    .score-table th, .score-table td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--hairline);
+      color: var(--ink);
+      font-size: 13px;
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+    .score-table th { color: var(--secondary); }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 4px;
+      max-width: 100%;
+      padding: 3px 8px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      line-height: 1.35;
+      text-align: center;
+      overflow-wrap: normal;
+      word-break: normal;
+      white-space: normal;
+      vertical-align: middle;
+    }
+    .badge-glyph { flex: none; }
+    .badge.block { border-color: var(--block); background: var(--block); color: #FFFFFF; }
+    .badge.high { border: 2px solid var(--block); background: var(--ground); color: var(--block-text); }
+    .badge.caution { border-color: var(--unknown); background: var(--ground); color: var(--ink); }
+    .badge.safe { border-color: var(--safe); background: var(--ground); color: var(--safe-text); }
+    .badge.unknown { border: 1px dashed var(--ink); background: var(--unknown); color: var(--ink); }
+    .compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+    .compare-card { min-width: 0; padding: 18px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--ground-alt); }
+    .compare-card.shield { border-color: var(--hairline-strong); }
+    .compare-card ul { margin-left: 16px; }
+    .compare-card li { font-size: 13px; margin-bottom: 6px; }
+    .error-page { max-width: 680px; min-height: 360px; }
+    .error-page .hero { margin-bottom: 0; }
+    .error-state { margin-top: 24px; }
+    .not-found-links { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 32px 0 0; padding: 0; list-style: none; }
+    .not-found-links li { margin: 0; }
+    .footer { width: 100%; border-top: 1px solid var(--hairline); background: var(--ground); color: var(--ink); }
+    .footer-inner {
+      width: calc(100% - 32px);
+      max-width: 1152px;
+      margin: 0 auto;
+      padding: 56px 0 0;
+    }
+    .footer-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; }
+    .footer-wordmark { color: var(--ink); font-size: 20px; font-weight: 500; text-decoration: none; }
+    .footer-wordmark span:last-child { color: var(--accent); }
+    .footer-brand p { max-width: 26em; margin: 12px 0 0; color: var(--secondary); font-size: 14px; }
+    .footer-brand .founder { color: var(--secondary); font-size: 13px; }
+    .footer-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+    .footer-cols section { min-width: 0; }
+    .footer-cols h2 {
+      margin: 0 0 12px;
+      padding: 0;
+      border: 0;
+      color: var(--secondary);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .footer-cols a {
+      display: flex;
+      align-items: center;
+      min-height: 40px;
+      color: var(--ink);
+      font-size: 14px;
+      text-decoration: none;
+      overflow-wrap: anywhere;
+    }
+    .footer-cols a:hover { color: var(--accent); }
+    .footer-cols a.footer-email { overflow-wrap: normal; white-space: normal; }
+    .footer-cols a.footer-email span { min-width: 0; }
+    .footer a:focus-visible { outline-color: var(--accent); }
+    .footer-bottom {
+      margin-top: 48px;
+      padding: 20px 0;
+      border-top: 1px solid var(--hairline);
+      color: var(--secondary);
+      font-size: 12px;
+    }
+    @media (max-width: 1080px) {
+      .nav-links, .nav-cta { display: none; }
+      .mobile-menu { display: block; }
+      .mobile-menu summary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--ink);
+      }
+      .mobile-menu summary:hover { background: var(--ground-alt); }
+      .menu-icon-close { display: none; }
+      .mobile-menu[open] .menu-icon-bars { display: none; }
+      .mobile-menu[open] .menu-icon-close { display: block; }
+      .mobile-panel {
+        position: fixed;
+        top: 64px;
+        right: 0;
+        left: 0;
+        z-index: 21;
+        padding: 8px 16px 16px;
+        border-bottom: 1px solid var(--hairline);
+        background: var(--ground);
+      }
+      .mobile-menu[open] .mobile-panel { display: flex; flex-direction: column; }
+      .mobile-panel a:not(.nav-cta) {
+        display: flex;
+        align-items: center;
+        min-height: 48px;
+        border-bottom: 1px solid var(--hairline);
+        color: var(--ink);
+        font-size: 15px;
+        font-weight: 500;
+        text-decoration: none;
+      }
+      .mobile-panel .nav-cta { display: inline-flex; justify-content: center; margin-top: 14px; }
+      .footer-grid { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+    }
+    @media (max-width: 600px) {
+      .wrap { padding: 36px 0 64px; }
+      .hero { margin-bottom: 32px; }
+      .hero h1 { font-size: 32px; }
+      .score-table th, .score-table td { padding: 8px 4px; font-size: 12px; }
+      .score-table th:nth-child(2), .score-table td:nth-child(2) { padding-left: 3px; padding-right: 3px; }
+      .compare-grid { grid-template-columns: minmax(0, 1fr); }
+      .compare-card { padding: 16px; }
+      .footer-inner { padding-top: 40px; }
+      .footer-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 16px; }
+      .footer-bottom { margin-top: 36px; }
     }
   </style>
     <script src="/js/plausible-init.js"></script>
     <script async src="/js/script.js"></script>
+    <script src="/js/static-nav.js" defer></script>
 </head>
 <body>
 
-  <nav class="nav">
-    <span class="nav-logo" aria-hidden="true">&#128737;</span>
-    <span class="nav-name">ShieldAI Firewall</span>
-    <a href="/" class="nav-back">&#8592; Back to home</a>
+  <nav class="site-nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="wordmark" href="/">ShieldBot</a>
+      <div class="nav-actions">
+        <div class="nav-links">
+          <a href="/#how-it-works">How it works</a>
+          <a href="/#chains">Coverage</a>
+          <a href="/#on-chain">On-chain registry</a>
+          <a href="/#agent-security">For builders</a>
+          <a href="/dashboard">Dashboard</a>
+        </div>
+        <a class="nav-cta" href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Add to Chrome</a>
+        <details class="mobile-menu">
+          <summary aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu">
+            <svg viewBox="0 0 32 32" width="24" height="24" fill="currentColor" aria-hidden="true">
+              <g class="menu-icon-bars">
+                <path d="M4 6H28V8H4z" />
+                <path d="M4 24H28V26H4z" />
+                <path d="M4 12H28V14H4z" />
+                <path d="M4 18H28V20H4z" />
+              </g>
+              <path class="menu-icon-close" d="M17.4141 16 24 9.4141 22.5859 8 16 14.5859 9.4143 8 8 9.4141 14.5859 16 8 22.5859 9.4143 24 16 17.4141 22.5859 24 24 22.5859 17.4141 16z" />
+            </svg>
+          </summary>
+          <div class="mobile-panel" id="mobile-menu">
+            <a href="/#how-it-works">How it works</a>
+            <a href="/#chains">Coverage</a>
+            <a href="/#on-chain">On-chain registry</a>
+            <a href="/#agent-security">For builders</a>
+            <a href="/dashboard">Dashboard</a>
+            <a class="nav-cta" href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Add to Chrome</a>
+          </div>
+        </details>
+      </div>
+    </div>
   </nav>
 
   <main class="wrap">
@@ -191,16 +459,43 @@
   </main>
 
   <footer class="footer">
-    <span>&#169; 2026 ShieldBot Security. All rights reserved.</span>
-    <span>ShieldAI Transaction Firewall</span>
-    <nav aria-label="Footer">
-      <a href="/">Home</a>
-      <a href="/about.html">About</a>
-      <a href="/privacy.html">Privacy</a>
-      <a href="/terms.html">Terms</a>
-      <a href="/security.html">Security</a>
-      <a href="mailto:support@shieldbotsecurity.online">Support</a>
-    </nav>
+    <div class="footer-inner">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="footer-wordmark" href="/"><span>Shield</span><span>Bot</span></a>
+          <p>The security layer that says what it checked.</p>
+          <p class="founder">Built by Ridwan Nurudeen, founder and solo builder.</p>
+        </div>
+        <div class="footer-cols">
+          <section>
+            <h2>Product</h2>
+            <a href="/#how-it-works">How it works</a>
+            <a href="/#on-chain">On-chain check</a>
+            <a href="/#chains">Coverage</a>
+            <a href="/#agent-security">For builders</a>
+            <a href="/dashboard">Threat dashboard</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/about.html">About</a>
+            <a href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Chrome extension</a>
+            <a href="https://api.shieldbotsecurity.online/docs" target="_blank" rel="noopener noreferrer">API docs</a>
+          </section>
+          <section>
+            <h2>Legal</h2>
+            <a href="/privacy.html">Privacy Policy</a>
+            <a href="/terms.html">Terms of Service</a>
+            <a href="/security.html">Security</a>
+          </section>
+          <section>
+            <h2>Community</h2>
+            <a href="https://github.com/Ridwannurudeen/shieldbot" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href="https://t.me/shieldbot_bnb_bot" target="_blank" rel="noopener noreferrer">Telegram bot</a>
+            <a href="https://x.com/shieldbot_" target="_blank" rel="noopener noreferrer">@shieldbot_</a>
+            <a class="footer-email" href="mailto:support@shieldbotsecurity.online"><span>support@<wbr>shieldbotsecurity.online</span></a>
+          </section>
+        </div>
+      </div>
+      <div class="footer-bottom">&#169; 2026 ShieldBot.</div>
+    </div>
   </footer>
 
 </body>
