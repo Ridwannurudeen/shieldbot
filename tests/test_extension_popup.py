@@ -404,13 +404,13 @@ def contrast(foreground, background):
 @pytest.mark.parametrize(
     ("page", "selector", "background"),
     [
-        ("popup.html", ".history-time", "#1e293b"),
-        ("popup.html", ".feed-time", "#020617"),
-        ("popup.html", ".gauge-sub", "#020617"),
-        ("popup.html", ".ctr-meta", "#020617"),
-        ("popup.html", ".dh-version", "#020617"),
-        ("popup.html", ".feed-empty-lbl", "#020617"),
-        ("popup.html", ".wh-hint", "#020617"),
+        ("popup.html", ".history-time", "#FFFFFF"),
+        ("popup.html", ".feed-time", "#FFFFFF"),
+        ("popup.html", ".gauge-sub", "#FFFFFF"),
+        ("popup.html", ".ctr-meta", "#FFFFFF"),
+        ("popup.html", ".dh-version", "#FFFFFF"),
+        ("popup.html", ".feed-empty-lbl", "#FFFFFF"),
+        ("popup.html", ".wh-hint", "#FFFFFF"),
         ("welcome.html", ".version", "#1e293b"),
     ],
 )
