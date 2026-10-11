@@ -635,6 +635,8 @@ def test_built_landing_bundle_contains_the_current_feature_copy(component):
 HERO_SECTION_COPY = {
     "HeroRecord.tsx": (
         "Recorded reply of 26 September 2026, chain 1, BLOCK RECOMMENDED.",
+        "Recorded reply of 11 October 2026, chain 4663, UNKNOWN.",
+        "Recorded reply of 11 October 2026, chain 42161, SAFE.",
         "Recorded examples, not live scans.",
         "overlay at unreleased commit 2b54a1b, fed that reply.",
     ),
@@ -830,6 +832,9 @@ def test_live_chain_matrix_and_check_definitions_use_reported_fields():
     assert 'label="Unavailable"' not in chains
     assert "Public mempool: Unavailable. GET /api/stats did not answer" in chains
     assert "Where it says None" not in chains
+    # One legend vocabulary with Mechanism's check cells: Filled, Dashed, Outline: Unavailable.
+    assert "Outline: Unavailable" in chains and "Not available" not in chains
+    assert '"None"' not in read(COMPONENTS / "WhyUnknown.tsx")
     assert "table-fixed" in chains
     assert "min-w-[720px]" not in chains
 
@@ -1025,6 +1030,53 @@ def test_a_code_block_says_when_its_lines_scroll_sideways():
     assert "new ResizeObserver(measure)" in block
     assert "setOverflows(element.scrollWidth > element.clientWidth)" in block
     assert "Scroll the block sideways to read each line in full" in block
+
+
+def test_the_feature_index_is_a_vertical_tablist_with_roving_focus():
+    tabs = " ".join(read(COMPONENTS / "FeatureTabs.tsx").split())
+    for text in (
+        'role="tablist"',
+        'aria-orientation="vertical"',
+        'role="tab"',
+        'role="tabpanel"',
+        "tabIndex={selected ? 0 : -1}",
+        "const next = current === last ? 0 : current + 1;",
+        "const previous = current === 0 ? last : current - 1;",
+        "ArrowDown: next, ArrowRight: next, ArrowUp: previous, ArrowLeft: previous, Home: 0, End: last,",
+        "event.preventDefault(); select(target);",
+        "tabs.current[i]?.focus();",
+    ):
+        assert text in tabs, text
+
+
+def test_the_faq_opens_one_native_button_answer_at_a_time():
+    faq = " ".join(read(COMPONENTS / "FAQ.tsx").split())
+    for text in (
+        '<button type="button"',
+        "onClick={() => setOpen(expanded ? null : i)}",
+        "aria-expanded={expanded}",
+        "aria-controls={`faq-answer-${i}`}",
+        'role="region"',
+        "inert={!expanded}",
+    ):
+        assert text in faq, text
+    # No unbacked comparison with other tools.
+    assert "Many tools" not in faq
+
+
+def test_the_footer_health_line_reads_unavailable_when_the_api_does_not_answer():
+    # /api/health is exempt from the rate limiter, so the footer's request costs no allowance.
+    assert 'if request.url.path in ("/", "/api/health",' in read(ROOT / "api.py")
+    footer = " ".join(read(COMPONENTS / "Footer.tsx").split())
+    for text in (
+        'fetch("https://api.shieldbotsecurity.online/api/health", { signal: controller.signal })',
+        "const timeout = setTimeout(() => controller.abort(), 10_000);",
+        "if (!r.ok) throw new Error(`HTTP ${r.status}`);",
+        "if (active) setHealth(null);",
+        "active = false; clearTimeout(timeout); controller.abort();",
+        '"Unavailable. GET /api/health did not answer."',
+    ):
+        assert text in footer, text
 
 
 def test_built_dashboard_contains_the_current_source_strings():
