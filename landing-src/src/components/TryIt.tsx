@@ -283,7 +283,7 @@ export default function TryIt() {
             className="w-full h-auto rounded-md ring-1 ring-hairline"
           />
           <figcaption className="mt-1.5 text-xs leading-[18px] text-secondary">
-            Recorded /api/firewall reply of 11 October 2026, chain 4663, UNKNOWN. Upper part of the dialog, same overlay.
+            Recorded /api/firewall reply of 11 October 2026, chain 4663, UNKNOWN. Upper part of the dialog, overlay at unreleased commit 2b54a1b.
           </figcaption>
         </figure>
       </div>

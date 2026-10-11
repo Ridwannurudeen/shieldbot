@@ -120,7 +120,7 @@ export default function OnChain() {
           <div className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
             {figures.map((figure) => (
               <div key={figure.label} className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
-                <div className="font-mono text-2xl md:text-[28px] leading-none tracking-tight text-ink tabular-nums">{figure.value}</div>
+                <div className="font-mono text-2xl md:text-[28px] font-medium leading-none tracking-tight text-ink tabular-nums">{figure.value}</div>
                 <div className="mt-2 text-[13px] text-muted">{figure.label}</div>
               </div>
             ))}
