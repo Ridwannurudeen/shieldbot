@@ -22,6 +22,7 @@ PUBLIC_PATHS = (
     "/api/stats",
     "/api/threats/feed",
     "/api/verdict/{chain_id}/{address}",
+    "/api/verdicts/recent",
     "/api/coverage/{chain_id}",
     "/api/verdicts",
     "/api/health",

@@ -166,6 +166,19 @@ async def test_permalink_rejects_bad_input(verdict_api, path, status):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path,status",
+    [
+        ("/api/verdicts/recent?chain_id=4663&limit=abc", 422),
+        ("/api/verdicts/recent?limit=10", 422),
+    ],
+)
+async def test_recent_verdicts_rejects_bad_input(verdict_api, path, status):
+    _, client, _ = verdict_api
+    assert client.get(path).status_code == status
+
+
+@pytest.mark.asyncio
 async def test_permalink_is_503_without_a_database(verdict_api, monkeypatch):
     api, client, _ = verdict_api
     monkeypatch.setattr(api.container, "db", None)

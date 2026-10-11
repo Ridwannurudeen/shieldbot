@@ -2299,7 +2299,14 @@ async def verdict_permalink(chain_id: int, address: str):
 
 @app.get("/api/verdicts/recent")
 async def recent_verdicts(chain_id: int, limit: int = 10):
-    """List confirmed on-chain records, newest first."""
+    """List confirmed on-chain records for a chain, newest first.
+
+    `limit` defaults to 10 and is clamped to 1..50. The response contains
+    `chain_id`, `count`, and `records`; each record contains `subject`, `verdict`,
+    `verdict_code`, `evidence_hash`, `observed_block`, `published_at`,
+    `onchain_status`, `registry`, `tx_hash`, and `verdict_url`. The `verdict_url`
+    points to the subject's permalink, which shows that subject's newest record.
+    """
     from core.verdict_evidence import Verdict
 
     _validate_chain_id(chain_id)
