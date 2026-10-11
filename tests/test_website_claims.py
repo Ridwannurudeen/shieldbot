@@ -220,6 +220,7 @@ def test_the_site_shows_the_robinhood_contract_addresses():
     export_lines = [line for line in verification_code.splitlines() if line.startswith("export ")]
     assert len(export_lines) == 4
     assert "#" not in verification_code
+    # Recorded fixture JSON under landing-src/scripts/ is excluded on purpose: these are verbatim API replies whose only 64-hex values are public evidence hashes and calldata.
     source = "\n".join(read(path) for path in (LANDING_SRC / "src").rglob("*") if path.is_file())
     assert not re.search(r"0x[0-9a-fA-F]{64}", source)
     assert not re.search(r"0x[0-9a-fA-F]{64}", bundle)
@@ -512,6 +513,8 @@ def test_hero_story_shows_the_real_loading_dialog():
         "sitemap.xml",
         ".well-known/security.txt",
         "js/plausible-init.js",
+        "try/index.html",
+        "try/harness.js",
     ],
 )
 def test_built_landing_copies_the_current_public_files(name):
@@ -707,10 +710,14 @@ def test_no_unbacked_marketing_claims_anywhere_on_the_site():
         "landing-src/public/terms.html": read(LANDING_SRC / "public" / "terms.html"),
         "landing-src/public/security.html": read(LANDING_SRC / "public" / "security.html"),
         "landing-src/public/404.html": read(LANDING_SRC / "public" / "404.html"),
+        "landing-src/public/try/index.html": read(LANDING_SRC / "public" / "try" / "index.html"),
+        "landing-src/public/try/harness.js": read(LANDING_SRC / "public" / "try" / "harness.js"),
         "landing/privacy.html": read(ROOT / "landing" / "privacy.html"),
         "landing/terms.html": read(ROOT / "landing" / "terms.html"),
         "landing/security.html": read(ROOT / "landing" / "security.html"),
         "landing/404.html": read(ROOT / "landing" / "404.html"),
+        "landing/try/index.html": read(ROOT / "landing" / "try" / "index.html"),
+        "landing/try/harness.js": read(ROOT / "landing" / "try" / "harness.js"),
         "bundle": bundle,
     }
     for name, text in pages.items():

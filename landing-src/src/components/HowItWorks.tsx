@@ -108,7 +108,7 @@ export default function HowItWorks() {
                 return (
                   <li
                     key={step.num}
-                    className={`rounded-[10px] border transition-colors duration-150 ease-out ${expanded ? "border-white/25 bg-white/[0.12]" : "border-transparent hover:bg-white/[0.06]"}`}
+                    className={`rounded-[10px] border transition-colors duration-150 ease-out ${expanded ? "border-white/70 bg-white/[0.12]" : "border-transparent hover:bg-white/[0.06]"}`}
                   >
                     <h3>
                       <button
@@ -120,7 +120,7 @@ export default function HowItWorks() {
                         className="grid w-full grid-cols-[32px_1fr] items-center gap-4 rounded-[10px] px-5 py-5 text-left md:px-6"
                       >
                         <span
-                          className={`grid h-8 w-8 place-items-center rounded-full border text-sm font-medium transition-colors duration-150 ease-out ${expanded ? "border-white bg-white text-accent" : "border-white/50 text-white"}`}
+                          className={`grid h-8 w-8 place-items-center rounded-full border text-sm font-medium transition-colors duration-150 ease-out ${expanded ? "border-white bg-white text-accent" : "border-white/60 text-white"}`}
                         >
                           {i + 1}
                         </span>
