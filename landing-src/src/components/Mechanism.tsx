@@ -75,16 +75,31 @@ export default function Mechanism() {
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
 
   useEffect(() => {
-    fetch("https://api.shieldbotsecurity.online/api/stats")
+    const controller = new AbortController();
+    let active = true;
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+
+    fetch("https://api.shieldbotsecurity.online/api/stats", {
+      signal: controller.signal,
+    })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
       .then((d: Stats) => {
+        if (!active) return;
         setStats(d);
         setFetchedAt(new Date());
       })
-      .catch(() => setStats(null));
+      .catch(() => {
+        if (active) setStats(null);
+      })
+      .finally(() => clearTimeout(timeout));
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+      controller.abort();
+    };
   }, []);
 
   const loading = stats === undefined;

@@ -199,7 +199,7 @@ export default function TryIt() {
       >
         Check a token or address
       </p>
-      <div className="mt-3.5 flex flex-wrap items-center gap-1 rounded-2xl border border-hairline-strong bg-ground p-1 shadow-sm transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:shadow-[0_0_0_3px_rgba(163,22,143,0.22)] sm:flex-nowrap sm:rounded-full">
+      <div className="mt-3.5 flex flex-wrap items-center gap-1 rounded-2xl border border-unknown bg-ground p-1 shadow-sm transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:shadow-[0_0_0_3px_rgba(163,22,143,0.22)] sm:flex-nowrap sm:rounded-full">
         <label htmlFor="try-chain" className="sr-only">
           Chain
         </label>
@@ -259,7 +259,7 @@ export default function TryIt() {
         Quick check: no sell simulation, so a token reads Unknown here. The
         extension and POST /api/firewall run the full check.
       </p>
-      <div className="mt-5 grid grid-cols-2 gap-3">
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <figure className="min-w-0">
           <img
             src="/hero-overlay-safe.webp"

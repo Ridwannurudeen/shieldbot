@@ -56,7 +56,7 @@ export default function Footer() {
         <div className="grid grid-cols-1 gap-12 lg:grid-cols-12">
           <div className="min-w-0 lg:col-span-5">
             <a href="#top" className="inline-flex min-h-[44px] items-center gap-2">
-              <span className="mark-slot inline-block w-6 h-6" aria-hidden="true" />
+              <span className="mark-slot inline-block w-6 h-6 empty:hidden" aria-hidden="true" />
               <span className="text-[22px] leading-none font-medium tracking-[-0.03em] text-ink">ShieldBot</span>
             </a>
             <p className="mt-3 max-w-[24em] text-[15px] leading-relaxed text-secondary">The security layer that says what it checked.</p>
@@ -72,7 +72,7 @@ export default function Footer() {
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="you@example.com"
                   required
-                  className="h-11 min-w-0 flex-1 rounded-lg border border-hairline-strong bg-ground px-3 text-[15px] text-ink placeholder:text-secondary transition-colors duration-150 ease-out focus:border-accent"
+                  className="h-11 min-w-0 flex-1 rounded-lg border border-unknown bg-ground px-3 text-[15px] text-ink placeholder:text-secondary transition-colors duration-150 ease-out focus:border-accent"
                 />
                 <button
                   type="submit"

@@ -44,7 +44,7 @@ export default function Navbar() {
     <nav aria-label="Main" className="fixed top-0 inset-x-0 z-50 bg-ground/90 backdrop-blur border-b border-hairline">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         <a href="#top" className="flex items-center gap-2 min-h-[44px]">
-          <span className="mark-slot inline-block w-6 h-6" aria-hidden="true" />
+          <span className="mark-slot inline-block w-6 h-6 empty:hidden" aria-hidden="true" />
           <span className="text-[22px] leading-none font-medium tracking-[-0.03em] text-ink">ShieldBot</span>
         </a>
 
