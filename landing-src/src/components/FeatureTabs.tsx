@@ -95,7 +95,7 @@ function Capture({
           height={480}
           loading="lazy"
           alt={alt}
-          className="block w-full max-w-[400px] h-auto rounded-t-md"
+          className="block w-full max-w-[400px] h-auto rounded-t-md [-webkit-mask-image:linear-gradient(#000_88%,transparent)] [mask-image:linear-gradient(#000_88%,transparent)]"
         />
       </div>
       <figcaption className="mt-3 text-xs leading-[18px] text-secondary">
@@ -105,7 +105,13 @@ function Capture({
   );
 }
 
-function Illustration({ children }: { children: ReactNode }) {
+function Illustration({
+  subject,
+  children,
+}: {
+  subject: string;
+  children: ReactNode;
+}) {
   return (
     <figure className="min-w-0">
       <div className="relative grid h-[300px] place-items-center rounded-xl border border-dashed border-hairline-strong bg-ground-alt sm:h-[360px]">
@@ -115,8 +121,8 @@ function Illustration({ children }: { children: ReactNode }) {
         {children}
       </div>
       <figcaption className="mt-3 text-xs leading-[18px] text-secondary">
-        Illustration, not a capture: no capture of this dialog has been recorded
-        yet. The text beside it is from the extension's store listing.
+        Illustration, not a capture: no capture of this {subject} has been
+        recorded yet. The text beside it is from the extension's store listing.
       </figcaption>
     </figure>
   );
@@ -189,7 +195,7 @@ function Media({ id }: { id: string }) {
     );
   if (id === "signatures")
     return (
-      <Illustration>
+      <Illustration subject="dialog">
         <svg
           viewBox="0 0 280 220"
           className="w-[240px] sm:w-[280px]"
@@ -251,7 +257,7 @@ function Media({ id }: { id: string }) {
       </Illustration>
     );
   return (
-    <Illustration>
+    <Illustration subject="banner">
       <svg
         viewBox="0 0 300 220"
         className="w-[260px] sm:w-[300px]"
@@ -327,10 +333,11 @@ export default function FeatureTabs() {
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const current = tabs.current.indexOf(event.target as HTMLButtonElement);
     const last = features.length - 1;
     const next = {
-      ArrowRight: active === last ? 0 : active + 1,
-      ArrowLeft: active === 0 ? last : active - 1,
+      ArrowRight: current === last ? 0 : current + 1,
+      ArrowLeft: current === 0 ? last : current - 1,
       Home: 0,
       End: last,
     }[event.key];
@@ -365,7 +372,7 @@ export default function FeatureTabs() {
           role="tablist"
           aria-label="Features"
           onKeyDown={onKeyDown}
-          className="mt-10 grid grid-cols-2 overflow-hidden rounded-t-xl border border-hairline bg-ground sm:grid-cols-3 md:mt-12 lg:grid-cols-5"
+          className="mt-10 grid grid-cols-2 overflow-hidden rounded-t-xl border border-hairline bg-ground sm:grid-cols-6 md:mt-12 lg:grid-cols-5"
         >
           {features.map((feature, i) => {
             const selected = i === active;
@@ -382,7 +389,7 @@ export default function FeatureTabs() {
                 aria-controls={`feature-panel-${feature.id}`}
                 tabIndex={selected ? 0 : -1}
                 onClick={() => setActive(i)}
-                className={`-mb-px -mr-px flex min-h-[56px] items-center justify-center border-b border-r border-hairline px-3 text-center text-[15px] font-medium transition-colors duration-150 ease-out last:col-span-2 sm:last:col-span-1 md:min-h-[60px] ${selected ? "bg-accent-tint text-accent shadow-[inset_0_-2px_0_rgb(var(--c-accent))]" : "text-secondary hover:text-ink"}`}
+                className={`-mb-px -mr-px flex min-h-[56px] items-center justify-center border-b border-r border-hairline px-3 text-center text-[15px] font-medium transition-colors duration-150 ease-out focus-visible:[outline-offset:-3px] md:min-h-[60px] lg:col-span-1 ${i < 3 ? "sm:col-span-2" : i === 3 ? "sm:col-span-3" : "col-span-2 sm:col-span-3"} ${selected ? "bg-accent-tint text-accent shadow-[inset_0_-2px_0_rgb(var(--c-accent))]" : "text-secondary hover:text-ink"}`}
               >
                 {feature.tab}
               </button>

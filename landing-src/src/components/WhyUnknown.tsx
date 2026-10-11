@@ -125,7 +125,7 @@ export default function WhyUnknown() {
           </ul>
         </div>
 
-        <div className="relative grid min-w-0 gap-4 lg:block lg:h-[440px]">
+        <div className="relative grid min-w-0 gap-4 lg:block lg:h-[520px]">
           <div className="float-a rounded-[14px] border border-hairline bg-ground p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_16px_rgba(16,24,40,0.06)] lg:absolute lg:left-0 lg:top-2 lg:w-[360px]">
             <p className="text-[13px] font-medium text-secondary">
               Registry record, Robinhood Chain

@@ -101,7 +101,7 @@ export default function HowItWorks() {
             </p>
           </div>
 
-          <div className="mt-12 grid grid-cols-1 items-center gap-10 md:mt-16 lg:grid-cols-2 lg:gap-12">
+          <div className="mt-12 grid grid-cols-1 items-start gap-10 md:mt-16 lg:grid-cols-2 lg:gap-12">
             <ol className="grid gap-2">
               {steps.map((step, i) => {
                 const expanded = open === i;
