@@ -324,6 +324,8 @@ function Media({ id }: { id: string }) {
   );
 }
 
+// A left index of the five features (a vertical tablist: ArrowUp/ArrowDown, also ArrowLeft/ArrowRight, Home,
+// End) beside the open entry. Below 1024 px the index sits above the entry.
 export default function FeatureTabs() {
   const [active, setActive] = useState(0);
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -336,15 +338,19 @@ export default function FeatureTabs() {
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const current = tabs.current.indexOf(event.target as HTMLButtonElement);
     const last = features.length - 1;
-    const next = {
-      ArrowRight: current === last ? 0 : current + 1,
-      ArrowLeft: current === 0 ? last : current - 1,
+    const next = current === last ? 0 : current + 1;
+    const previous = current === 0 ? last : current - 1;
+    const target = {
+      ArrowDown: next,
+      ArrowRight: next,
+      ArrowUp: previous,
+      ArrowLeft: previous,
       Home: 0,
       End: last,
     }[event.key];
-    if (next === undefined) return;
+    if (target === undefined) return;
     event.preventDefault();
-    select(next);
+    select(target);
   }
 
   return (
@@ -354,90 +360,100 @@ export default function FeatureTabs() {
       className="border-b border-hairline bg-ground-alt py-16 md:py-24"
     >
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        <div className="mx-auto max-w-3xl text-center">
-          <p className="text-sm font-medium text-accent">What it does</p>
+        <div className="max-w-3xl">
+          <p className="font-mono text-xs uppercase tracking-[0.08em] text-secondary">
+            What it does
+          </p>
           <h2
             id="features-title"
             className="mt-3 text-h2-sm md:text-h2 text-ink"
           >
-            ShieldBot in action
+            Where a verdict shows up.
           </h2>
           <p className="mt-4 text-[17px] md:text-lg leading-relaxed text-secondary">
             One engine behind the extension, the Telegram bot and the on-chain
-            guard. Each tab shows a recorded answer or says it is an
+            guard. Each entry shows a recorded answer or says it is an
             illustration.
           </p>
         </div>
 
-        <div
-          role="tablist"
-          aria-label="Features"
-          onKeyDown={onKeyDown}
-          className="mt-10 grid grid-cols-2 overflow-hidden rounded-t-xl border border-hairline bg-ground sm:grid-cols-6 md:mt-12 lg:grid-cols-5"
-        >
-          {features.map((feature, i) => {
-            const selected = i === active;
-            return (
-              <button
-                key={feature.id}
-                ref={(el) => {
-                  tabs.current[i] = el;
-                }}
-                type="button"
-                role="tab"
-                id={`feature-tab-${feature.id}`}
-                aria-selected={selected}
-                aria-controls={`feature-panel-${feature.id}`}
-                tabIndex={selected ? 0 : -1}
-                onClick={() => setActive(i)}
-                className={`-mb-px -mr-px flex min-h-[56px] items-center justify-center border-b border-r border-hairline px-3 text-center text-[15px] font-medium transition-colors duration-150 ease-out focus-visible:[outline-offset:-3px] md:min-h-[60px] lg:col-span-1 ${i < 3 ? "sm:col-span-2" : i === 3 ? "sm:col-span-3" : "col-span-2 sm:col-span-3"} ${selected ? "bg-accent-tint text-accent shadow-[inset_0_-2px_0_rgb(var(--c-accent))]" : "text-secondary hover:text-ink"}`}
-              >
-                {feature.tab}
-              </button>
-            );
-          })}
-        </div>
-
-        {features.map((feature, i) => (
+        <div className="mt-10 grid grid-cols-1 gap-8 md:mt-12 lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-12">
           <div
-            key={feature.id}
-            role="tabpanel"
-            id={`feature-panel-${feature.id}`}
-            aria-labelledby={`feature-tab-${feature.id}`}
-            tabIndex={0}
-            hidden={i !== active}
-            className="tab-fade rounded-b-xl border border-t-0 border-hairline bg-ground px-4 py-8 sm:px-8 md:py-12 lg:px-12 lg:py-14"
+            role="tablist"
+            aria-label="Features"
+            aria-orientation="vertical"
+            onKeyDown={onKeyDown}
+            className="min-w-0 self-start border-t border-hairline-strong"
           >
-            <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:gap-14">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-accent">
-                  {feature.eyebrow}
-                </p>
-                <h3 className="mt-3 text-[26px] font-medium leading-[1.2] tracking-[-0.02em] text-ink md:text-[30px]">
-                  {feature.title}
-                </h3>
-                <p className="mt-4 text-base leading-[26px] text-secondary">
-                  {feature.desc}
-                </p>
-                <ul className="mt-5 grid gap-3">
-                  {feature.points.map((point) => (
-                    <li
-                      key={point}
-                      className="grid grid-cols-[18px_1fr] gap-3 text-[15px] leading-[23px] text-ink"
-                    >
-                      <span
-                        className="mt-[8px] h-1.5 w-1.5 justify-self-center rounded-full bg-accent"
-                        aria-hidden="true"
-                      />
-                      {point}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <Media id={feature.id} />
-            </div>
+            {features.map((feature, i) => {
+              const selected = i === active;
+              return (
+                <button
+                  key={feature.id}
+                  ref={(el) => {
+                    tabs.current[i] = el;
+                  }}
+                  type="button"
+                  role="tab"
+                  id={`feature-tab-${feature.id}`}
+                  aria-selected={selected}
+                  aria-controls={`feature-panel-${feature.id}`}
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => setActive(i)}
+                  className={`-ml-px grid w-full grid-cols-[28px_minmax(0,1fr)] items-baseline gap-x-2 border-b border-l-2 border-b-hairline-strong py-3 pl-3 pr-2 text-left transition-colors duration-150 ease-out focus-visible:[outline-offset:-3px] ${selected ? "border-l-accent bg-ground" : "border-l-transparent hover:bg-ground"}`}
+                >
+                  <span className={`font-mono text-xs ${selected ? "text-accent" : "text-secondary"}`}>
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span className={`text-[15px] font-medium leading-[22px] ${selected ? "text-ink" : "text-secondary"}`}>
+                    {feature.tab}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-        ))}
+
+          {features.map((feature, i) => (
+            <div
+              key={feature.id}
+              role="tabpanel"
+              id={`feature-panel-${feature.id}`}
+              aria-labelledby={`feature-tab-${feature.id}`}
+              tabIndex={0}
+              hidden={i !== active}
+              className="tab-fade min-w-0 focus-visible:[outline-offset:4px] lg:col-start-2 lg:row-start-1 lg:border-t lg:border-hairline-strong lg:pt-8"
+            >
+              <div className="grid grid-cols-1 items-start gap-10 xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] xl:gap-12">
+                <div className="min-w-0">
+                  <p className="font-mono text-xs tracking-[0.08em] text-secondary">
+                    {String(i + 1).padStart(2, "0")} · {feature.eyebrow}
+                  </p>
+                  <h3 className="mt-3 text-[26px] font-medium leading-[1.2] tracking-[-0.02em] text-ink md:text-[30px]">
+                    {feature.title}
+                  </h3>
+                  <p className="mt-4 text-base leading-[26px] text-secondary">
+                    {feature.desc}
+                  </p>
+                  <ul className="mt-5 grid gap-3">
+                    {feature.points.map((point) => (
+                      <li
+                        key={point}
+                        className="grid grid-cols-[18px_1fr] gap-3 text-[15px] leading-[23px] text-ink"
+                      >
+                        <span
+                          className="mt-[8px] h-1.5 w-1.5 justify-self-center rounded-[1px] bg-accent"
+                          aria-hidden="true"
+                        />
+                        {point}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <Media id={feature.id} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
