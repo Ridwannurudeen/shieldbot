@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import CodeBlock from "./CodeBlock";
 import ContractCard from "./ContractCard";
 import SectionHeader from "./SectionHeader";
@@ -6,6 +7,7 @@ import VerdictRecord from "./VerdictRecord";
 import { registryChip } from "../registryVerdict";
 import {
   REGISTRY_CHAIN,
+  loadRecentRecords,
   short,
   useFeed,
   utc,
@@ -177,6 +179,22 @@ function RecordRow({ subject, record }: Row) {
 
 function RecentRecords() {
   const { recent, launches, records, fetchedAt } = useFeed();
+  const strip = useRef<HTMLDivElement>(null);
+
+  // In the fallback each row needs its own record request; they are sent only once the strip is about a screen
+  // away, so a visitor who never scrolls here does not spend the API's per-minute allowance on them.
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        loadRecentRecords();
+      },
+      { rootMargin: "800px 0px" },
+    );
+    if (strip.current) observer.observe(strip.current);
+    return () => observer.disconnect();
+  }, []);
   const fallback = recent === "fallback";
   const rows: Row[] | null | undefined = Array.isArray(recent)
     ? recent.map((record) => ({ subject: record.subject, record }))
@@ -190,7 +208,10 @@ function RecentRecords() {
   const at = fetchedAt ? `, fetched ${utc(fetchedAt.getTime() / 1000)}` : "";
 
   return (
-    <div className="mt-10 overflow-hidden rounded-[14px] border border-hairline bg-ground shadow-md">
+    <div
+      ref={strip}
+      className="mt-10 overflow-hidden rounded-[14px] border border-hairline bg-ground shadow-md"
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-5 py-4">
         <h3 className="text-lg font-medium text-ink">
           {fallback

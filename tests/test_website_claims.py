@@ -926,6 +926,23 @@ process.stdout.write(JSON.stringify(words.map((word) => [word, registryChip(word
         assert "function registryChip" not in source, name
 
 
+def test_registry_requests_are_shared_and_the_strip_loads_its_records_near_the_viewport():
+    # The API allows 10 requests in 5 seconds and 30 a minute per IP (api.py rate_limiter). The why-unknown record
+    # goes through the feed, so an address is fetched once; the strip's other records wait for the strip.
+    assert "RateLimiter(requests_per_minute=30, burst=10)" in read(ROOT / "api.py")
+    feed = read(LANDING_SRC / "src" / "registryFeed.ts")
+    assert "}, 10_000)," in feed and "controller.abort();" in feed
+    assert "if (current.asked.has(address)) continue;" in feed
+    assert "want(current, addresses.slice(0, 1));" in feed
+    assert "if (current.restWanted) want(current, current.rest);" in feed
+    why = read(COMPONENTS / "WhyUnknown.tsx")
+    assert "const record = useRecord(SUBJECT);" in why
+    assert "/api/verdict/4663/${SUBJECT}`)" not in why
+    strip = read(COMPONENTS / "OnChain.tsx")
+    assert "new IntersectionObserver(" in strip and "loadRecentRecords();" in strip
+    assert "fetch(" not in strip
+
+
 def test_try_it_uses_a_verdict_record_without_repeated_hero_captures():
     try_it = read(COMPONENTS / "TryIt.tsx")
     assert 'import VerdictRecord from "./VerdictRecord";' in try_it

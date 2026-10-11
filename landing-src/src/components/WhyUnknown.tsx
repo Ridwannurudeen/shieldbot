@@ -1,28 +1,15 @@
 import { useEffect, useState } from "react";
 import VerdictRecord from "./VerdictRecord";
 import { registryChip } from "../registryVerdict";
-import { REGISTRY_CHAIN } from "../registryFeed";
+import { REGISTRY_CHAIN, useRecord } from "../registryFeed";
 
-// Two records from the API, fetched when the page loads: the newest blocked Robinhood Chain launch as the
-// registry holds it (GET /api/verdict/4663/{subject}), drawn as a verdict record whose check-row is the coverage
-// in its published evidence, and that chain's coverage (GET /api/coverage/4663) as a row of cells. A route that
-// does not answer leaves each of its fields reading Unavailable; nothing is filled in.
+// Two records from the API, fetched when the page loads: a blocked Robinhood Chain launch as the registry holds
+// it (GET /api/verdict/4663/{subject}, through the shared feed in src/registryFeed.ts, so the recent-records strip
+// does not ask for it again), drawn as a verdict record whose check-row is the coverage in its published
+// evidence, and that chain's coverage (GET /api/coverage/4663) as a row of cells. A route that does not answer
+// leaves each of its fields reading Unavailable; nothing is filled in.
 const API = "https://api.shieldbotsecurity.online";
 const SUBJECT = "0x34357625e8b7414b47c0410327c29361a70c26dd";
-
-interface RegistryReply {
-  verdict: string | null;
-  verdict_code: number | null;
-  evidence_hash: string | null;
-  observed_block: number | null;
-  published_at: number | null;
-  onchain_status: string | null;
-  tx_hash: string | null;
-  evidence: {
-    coverage?: Record<string, number | boolean>;
-    coverage_reasons?: Record<string, string | null>;
-  } | null;
-}
 
 interface Coverage {
   capabilities: {
@@ -43,7 +30,7 @@ function short(hex: string) {
   return `${hex.slice(0, 6)}…${hex.slice(-4)}`;
 }
 
-function useRecord<T>(url: string) {
+function useJson<T>(url: string) {
   // undefined while loading, null when the route did not answer.
   const [data, setData] = useState<T | null | undefined>(undefined);
   useEffect(() => {
@@ -109,8 +96,8 @@ function Capability({
 }
 
 export default function WhyUnknown() {
-  const record = useRecord<RegistryReply>(`${API}/api/verdict/4663/${SUBJECT}`);
-  const coverage = useRecord<Coverage>(`${API}/api/coverage/4663`);
+  const record = useRecord(SUBJECT);
+  const coverage = useJson<Coverage>(`${API}/api/coverage/4663`);
 
   const caps = coverage?.capabilities;
   const routers = caps?.router_allowlist?.routers;
