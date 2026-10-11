@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { CHECK_ORDER } from "./CheckRow";
 import Icon, { type IconName } from "./Icon";
+import VerdictRecord from "./VerdictRecord";
+import { verdictOf } from "../firewallVerdict";
+import { recordedReplies } from "../recordedReplies";
 
 const steps: { num: string; title: string; desc: string }[] = [
   {
@@ -74,130 +77,80 @@ const channels: { title: string; desc: string; link: string; href: string; icon:
 ];
 
 
-// The accent band: the three steps as an accordion beside the real BLOCK capture in a drawn browser frame,
-// then the other checks and the channels on the white ground.
-export default function HowItWorks() {
-  const [open, setOpen] = useState(0);
+// The process track: the three steps along one rule on the paper ground, open (no accordion), ending in the
+// record a check produces, drawn from the recorded BLOCK reply (src/recordedReplies.ts). No capture here: the
+// hero holds the captures.
+const recorded = recordedReplies.block;
+const recordedChip = verdictOf(recorded).label;
 
+export default function HowItWorks() {
   return (
     <>
       <section
         id="how-it-works"
         aria-labelledby="how-it-works-title"
-        className="band bg-accent text-white"
+        className="border-b border-hairline bg-ground-alt py-16 md:py-24"
       >
-        <div className="max-w-6xl mx-auto px-4 py-[72px] sm:px-6 md:py-28">
-          <div className="mx-auto max-w-3xl text-center">
-            <p className="text-sm font-medium text-white/90">How it works</p>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="max-w-3xl">
+            <p className="font-mono text-xs uppercase tracking-[0.08em] text-secondary">
+              How it works
+            </p>
             <h2
               id="how-it-works-title"
-              className="mt-3 text-h2-sm md:text-h2 text-white"
+              className="mt-3 text-h2-sm md:text-h2 text-ink"
             >
               Three steps between you and a scam.
             </h2>
-            <p className="mx-auto mt-4 max-w-[36em] text-[17px] md:text-lg leading-relaxed text-white/90">
+            <p className="mt-4 max-w-[36em] text-[17px] md:text-lg leading-relaxed text-secondary">
               A check usually takes a few seconds, before your wallet's
               signature window opens.
             </p>
           </div>
 
-          <div className="mt-12 grid grid-cols-1 items-start gap-10 md:mt-16 lg:grid-cols-2 lg:gap-12">
-            <ol className="grid gap-2">
-              {steps.map((step, i) => {
-                const expanded = open === i;
-                return (
-                  <li
-                    key={step.num}
-                    className={`rounded-[10px] border transition-colors duration-150 ease-out ${expanded ? "border-white/70 bg-white/[0.12]" : "border-transparent hover:bg-white/[0.06]"}`}
-                  >
-                    <h3>
-                      <button
-                        type="button"
-                        id={`step-${step.num}`}
-                        aria-expanded={expanded}
-                        aria-controls={`step-${step.num}-panel`}
-                        onClick={() => setOpen(i)}
-                        className="grid w-full grid-cols-[32px_1fr] items-center gap-4 rounded-[10px] px-5 py-5 text-left md:px-6"
-                      >
-                        <span
-                          className={`grid h-8 w-8 place-items-center rounded-full border text-sm font-medium transition-colors duration-150 ease-out ${expanded ? "border-white bg-white text-accent" : "border-white/60 text-white"}`}
-                        >
-                          {i + 1}
-                        </span>
-                        <span className="text-lg font-medium leading-7 tracking-[-0.01em] text-white">
-                          {step.title}
-                        </span>
-                      </button>
-                    </h3>
-                    <div
-                      id={`step-${step.num}-panel`}
-                      role="region"
-                      aria-labelledby={`step-${step.num}`}
-                      data-open={expanded}
-                      inert={!expanded}
-                      className="acc-panel"
-                    >
-                      <div>
-                        <p className="pb-5 pl-[68px] pr-5 text-[15px] leading-[23px] text-white/90 md:pl-[72px] md:pr-6">
-                          {step.desc}
-                        </p>
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
-
-            <figure className="min-w-0 rounded-2xl border border-white/20 bg-white/10 p-3.5 sm:p-7">
-              <div className="overflow-hidden rounded-[10px] bg-ground shadow-[0_20px_40px_rgba(0,0,0,0.18)]">
-                <div
-                  className="flex h-9 items-center gap-3.5 border-b border-hairline px-3.5"
-                  aria-hidden="true"
+          <ol className="mt-12 grid grid-cols-1 md:mt-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.5fr)]">
+            {steps.map((step, i) => {
+              const last = i === steps.length - 1;
+              return (
+                <li
+                  key={step.num}
+                  className={`relative min-w-0 border-l pl-6 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-8 ${last ? "border-accent" : "border-hairline-strong pb-10 lg:pb-0 lg:pr-10"}`}
                 >
-                  <span className="flex gap-1.5">
-                    <i className="h-2.5 w-2.5 rounded-full bg-hairline" />
-                    <i className="h-2.5 w-2.5 rounded-full bg-hairline" />
-                    <i className="h-2.5 w-2.5 rounded-full bg-hairline" />
-                  </span>
-                  <span className="flex h-6 flex-1 items-center justify-center rounded-full bg-ground-alt text-xs text-secondary">
-                    dapp.example
-                  </span>
-                  <span className="h-4 w-4" />
-                </div>
-                <div className="flex justify-center bg-[#26262A] px-4 pt-4 sm:px-8 sm:pt-6">
-                  <div className="w-full max-w-[360px] overflow-hidden rounded-t lg:h-[400px] lg:[-webkit-mask-image:linear-gradient(#000_80%,transparent)] lg:[mask-image:linear-gradient(#000_80%,transparent)]">
-                    <picture>
-                      <source
-                        media="(max-width: 1023px)"
-                        srcSet="/hero-overlay-mobile.webp"
-                        width={390}
-                        height={496}
+                  <span
+                    aria-hidden="true"
+                    className={`absolute -left-[5px] top-1.5 h-[9px] w-[9px] rounded-[2px] lg:-top-[5px] lg:left-0 ${last ? "bg-accent" : "border border-ink bg-ground-alt"}`}
+                  />
+                  <p className="font-mono text-xs tracking-[0.08em] text-secondary">
+                    {step.num}
+                  </p>
+                  <h3 className="mt-2 text-xl font-medium leading-7 tracking-[-0.01em] text-ink">
+                    {step.title}
+                  </h3>
+                  <p className="mt-2 max-w-[34em] text-[15px] leading-[23px] text-secondary">
+                    {step.desc}
+                  </p>
+                  {i === 1 && (
+                    <p className="mt-4 font-mono text-xs leading-[18px] text-secondary">
+                      {CHECK_ORDER.join(" · ")}
+                    </p>
+                  )}
+                  {last && (
+                    <div className="mt-6">
+                      <VerdictRecord
+                        variant="compact"
+                        chip={{ verdict: recordedChip.verdict, label: recordedChip.text }}
+                        coverage={recorded.coverage}
+                        reason={recorded.plain_english}
+                        chain={{ id: recorded.chain_id, name: recorded.network }}
+                        evidenceHash={recorded.evidence_hash}
+                        source="The recorded POST /api/firewall reply of 26 September 2026, as served."
                       />
-                      <img
-                        src="/hero-overlay.webp"
-                        width={490}
-                        height={1019}
-                        loading="lazy"
-                        alt="The ShieldBot extension's warning dialog for a request that approves unlimited USDC spending on Ethereum. The verdict badge reads BLOCK RECOMMENDED — Safety: 0/100. The danger signals include Spender flagged by GoPlus: stealing_attack (SlowMist,BlockSec)."
-                        className="block w-full h-auto"
-                      />
-                    </picture>
-                  </div>
-                </div>
-              </div>
-              <figcaption className="mt-3 text-xs leading-[18px] text-white/90">
-                The browser frame is drawn; the dialog is a capture of the
-                extension's overlay at unreleased commit 2b54a1b (3.1.0 on the
-                Chrome Web Store, as ShieldAI Transaction Firewall, still shows
-                the earlier dark dialog), fed the API's reply for this request
-                on 26 September 2026. It recommends blocking an unlimited USDC
-                approval to the wallet behind the 2021 BadgerDAO front-end
-                attack, which GoPlus flags for stealing attacks. The
-                Proxy/upgradeable contract signal describes USDC's own
-                contract, an upgradeable proxy, not the spender.
-              </figcaption>
-            </figure>
-          </div>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
         </div>
       </section>
 

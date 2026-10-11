@@ -416,7 +416,6 @@ def test_structured_data_is_valid_and_matches_the_visible_faq():
 
 HERO_CAPTURES = [
     # (recorded reply, component whose alt text describes it, captures made from the reply)
-    ("hero-overlay-response.json", "HowItWorks.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
     ("hero-overlay-response.json", "HeroRecord.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
     ("hero-overlay-unknown-response.json", "HeroRecord.tsx", ("hero-overlay-unknown.webp",)),
     ("hero-overlay-safe-response.json", "HeroRecord.tsx", ("hero-overlay-safe.webp",)),
