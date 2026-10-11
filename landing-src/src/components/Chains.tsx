@@ -1,8 +1,10 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 // Per-chain coverage. tests/test_website_claims.py checks each row against the chain adapters
 // (sell simulation), services/mempool_service.py (mempool) and services/launch_discovery.py.
 interface Chain {
+  chainId: number;
   name: string;
   // Who simulates a buy and a sell: honeypot.is, ShieldBot's own simulator, or nobody.
   simulation: "honeypot.is" | "ShieldBot" | null;
@@ -18,6 +20,7 @@ const SUPPORTED_CHAINS = 8;
 
 const chains: Chain[] = [
   {
+    chainId: 1,
     name: "Ethereum",
     simulation: "honeypot.is",
     mempool: true,
@@ -35,6 +38,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 56,
     name: "BNB Chain",
     simulation: "honeypot.is",
     mempool: true,
@@ -47,6 +51,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 8453,
     name: "Base",
     simulation: "honeypot.is",
     mempool: false,
@@ -59,6 +64,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 42161,
     name: "Arbitrum",
     simulation: "ShieldBot",
     mempool: false,
@@ -73,6 +79,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 137,
     name: "Polygon",
     simulation: null,
     mempool: true,
@@ -85,6 +92,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 10,
     name: "Optimism",
     simulation: null,
     mempool: false,
@@ -97,6 +105,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 204,
     name: "opBNB",
     simulation: null,
     mempool: true,
@@ -110,6 +119,7 @@ const chains: Chain[] = [
   },
   {
     // Generic chain-link mark: no third-party logo.
+    chainId: 4663,
     name: "Robinhood Chain",
     simulation: "ShieldBot",
     mempool: false,
@@ -124,7 +134,143 @@ const chains: Chain[] = [
 ];
 
 
+const API = "https://api.shieldbotsecurity.online";
+
+interface ChainCoverage {
+  chain_id: number;
+  capabilities: {
+    sell_simulation: string | null;
+    public_mempool: string | null;
+  } | null;
+}
+
+type CellState = "available" | "unavailable" | "unknown";
+
+function CapabilityCell({
+  state,
+  label,
+}: {
+  state: CellState;
+  label: string;
+}) {
+  const square =
+    state === "available"
+      ? "border-ink bg-ink"
+      : state === "unavailable"
+        ? "border-dashed border-ink"
+        : "border-ink bg-ground";
+
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-start gap-1 text-[11px] leading-4 text-ink sm:items-center sm:gap-2 sm:text-[13px] sm:leading-5">
+      <span
+        aria-hidden="true"
+        className={"h-2.5 w-2.5 flex-none rounded-[2px] border " + square}
+      />
+      <span className="min-w-0 whitespace-normal">{label}</span>
+    </span>
+  );
+}
+
+function simulationCell(
+  coverage: ChainCoverage | null | undefined,
+): { state: CellState; label: string } {
+  const provider = coverage?.capabilities?.sell_simulation;
+  if (coverage === undefined) return { state: "unknown", label: "Loading" };
+  if (coverage === null || provider === null || provider === undefined) {
+    return { state: "unknown", label: "Unavailable" };
+  }
+  if (provider === "goplus_reported") {
+    return { state: "unavailable", label: "GoPlus flags only" };
+  }
+  return {
+    state: "available",
+    label: provider === "eth_simulateV1" ? "ShieldBot simulator" : provider,
+  };
+}
+
+function mempoolCell(
+  coverage: ChainCoverage | null | undefined,
+): { state: CellState; label: string } {
+  const status = coverage?.capabilities?.public_mempool;
+  if (coverage === undefined) return { state: "unknown", label: "Loading" };
+  if (coverage === null || status === null || status === undefined) {
+    return { state: "unknown", label: "Unavailable" };
+  }
+  if (status === "yes") {
+    return { state: "available", label: "Observed on last poll" };
+  }
+  if (status === "no") {
+    return { state: "unavailable", label: "No public mempool" };
+  }
+  if (status === "unobservable") {
+    return { state: "unavailable", label: "Not observable" };
+  }
+  return { state: "unknown", label: status };
+}
+
 export default function Chains() {
+  const [coverage, setCoverage] = useState<
+    Record<number, ChainCoverage | null | undefined>
+  >({});
+
+  useEffect(() => {
+    let active = true;
+    let next = 0;
+    let schedule: ReturnType<typeof setTimeout> | undefined;
+    const requests = new Map<AbortController, ReturnType<typeof setTimeout>>();
+
+    const loadNext = () => {
+      const chain = chains[next];
+      next += 1;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      requests.set(controller, timeout);
+
+      fetch(API + "/api/coverage/" + chain.chainId, {
+        signal: controller.signal,
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        })
+        .then((data: ChainCoverage) => {
+          if (data.chain_id !== chain.chainId) {
+            throw new Error("Mismatched chain coverage");
+          }
+          if (active) {
+            setCoverage((current) => ({ ...current, [chain.chainId]: data }));
+          }
+        })
+        .catch(() => {
+          if (active) {
+            setCoverage((current) => ({ ...current, [chain.chainId]: null }));
+          }
+        })
+        .finally(() => {
+          clearTimeout(timeout);
+          requests.delete(controller);
+        });
+
+      if (next < chains.length) schedule = setTimeout(loadNext, 1_300);
+    };
+
+    schedule = setTimeout(loadNext, 10_100);
+    return () => {
+      active = false;
+      if (schedule) clearTimeout(schedule);
+      requests.forEach((timeout, controller) => {
+        clearTimeout(timeout);
+        controller.abort();
+      });
+      requests.clear();
+    };
+  }, []);
+
+  const unavailableChains = chains
+    .filter((chain) => coverage[chain.chainId] === null)
+    .map((chain) => chain.name);
+
   return (
     <section id="chains" aria-labelledby="chains-title" className="bg-ground-alt py-14 md:py-[72px] lg:py-24">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -136,66 +282,97 @@ export default function Chains() {
           </p>
         </div>
 
-        <div className="orbit relative mt-6 h-[300px] overflow-hidden md:h-[420px]" aria-hidden="true">
-          <svg className="absolute inset-0 hidden h-full w-full md:block" viewBox="0 0 1104 420" preserveAspectRatio="none">
-            <ellipse cx="552" cy="226" rx="360" ry="92" fill="none" stroke="rgb(var(--c-hairline-strong))" />
-            <ellipse cx="552" cy="222" rx="250" ry="62" fill="none" stroke="rgb(var(--c-hairline-strong))" strokeDasharray="2 6" />
-            <ellipse cx="552" cy="232" rx="470" ry="124" fill="none" stroke="rgb(var(--c-hairline-strong))" strokeDasharray="2 6" />
-          </svg>
-          <div className="absolute left-1/2 top-[38%] z-10 -translate-x-1/2 -translate-y-1/2 text-center md:top-1/2">
-            <b className="block font-medium text-[64px] leading-none tracking-[-0.04em] text-ink md:text-[88px]">{SUPPORTED_CHAINS}</b>
-            <span className="mt-1.5 block text-[15px] text-secondary">EVM chains</span>
+        <div className="mt-10">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <h3 className="font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-secondary">
+              Live chain capabilities
+            </h3>
+            <div
+              role="group"
+              aria-label="Capability cell legend"
+              className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-secondary"
+            >
+              <span className="inline-flex items-center gap-2">
+                <span aria-hidden="true" className="h-3 w-3 rounded-[2px] border border-ink bg-ink" />
+                Available
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <span aria-hidden="true" className="h-3 w-3 rounded-[2px] border border-dashed border-ink" />
+                Not available
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <span aria-hidden="true" className="h-3 w-3 rounded-[2px] border border-ink bg-ground" />
+                Unavailable
+              </span>
+            </div>
           </div>
-          <div className="orbit-tilt">
-            <ul className="orbit-ring">
-              {chains.map((c, i) => (
-                <li key={c.name} className="orbit-item" style={{ "--a": `${i * 45}deg`, "--d": `${i * -1500}ms` } as CSSProperties}>
-                  <div className="orbit-face">
-                    <span className="orbit-pill inline-flex items-center gap-2.5 whitespace-nowrap rounded-full border border-hairline bg-ground p-1.5 text-[15px] font-medium text-ink shadow-md md:h-[52px] md:py-0 md:pl-2 md:pr-[18px]">
-                      <span className="grid h-9 w-9 flex-none place-items-center rounded-full bg-ground-alt">{c.logo}</span>
-                      <span className="hidden md:inline">{c.name}</span>
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
 
-        <div className="mt-10 max-w-4xl overflow-x-auto rounded-2xl border border-hairline bg-ground px-3 py-2 shadow-sm sm:px-6" tabIndex={0} aria-label="Coverage by chain">
-          <table className="w-full text-[13px] sm:text-sm">
-            <caption className="sr-only">
-              Which checks run on each supported chain
-            </caption>
-            <thead>
-              <tr className="text-left text-[11px] uppercase text-secondary md:tracking-wider sm:text-xs">
-                <th scope="col" className="py-3 pr-1.5 font-medium sm:pr-2">Chain</th>
-                <th scope="col" className="py-3 px-1.5 sm:px-2 font-medium">Sell simulation</th>
-                <th scope="col" className="py-3 px-1.5 sm:px-2 font-medium">Mempool watch</th>
-                <th scope="col" className="py-3 pl-1.5 sm:pl-2 font-medium">Launch scans</th>
-              </tr>
-            </thead>
-            <tbody>
-              {chains.map((c) => (
-                <tr key={c.name} className="border-t border-hairline">
-                  <th scope="row" className="py-3 pr-1.5 text-left font-medium text-ink sm:pr-2">
-                    <span className="flex items-center gap-1.5 sm:gap-3">
-                      {c.logo}
-                      {c.name}
-                    </span>
-                  </th>
-                  <td className="py-3 px-1.5 text-ink sm:px-2">
-                    {c.simulation ?? "None"}
-                    {c.simulationScope && (
-                      <span className="block text-xs text-secondary">{c.simulationScope}</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-1.5 text-ink sm:px-2">{c.mempool ? "Yes" : "No"}</td>
-                  <td className="py-3 pl-1.5 text-ink sm:pl-2">{c.launches ? "Yes" : "No"}</td>
+          <div
+            role="region"
+            className="mt-4 overflow-x-auto rounded-lg border border-hairline bg-ground"
+            tabIndex={0}
+            aria-label="Live capability matrix by chain"
+          >
+            <table className="w-full table-fixed text-xs sm:text-sm">
+              <colgroup>
+                <col style={{ width: "30%" }} />
+                <col style={{ width: "23.3333%" }} />
+                <col style={{ width: "23.3333%" }} />
+                <col style={{ width: "23.3333%" }} />
+              </colgroup>
+              <caption className="sr-only">
+                Live sell simulation and public mempool capabilities by supported chain.
+                Launch scan capability is not exposed by this endpoint.
+              </caption>
+              <thead>
+                <tr className="text-left text-[11px] uppercase text-secondary sm:text-xs">
+                  <th scope="col" className="py-3 pl-2 pr-1 text-left font-medium sm:pl-4 sm:pr-3">Chain</th>
+                  <th scope="col" className="px-1.5 py-3 text-left font-medium sm:px-3">Sell simulation</th>
+                  <th scope="col" className="px-1.5 py-3 text-left font-medium sm:px-3">Public mempool</th>
+                  <th scope="col" className="py-3 pl-1.5 pr-2 text-left font-medium sm:pl-3 sm:pr-4">Launch scans</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {chains.map((chain) => {
+                  const record = coverage[chain.chainId];
+                  const simulation = simulationCell(record);
+                  const mempool = mempoolCell(record);
+
+                  return (
+                    <tr key={chain.chainId} className="border-t border-hairline">
+                      <th
+                        scope="row"
+                        className="py-3 pl-2 pr-1 text-left font-medium text-ink sm:pl-4 sm:pr-3"
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5 sm:gap-3">
+                          {chain.logo}
+                          <span className="min-w-0">{chain.name}</span>
+                        </span>
+                      </th>
+                      <td className="px-0.5 py-3 sm:px-3">
+                        <CapabilityCell {...simulation} />
+                      </td>
+                      <td className="px-0.5 py-3 sm:px-3">
+                        <CapabilityCell {...mempool} />
+                      </td>
+                      <td className="py-3 pl-0.5 pr-1 sm:pl-3 sm:pr-4">
+                        <CapabilityCell state="unknown" label="Unavailable" />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="mt-4 text-xs leading-[18px] text-secondary">
+            {unavailableChains.length > 0
+              ? "Unavailable. GET /api/coverage/{chain_id} did not answer for " +
+                unavailableChains.join(", ") +
+                "."
+              : "Live from GET /api/coverage/{chain_id}. Mempool status reflects the last poll; " +
+                "launch scan capability is not exposed by this endpoint."}
+          </p>
         </div>
 
         <ul className="mt-6 max-w-3xl space-y-2 text-sm leading-relaxed text-secondary">

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import Badge from "./Badge";
 import SectionHeader from "./SectionHeader";
+import { CHECK_ORDER, type CheckKey } from "./CheckRow";
 
 // Figures from GET /api/stats (api.py public_stats), fetched when the page loads. A source that is not
 // running reports null there, and each figure then reads Unavailable; nothing is filled in.
@@ -28,12 +28,14 @@ const chainNames: Record<number, string> = {
   4663: "Robinhood Chain",
 };
 
-const checks = [
-  "Contract code",
-  "Sell simulation",
-  "Market data",
-  "Typed data",
-];
+const CHECK_MEANINGS: Record<CheckKey, string> = {
+  structural: "Contract verification, age, bytecode risks, holder concentration, and scam matches.",
+  market: "Liquidity, pair age, price movement, and wash-trading signals.",
+  behavioral: "Ethos reputation and scam flags for a transaction counterparty.",
+  honeypot: "Buy and sell behavior, transfer taxes, and sellability.",
+  intent: "Decoded calls, approval grants, recipients, and mismatches between a call and its apparent purpose.",
+  signature: "EIP-712 permits and signed NFT orders, including spender, amount, and deadline.",
+};
 
 function count(n: number | null | undefined) {
   return typeof n === "number" ? n.toLocaleString("en-US") : null;
@@ -131,58 +133,37 @@ export default function Mechanism() {
           lead="Every request goes through the same checks. When one cannot run, ShieldBot names it and the verdict reads Unknown. Robinhood Chain verdicts from Telegram scans, guard rescans, and launches it blocks or the guard watches are published to the on-chain registry."
         />
 
-        <div className="mt-12 grid grid-cols-1 items-center gap-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:gap-16">
-          <div
-            className="relative mx-auto aspect-square w-full max-w-[400px]"
-            aria-hidden="true"
-          >
-            <svg
-              viewBox="0 0 400 400"
-              className="absolute inset-0 h-full w-full"
-            >
-              <circle
-                cx="200"
-                cy="200"
-                r="190"
-                fill="none"
-                stroke="rgb(var(--c-hairline-strong))"
-                strokeDasharray="2 6"
-              />
-              <circle
-                cx="200"
-                cy="200"
-                r="132"
-                fill="none"
-                stroke="rgb(var(--c-hairline-strong))"
-              />
-              <circle
-                cx="200"
-                cy="200"
-                r="74"
-                fill="none"
-                stroke="rgb(var(--c-hairline-strong))"
-                strokeDasharray="2 6"
-              />
-            </svg>
-            <div className="absolute inset-0 grid place-items-center">
-              <Badge verdict="unknown" size="lg">
-                UNKNOWN
-              </Badge>
-            </div>
-            {checks.map((check, i) => (
-              <span
-                key={check}
-                className="absolute flex h-8 -translate-x-1/2 -translate-y-1/2 items-center gap-2 whitespace-nowrap rounded-full border border-hairline bg-ground px-3 text-[13px] text-ink shadow-sm"
-                style={{
-                  left: `${50 + 33 * Math.cos(((i * 90 - 45) * Math.PI) / 180)}%`,
-                  top: `${50 + 33 * Math.sin(((i * 90 - 45) * Math.PI) / 180)}%`,
-                }}
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-unknown" />
-                {check}
+        <div className="mt-12 grid grid-cols-1 items-start gap-12 lg:grid-cols-[minmax(0,6fr)_minmax(0,5fr)] lg:gap-16">
+          <figure className="rounded-lg border border-hairline bg-ground p-5 sm:p-6">
+            <figcaption id="check-definition-title" className="font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-secondary">
+              The six check keys
+            </figcaption>
+            <div aria-label="Check cell legend" className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-secondary">
+              <span className="inline-flex items-center gap-2">
+                <span aria-hidden="true" className="h-4 w-4 rounded-[2px] border border-ink bg-ink" />
+                Filled: ran
               </span>
-            ))}
-          </div>
+              <span className="inline-flex items-center gap-2">
+                <span aria-hidden="true" className="h-4 w-4 rounded-[2px] border border-dashed border-ink" />
+                Dashed: partial or no run
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <span aria-hidden="true" className="h-4 w-4 rounded-[2px] border border-ink bg-ground" />
+                Outline: Unavailable
+              </span>
+            </div>
+            <ol className="mt-5 divide-y divide-hairline border-t border-hairline">
+              {CHECK_ORDER.map((key) => (
+                <li key={key} className="grid grid-cols-[minmax(92px,max-content)_minmax(0,1fr)] gap-x-4 py-3 sm:grid-cols-[minmax(110px,max-content)_minmax(0,1fr)]">
+                  <code className="font-mono text-xs leading-5 text-ink">{key}</code>
+                  <p className="text-[13px] leading-5 text-secondary">{CHECK_MEANINGS[key]}</p>
+                </li>
+              ))}
+            </ol>
+            <p className="mt-4 border-t border-hairline pt-3 text-xs leading-[18px] text-secondary">
+              A dashed cell is not a pass. If a provider does not return a check, its cell reads Unavailable.
+            </p>
+          </figure>
 
           <div>
             <div className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2">

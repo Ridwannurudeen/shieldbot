@@ -420,8 +420,6 @@ HERO_CAPTURES = [
     ("hero-overlay-response.json", "HeroRecord.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
     ("hero-overlay-unknown-response.json", "HeroRecord.tsx", ("hero-overlay-unknown.webp",)),
     ("hero-overlay-safe-response.json", "HeroRecord.tsx", ("hero-overlay-safe.webp",)),
-    ("hero-overlay-safe-response.json", "TryIt.tsx", ("hero-overlay-safe.webp",)),
-    ("hero-overlay-unknown-response.json", "TryIt.tsx", ("hero-overlay-unknown.webp",)),
     ("hero-overlay-unknown-response.json", "FeatureTabs.tsx", ("hero-overlay-unknown.webp",)),
     ("hero-overlay-safe-response.json", "FeatureTabs.tsx", ("hero-overlay-safe.webp",)),
     ("hero-overlay-response.json", "CtaCard.tsx", ("hero-overlay.webp",)),
@@ -643,10 +641,6 @@ HERO_SECTION_COPY = {
         "Checking, this can take up to 25 seconds",
         "Too many checks from this connection. Wait a minute and try again.",
         "Quick check: no sell simulation, so a token reads Unknown here.",
-        "Recorded /api/firewall reply of 11 October 2026, chain 42161, SAFE. Upper part of the dialog, overlay at "
-        "unreleased commit 2b54a1b.",
-        "Recorded /api/firewall reply of 11 October 2026, chain 4663, UNKNOWN. Upper part of the dialog, overlay at "
-        "unreleased commit 2b54a1b.",
     ),
     "Mechanism.tsx": (
         "Each check runs, or it says it did not.",
@@ -817,6 +811,66 @@ def test_hero_demo_shows_documented_examples_and_makes_no_request():
     assert json.loads(read(scripts / "hero-overlay-safe-response.json"))["classification"] == "SAFE"
     unknown = json.loads(read(scripts / "hero-overlay-unknown-response.json"))
     assert unknown["status"] != "ok" and any(unknown["coverage_reasons"].values())
+
+
+def test_live_chain_matrix_and_check_definitions_use_reported_fields():
+    chains = read(COMPONENTS / "Chains.tsx")
+    assert 'fetch(API + "/api/coverage/" + chain.chainId' in chains
+    assert "setTimeout(() => controller.abort(), 10_000)" in chains
+    assert "setTimeout(loadNext, 1_300)" in chains
+    assert "schedule = setTimeout(loadNext, 10_100)" in chains
+    assert "GoPlus flags only" in chains
+    assert 'label: "Not observable"' in chains
+    assert "Launch scan capability is not exposed by this endpoint." in chains
+    assert "Unavailable. GET /api/coverage/{chain_id} did not answer for " in chains
+    assert "table-fixed" in chains
+    assert "min-w-[720px]" not in chains
+
+    mechanism = read(COMPONENTS / "Mechanism.tsx")
+    assert 'fetch("https://api.shieldbotsecurity.online/api/stats"' in mechanism
+    assert "setTimeout(() => controller.abort(), 10_000)" in mechanism
+    assert "CHECK_ORDER.map((key)" in mechanism
+    for key in ("structural", "market", "behavioral", "honeypot", "intent", "signature"):
+        assert f"{key}:" in mechanism
+    assert "Dashed: partial or no run" in mechanism
+    assert "A dashed cell is not a pass." in mechanism
+    assert "GET /api/stats did not answer, so every figure reads Unavailable." in mechanism
+
+
+def test_registry_records_use_full_and_compact_verdict_records():
+    worked = read(COMPONENTS / "WorkedExample.tsx")
+    rows = read(COMPONENTS / "OnChain.tsx")
+    assert "<VerdictRecord" in worked
+    assert 'variant="full"' in worked
+    assert "evidenceHash={proof?.evidence_hash}" in worked
+    assert "short(record.subject)" in worked
+    assert "<VerdictRecord" in rows
+    assert 'variant="compact"' in rows
+    assert "evidenceHash={proof?.evidence_hash}" in rows
+    assert "record.onchain_status" in rows
+    assert '{ id: 4663, name: "Robinhood Chain" }' in rows
+
+
+def test_try_it_uses_a_verdict_record_without_repeated_hero_captures():
+    try_it = read(COMPONENTS / "TryIt.tsx")
+    assert 'import VerdictRecord from "./VerdictRecord";' in try_it
+    assert "<VerdictRecord" in try_it
+    assert 'variant="full"' in try_it
+    assert "evidenceHash={reply.evidence_hash}" in try_it
+    assert "hero-overlay-safe.webp" not in try_it
+    assert "hero-overlay-unknown.webp" not in try_it
+    assert "rounded-md" in try_it
+    assert "border-secondary" in try_it
+    assert "border-hairline-strong" not in try_it
+    assert "rounded-full" not in try_it
+    assert "rounded-2xl" not in try_it
+    assert "before:h-px" not in try_it
+    assert "after:h-px" not in try_it
+    for kind in ("idle", "invalid", "loading", "result", "bad-request", "rate-limited", "unavailable"):
+        assert f'kind: "{kind}"' in try_it
+    assert "const TIMEOUT_MS = 30_000;" in try_it
+    assert "AbortSignal.timeout(TIMEOUT_MS)" in try_it
+    assert 'if (!/^0x[0-9a-fA-F]{40}$/.test(value))' in try_it
 
 
 def test_built_dashboard_contains_the_current_source_strings():
