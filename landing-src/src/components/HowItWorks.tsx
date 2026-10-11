@@ -1,8 +1,10 @@
+import type { CSSProperties } from "react";
 import { CHECK_ORDER } from "./CheckRow";
 import Icon, { type IconName } from "./Icon";
 import VerdictRecord from "./VerdictRecord";
 import { verdictOf } from "../firewallVerdict";
 import { recordedReplies } from "../recordedReplies";
+import { useReading } from "../reading";
 
 const steps: { num: string; title: string; desc: string }[] = [
   {
@@ -79,11 +81,13 @@ const channels: { title: string; desc: string; link: string; href: string; icon:
 
 // The process track: the three steps along one rule on the paper ground, open (no accordion), ending in the
 // record a check produces, drawn from the recorded BLOCK reply (src/recordedReplies.ts). No capture here: the
-// hero holds the captures.
+// hero holds the captures. On view the track draws itself step by step (index.css): each segment of the rule draws,
+// its node lights and its step rises from dim; the last, magenta segment ends on the record, which then reads itself.
 const recorded = recordedReplies.block;
 const recordedChip = verdictOf(recorded).label;
 
 export default function HowItWorks() {
+  const track = useReading<HTMLOListElement>();
   return (
     <>
       <section
@@ -108,17 +112,21 @@ export default function HowItWorks() {
             </p>
           </div>
 
-          <ol className="mt-12 grid grid-cols-1 md:mt-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.5fr)]">
+          <ol
+            ref={track}
+            data-read="wait"
+            className="mt-12 grid grid-cols-1 md:mt-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.5fr)]">
             {steps.map((step, i) => {
               const last = i === steps.length - 1;
               return (
                 <li
                   key={step.num}
-                  className={`relative min-w-0 border-l pl-6 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-8 ${last ? "border-accent" : "border-hairline-strong pb-10 lg:pb-0 lg:pr-10"}`}
+                  style={{ "--s": i } as CSSProperties}
+                  className={`pt-step ${last ? "pt-last " : ""}relative min-w-0 border-l pl-6 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-8 ${last ? "border-accent" : "border-hairline-strong pb-10 lg:pb-0 lg:pr-10"}`}
                 >
                   <span
                     aria-hidden="true"
-                    className={`absolute -left-[5px] top-1.5 h-[9px] w-[9px] rounded-[2px] lg:-top-[5px] lg:left-0 ${last ? "bg-accent" : "border border-ink bg-ground-alt"}`}
+                    className={`pt-node absolute -left-[5px] top-1.5 h-[9px] w-[9px] rounded-[2px] lg:-top-[5px] lg:left-0 ${last ? "bg-accent" : "border border-ink bg-ground-alt"}`}
                   />
                   <p className="font-mono text-xs tracking-[0.08em] text-secondary">
                     {step.num}
@@ -135,8 +143,12 @@ export default function HowItWorks() {
                     </p>
                   )}
                   {last && (
-                    <div className="mt-6">
+                    <div
+                      className="mt-6"
+                      style={{ "--vr-d": "1500ms" } as CSSProperties}
+                    >
                       <VerdictRecord
+                        animate
                         variant="compact"
                         chip={{ verdict: recordedChip.verdict, label: recordedChip.text }}
                         coverage={recorded.coverage}

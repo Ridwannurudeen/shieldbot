@@ -39,8 +39,9 @@ import { short, shortenHex, utc } from "../registryFeed";
 //   guard         the guard's answer as served or recorded, e.g. "allowed=True, reason=0".
 //   source        the provenance line under the record: where the fields came from and when.
 //   variant       "full" (hero, figures) or "compact" (a row in a list).
-//   animate       play the reading once on mount; the final frame is the base style, so reduced motion shows
-//                 it at once. Remount (a new key) to replay.
+//   animate       play the reading once on mount, or inside a [data-read] section (src/reading.ts) once that
+//                 section is in view, after the section's own --vr-d; the final frame is the base style, so
+//                 reduced motion shows it at once. Remount (a new key) to replay.
 export interface VerdictRecordProps {
   request?: string;
   chip: { verdict: Verdict; label: string };

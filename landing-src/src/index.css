@@ -181,6 +181,31 @@
   .rd-label { animation: rd-dim 420ms ease-out var(--t) both; }
 }
 
+/* Process track (HowItWorks.tsx): the rule draws one segment per step, 600 ms each; as a segment starts its node
+   lights and its step rises from dim; the last segment is the magenta one, and the record at its end reads itself
+   from 1500 ms (--vr-d). About 4 s, once. */
+@media (prefers-reduced-motion: no-preference) {
+  .pt-step { border-color: transparent; }
+  .pt-step::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -1px;
+    width: 1px;
+    background: rgb(var(--c-hairline-strong));
+    transform-origin: top;
+    animation: vr-draw 600ms var(--e-draw) calc(var(--s) * 600ms) both;
+  }
+  .pt-last::after { background: rgb(var(--c-accent)); }
+  .pt-node { animation: pt-node 360ms var(--e-out) calc(var(--s) * 600ms) both; }
+  .pt-step > p,
+  .pt-step > h3 { animation: pt-rise 520ms var(--e-out) calc(var(--s) * 600ms + 120ms) both; }
+}
+@media (prefers-reduced-motion: no-preference) and (min-width: 1024px) {
+  .pt-step::after { top: -1px; bottom: auto; left: 0; right: 0; width: auto; height: 1px; transform-origin: left; animation-name: pt-draw-x; }
+}
+
 @media (prefers-reduced-motion: no-preference) and (min-width: 640px) {
   .hero-loading { animation: hero-loading 2000ms linear both; }
   .hero-verdict { animation: story-fade-in 350ms ease-out 1800ms both; }
@@ -188,7 +213,8 @@
 
 @keyframes vr-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
 @keyframes vr-needle {
-  from { transform: translateX(-100%); }
+  from { transform: translateX(-100%); opacity: 0; }
+  10% { opacity: 1; }
   75% { transform: none; opacity: 1; }
   to { transform: none; opacity: 0; }
 }
@@ -198,6 +224,9 @@
 @keyframes vr-settle { from { opacity: 0; transform: translateX(-6px); } }
 @keyframes rd-mark { 30% { opacity: 1; } }
 @keyframes rd-dim { from { opacity: 0.35; } }
+@keyframes pt-draw-x { from { transform: scaleX(0); } }
+@keyframes pt-node { from { opacity: 0; transform: scale(0.4); } }
+@keyframes pt-rise { from { opacity: 0.35; transform: translateY(6px); } }
 @keyframes story-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes hero-loading {
   0%, 100% { opacity: 0; }
