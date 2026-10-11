@@ -33,10 +33,6 @@
       --accent: #A3168F;
       --accent-hover: #8A1279;
       --accent-tint: #FBEFF9;
-      --panel: #141414;
-      --panel-text: #F7F6F2;
-      --panel-muted: #8B8B86;
-      --panel-accent: #EA66D8;
       --block: #C21F30;
       --block-text: #A81A29;
       --safe: #1D8A5A;
@@ -238,7 +234,8 @@
       font-weight: 500;
       letter-spacing: 0.04em;
       line-height: 1.35;
-      overflow-wrap: anywhere;
+      overflow-wrap: normal;
+      white-space: nowrap;
       vertical-align: middle;
     }
     .badge-glyph { flex: none; }
@@ -257,11 +254,7 @@
     .error-state { margin-top: 24px; }
     .not-found-links { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 32px 0 0; padding: 0; list-style: none; }
     .not-found-links li { margin: 0; }
-    .footer {
-      width: 100%;
-      background: var(--panel);
-      color: var(--panel-text);
-    }
+    .footer { width: 100%; border-top: 1px solid var(--hairline); background: var(--ground); color: var(--ink); }
     .footer-inner {
       width: calc(100% - 32px);
       max-width: 1152px;
@@ -269,17 +262,17 @@
       padding: 56px 0 0;
     }
     .footer-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; }
-    .footer-wordmark { color: var(--panel-text); font-size: 20px; font-weight: 500; text-decoration: none; }
-    .footer-wordmark span:last-child { color: var(--panel-accent); }
-    .footer-brand p { max-width: 26em; margin: 12px 0 0; color: var(--panel-text); font-size: 14px; }
-    .footer-brand .founder { color: var(--panel-muted); font-size: 13px; }
+    .footer-wordmark { color: var(--ink); font-size: 20px; font-weight: 500; text-decoration: none; }
+    .footer-wordmark span:last-child { color: var(--accent); }
+    .footer-brand p { max-width: 26em; margin: 12px 0 0; color: var(--secondary); font-size: 14px; }
+    .footer-brand .founder { color: var(--secondary); font-size: 13px; }
     .footer-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
     .footer-cols section { min-width: 0; }
     .footer-cols h2 {
       margin: 0 0 12px;
       padding: 0;
       border: 0;
-      color: var(--panel-muted);
+      color: var(--secondary);
       font-size: 12px;
       letter-spacing: 0.1em;
       text-transform: uppercase;
@@ -288,20 +281,21 @@
       display: flex;
       align-items: center;
       min-height: 40px;
-      color: var(--panel-text);
+      color: var(--ink);
       font-size: 14px;
       text-decoration: none;
       overflow-wrap: anywhere;
     }
-    .footer-cols a:hover { color: var(--panel-accent); }
-    .footer a:focus-visible { outline-color: var(--panel-accent); }
+    .footer-cols a:hover { color: var(--accent); }
+    .footer-cols a.footer-email { overflow-wrap: normal; white-space: normal; }
+    .footer-cols a.footer-email span { min-width: 0; }
+    .footer a:focus-visible { outline-color: var(--accent); }
     .footer-bottom {
       margin-top: 48px;
       padding: 20px 0;
-      border-top: 1px solid rgba(247, 246, 242, 0.16);
-      color: var(--panel-muted);
+      border-top: 1px solid var(--hairline);
+      color: var(--secondary);
       font-size: 12px;
-      overflow-wrap: anywhere;
     }
     @media (max-width: 1080px) {
       .nav-links, .nav-cta { display: none; }
@@ -310,15 +304,18 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-width: 44px;
-        min-height: 44px;
-        padding: 0 10px;
-        border: 1px solid var(--hairline);
-        border-radius: 999px;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
         color: var(--ink);
-        font-size: 14px;
-        font-weight: 500;
       }
+      .mobile-menu summary:hover { background: var(--ground-alt); }
+      .menu-icon-close { display: none; }
+      .mobile-menu[open] .menu-icon-bars { display: none; }
+      .mobile-menu[open] .menu-icon-close { display: block; }
       .mobile-panel {
         position: fixed;
         top: 64px;
@@ -358,6 +355,7 @@
   </style>
     <script src="/js/plausible-init.js"></script>
     <script async src="/js/script.js"></script>
+    <script src="/js/static-nav.js" defer></script>
 </head>
 <body>
 
@@ -374,8 +372,18 @@
         </div>
         <a class="nav-cta" href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Add to Chrome</a>
         <details class="mobile-menu">
-          <summary aria-label="Toggle navigation">Menu</summary>
-          <div class="mobile-panel">
+          <summary aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu">
+            <svg viewBox="0 0 32 32" width="24" height="24" fill="currentColor" aria-hidden="true">
+              <g class="menu-icon-bars">
+                <path d="M4 6H28V8H4z" />
+                <path d="M4 24H28V26H4z" />
+                <path d="M4 12H28V14H4z" />
+                <path d="M4 18H28V20H4z" />
+              </g>
+              <path class="menu-icon-close" d="M17.4141 16 24 9.4141 22.5859 8 16 14.5859 9.4143 8 8 9.4141 14.5859 16 8 22.5859 9.4143 24 16 17.4141 22.5859 24 24 22.5859 17.4141 16z" />
+            </svg>
+          </summary>
+          <div class="mobile-panel" id="mobile-menu">
             <a href="/#how-it-works">How it works</a>
             <a href="/#chains">Coverage</a>
             <a href="/#on-chain">On-chain registry</a>
@@ -502,6 +510,7 @@
             <a href="/#agent-security">For builders</a>
             <a href="/dashboard">Threat dashboard</a>
             <a href="/#faq">FAQ</a>
+            <a href="/about.html">About</a>
             <a href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Chrome extension</a>
             <a href="https://api.shieldbotsecurity.online/docs" target="_blank" rel="noopener noreferrer">API docs</a>
           </section>
@@ -516,7 +525,7 @@
             <a href="https://github.com/Ridwannurudeen/shieldbot" target="_blank" rel="noopener noreferrer">GitHub</a>
             <a href="https://t.me/shieldbot_bnb_bot" target="_blank" rel="noopener noreferrer">Telegram bot</a>
             <a href="https://x.com/shieldbot_" target="_blank" rel="noopener noreferrer">@shieldbot_</a>
-            <a href="mailto:support@shieldbotsecurity.online">support@shieldbotsecurity.online</a>
+            <a class="footer-email" href="mailto:support@shieldbotsecurity.online"><span>support@<wbr>shieldbotsecurity.online</span></a>
           </section>
         </div>
       </div>
