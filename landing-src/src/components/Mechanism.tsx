@@ -1,22 +1,9 @@
-import { useEffect, useState } from "react";
 import SectionHeader from "./SectionHeader";
 import { CHECK_ORDER, type CheckKey } from "./CheckRow";
+import { useStats } from "../liveStats";
 
-// Figures from GET /api/stats (api.py public_stats), fetched when the page loads. A source that is not
-// running reports null there, and each figure then reads Unavailable; nothing is filled in.
-interface Stats {
-  transactions_monitored: number | null;
-  mempool_counting_since: number | null;
-  mempool_chains_observable: number[] | null;
-  launch_discovery: {
-    scanned_share: { window_hours: number; launches: number; scanned: number };
-  } | null;
-  registry_records_confirmed: number | null;
-  evidence_documents: Record<string, number> | null;
-  contracts_scanned: number | null;
-  transactions_blocked: number | null;
-}
-
+// Figures from GET /api/stats (api.py public_stats, src/liveStats.ts), fetched when the page loads. A source
+// that is not running reports null there, and each figure then reads Unavailable; nothing is filled in.
 const chainNames: Record<number, string> = {
   1: "Ethereum",
   56: "BNB Chain",
@@ -73,36 +60,7 @@ function Figure({
 
 export default function Mechanism() {
   // undefined while loading, null when /api/stats did not answer.
-  const [stats, setStats] = useState<Stats | null | undefined>(undefined);
-  const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let active = true;
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-
-    fetch("https://api.shieldbotsecurity.online/api/stats", {
-      signal: controller.signal,
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((d: Stats) => {
-        if (!active) return;
-        setStats(d);
-        setFetchedAt(new Date());
-      })
-      .catch(() => {
-        if (active) setStats(null);
-      })
-      .finally(() => clearTimeout(timeout));
-    return () => {
-      active = false;
-      clearTimeout(timeout);
-      controller.abort();
-    };
-  }, []);
+  const { stats, fetchedAt } = useStats();
 
   const loading = stats === undefined;
   const share = stats?.launch_discovery?.scanned_share;

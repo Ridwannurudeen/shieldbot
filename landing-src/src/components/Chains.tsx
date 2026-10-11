@@ -1,8 +1,12 @@
-import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { useStats, type Stats } from "../liveStats";
 
 // Per-chain coverage. tests/test_website_claims.py checks each row against the chain adapters
 // (sell simulation), services/mempool_service.py (mempool) and services/launch_discovery.py.
+// The sell simulation and launch scan columns are drawn from these rows: GET /api/coverage/{chain_id} serves the
+// same adapter configuration, so asking it for each chain would add eight requests and no information. Whether a
+// public mempool was read is live: GET /api/stats (src/liveStats.ts, the request Mechanism already makes) lists
+// the chains the monitor read on its last poll.
 interface Chain {
   chainId: number;
   name: string;
@@ -134,24 +138,16 @@ const chains: Chain[] = [
 ];
 
 
-const API = "https://api.shieldbotsecurity.online";
-
-interface ChainCoverage {
-  chain_id: number;
-  capabilities: {
-    sell_simulation: string | null;
-    public_mempool: string | null;
-  } | null;
-}
-
 type CellState = "available" | "unavailable" | "unknown";
 
 function CapabilityCell({
   state,
   label,
+  note,
 }: {
   state: CellState;
   label: string;
+  note?: string;
 }) {
   const square =
     state === "available"
@@ -166,111 +162,46 @@ function CapabilityCell({
         aria-hidden="true"
         className={"h-2.5 w-2.5 flex-none rounded-[2px] border " + square}
       />
-      <span className="min-w-0 whitespace-normal">{label}</span>
+      <span className="min-w-0 whitespace-normal">
+        {label}
+        {note && <span className="block text-secondary">{note}</span>}
+      </span>
     </span>
   );
 }
 
-function simulationCell(
-  coverage: ChainCoverage | null | undefined,
-): { state: CellState; label: string } {
-  const provider = coverage?.capabilities?.sell_simulation;
-  if (coverage === undefined) return { state: "unknown", label: "Loading" };
-  if (coverage === null || provider === null || provider === undefined) {
-    return { state: "unknown", label: "Unavailable" };
-  }
-  if (provider === "goplus_reported") {
+function simulationCell(chain: Chain): { state: CellState; label: string; note?: string } {
+  if (chain.simulation === null) {
     return { state: "unavailable", label: "GoPlus flags only" };
   }
   return {
     state: "available",
-    label: provider === "eth_simulateV1" ? "ShieldBot simulator" : provider,
+    label: chain.simulation === "ShieldBot" ? "ShieldBot simulator" : chain.simulation,
+    note: chain.simulationScope,
   };
 }
 
 function mempoolCell(
-  coverage: ChainCoverage | null | undefined,
+  chain: Chain,
+  stats: Stats | null | undefined,
 ): { state: CellState; label: string } {
-  const status = coverage?.capabilities?.public_mempool;
-  if (coverage === undefined) return { state: "unknown", label: "Loading" };
-  if (coverage === null || status === null || status === undefined) {
-    return { state: "unknown", label: "Unavailable" };
-  }
-  if (status === "yes") {
-    return { state: "available", label: "Observed on last poll" };
-  }
-  if (status === "no") {
-    return { state: "unavailable", label: "No public mempool" };
-  }
-  if (status === "unobservable") {
-    return { state: "unavailable", label: "Not observable" };
-  }
-  return { state: "unknown", label: status };
+  if (!chain.mempool) return { state: "unavailable", label: "No public mempool" };
+  if (stats === undefined) return { state: "unknown", label: "Loading" };
+  const observable = stats?.mempool_chains_observable;
+  if (!observable) return { state: "unknown", label: "Unavailable" };
+  return observable.includes(chain.chainId)
+    ? { state: "available", label: "Observed on last poll" }
+    : { state: "unavailable", label: "Not observable" };
+}
+
+function launchCell(chain: Chain): { state: CellState; label: string } {
+  return chain.launches
+    ? { state: "available", label: "/launchalerts" }
+    : { state: "unavailable", label: "No" };
 }
 
 export default function Chains() {
-  const [coverage, setCoverage] = useState<
-    Record<number, ChainCoverage | null | undefined>
-  >({});
-
-  useEffect(() => {
-    let active = true;
-    let next = 0;
-    let schedule: ReturnType<typeof setTimeout> | undefined;
-    const requests = new Map<AbortController, ReturnType<typeof setTimeout>>();
-
-    const loadNext = () => {
-      const chain = chains[next];
-      next += 1;
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
-      requests.set(controller, timeout);
-
-      fetch(API + "/api/coverage/" + chain.chainId, {
-        signal: controller.signal,
-      })
-        .then((r) => {
-          if (!r.ok) throw new Error("HTTP " + r.status);
-          return r.json();
-        })
-        .then((data: ChainCoverage) => {
-          if (data.chain_id !== chain.chainId) {
-            throw new Error("Mismatched chain coverage");
-          }
-          if (active) {
-            setCoverage((current) => ({ ...current, [chain.chainId]: data }));
-          }
-        })
-        .catch(() => {
-          if (active) {
-            setCoverage((current) => ({ ...current, [chain.chainId]: null }));
-          }
-        })
-        .finally(() => {
-          clearTimeout(timeout);
-          requests.delete(controller);
-        });
-
-      if (next < chains.length) schedule = setTimeout(loadNext, 1_300);
-    };
-
-    schedule = setTimeout(loadNext, 10_100);
-    return () => {
-      active = false;
-      if (schedule) clearTimeout(schedule);
-      requests.forEach((timeout, controller) => {
-        clearTimeout(timeout);
-        controller.abort();
-      });
-      requests.clear();
-    };
-  }, []);
-
-  const unavailableChains = chains
-    .filter((chain) => coverage[chain.chainId] === null)
-    .map((chain) => chain.name);
-
+  const { stats, fetchedAt } = useStats();
   return (
     <section id="chains" aria-labelledby="chains-title" className="bg-ground-alt py-14 md:py-[72px] lg:py-24">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -285,7 +216,7 @@ export default function Chains() {
         <div className="mt-10">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <h3 className="font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-secondary">
-              Live chain capabilities
+              Chain capabilities
             </h3>
             <div
               role="group"
@@ -294,15 +225,15 @@ export default function Chains() {
             >
               <span className="inline-flex items-center gap-2">
                 <span aria-hidden="true" className="h-3 w-3 rounded-[2px] border border-ink bg-ink" />
-                Available
+                Filled: runs
               </span>
               <span className="inline-flex items-center gap-2">
                 <span aria-hidden="true" className="h-3 w-3 rounded-[2px] border border-dashed border-ink" />
-                Not available
+                Dashed: does not run on this chain
               </span>
               <span className="inline-flex items-center gap-2">
                 <span aria-hidden="true" className="h-3 w-3 rounded-[2px] border border-ink bg-ground" />
-                Unavailable
+                Outline: Unavailable
               </span>
             </div>
           </div>
@@ -311,7 +242,7 @@ export default function Chains() {
             role="region"
             className="mt-4 overflow-x-auto rounded-lg border border-hairline bg-ground"
             tabIndex={0}
-            aria-label="Live capability matrix by chain"
+            aria-label="Capability matrix by chain"
           >
             <table className="w-full table-fixed text-xs sm:text-sm">
               <colgroup>
@@ -321,8 +252,8 @@ export default function Chains() {
                 <col style={{ width: "23.3333%" }} />
               </colgroup>
               <caption className="sr-only">
-                Live sell simulation and public mempool capabilities by supported chain.
-                Launch scan capability is not exposed by this endpoint.
+                Sell simulation and launch scans by supported chain, from the code; public mempool
+                from the monitor's last poll, live from GET /api/stats.
               </caption>
               <thead>
                 <tr className="text-left text-[11px] uppercase text-secondary sm:text-xs">
@@ -334,9 +265,8 @@ export default function Chains() {
               </thead>
               <tbody>
                 {chains.map((chain) => {
-                  const record = coverage[chain.chainId];
-                  const simulation = simulationCell(record);
-                  const mempool = mempoolCell(record);
+                  const simulation = simulationCell(chain);
+                  const mempool = mempoolCell(chain, stats);
 
                   return (
                     <tr key={chain.chainId} className="border-t border-hairline">
@@ -356,7 +286,7 @@ export default function Chains() {
                         <CapabilityCell {...mempool} />
                       </td>
                       <td className="py-3 pl-0.5 pr-1 sm:pl-3 sm:pr-4">
-                        <CapabilityCell state="unknown" label="Unavailable" />
+                        <CapabilityCell {...launchCell(chain)} />
                       </td>
                     </tr>
                   );
@@ -366,12 +296,15 @@ export default function Chains() {
           </div>
 
           <p className="mt-4 text-xs leading-[18px] text-secondary">
-            {unavailableChains.length > 0
-              ? "Unavailable. GET /api/coverage/{chain_id} did not answer for " +
-                unavailableChains.join(", ") +
-                "."
-              : "Live from GET /api/coverage/{chain_id}. Mempool status reflects the last poll; " +
-                "launch scan capability is not exposed by this endpoint."}
+            Sell simulation and launch scans: from the code, the chain adapters and services/launch_discovery.py,
+            the configuration GET /api/coverage/{"{chain_id}"} serves.{" "}
+            {stats === null
+              ? "Public mempool: Unavailable. GET /api/stats did not answer, so no chain is shown as observed."
+              : stats === undefined
+                ? "Public mempool: loading GET /api/stats."
+                : !stats.mempool_chains_observable
+                  ? "Public mempool: Unavailable. GET /api/stats did not report which mempools the monitor read."
+                  : `Public mempool: live from GET /api/stats, the monitor's last poll${fetchedAt ? `, fetched ${fetchedAt.toISOString().slice(11, 16)} UTC` : ""}.`}
           </p>
         </div>
 
@@ -382,7 +315,7 @@ export default function Chains() {
             ShieldBot runs its own on supported Arbitrum and Robinhood Chain pool
             routes. On Arbitrum those are pools pairing the token with WETH on
             Uniswap V3, Uniswap V2 or SushiSwap.
-            Where it says None, and for an Arbitrum token with no such pool (for
+            Where it says GoPlus flags only, and for an Arbitrum token with no such pool (for
             example one traded only on Camelot, or only against stablecoins),
             honeypot and tax flags come from GoPlus alone, and they read Unknown
             when GoPlus has no answer. ARBROKER

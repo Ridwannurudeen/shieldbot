@@ -815,21 +815,32 @@ def test_hero_demo_shows_documented_examples_and_makes_no_request():
 
 
 def test_live_chain_matrix_and_check_definitions_use_reported_fields():
+    # The matrix sends no request of its own: sell simulation and launch scans are the pinned rows above (the
+    # adapter configuration GET /api/coverage/{chain_id} serves), and the mempool column reads the one
+    # GET /api/stats the page already makes, so a page load stays well inside the API's per-IP limit.
     chains = read(COMPONENTS / "Chains.tsx")
-    assert 'fetch(API + "/api/coverage/" + chain.chainId' in chains
-    assert "setTimeout(() => controller.abort(), 10_000)" in chains
-    assert "setTimeout(loadNext, 1_300)" in chains
-    assert "schedule = setTimeout(loadNext, 10_100)" in chains
+    for forbidden in ("fetch(", "XMLHttpRequest", "setTimeout("):
+        assert forbidden not in chains, forbidden
+    assert "useStats()" in chains
+    assert "**adapter.capabilities()," in read(ROOT / "api.py")
     assert "GoPlus flags only" in chains
     assert 'label: "Not observable"' in chains
-    assert "Launch scan capability is not exposed by this endpoint." in chains
-    assert "Unavailable. GET /api/coverage/{chain_id} did not answer for " in chains
+    assert 'label: "/launchalerts"' in chains
+    assert "<CapabilityCell {...launchCell(chain)} />" in chains
+    assert 'label="Unavailable"' not in chains
+    assert "Public mempool: Unavailable. GET /api/stats did not answer" in chains
+    assert "Where it says None" not in chains
     assert "table-fixed" in chains
     assert "min-w-[720px]" not in chains
 
+    stats = read(LANDING_SRC / "src" / "liveStats.ts")
+    assert 'fetch("https://api.shieldbotsecurity.online/api/stats"' in stats
+    assert "setTimeout(() => current.abort(), 10_000)" in stats
+    assert "controller.abort();" in stats
+    assert "if (!r.ok) throw" in stats
+
     mechanism = read(COMPONENTS / "Mechanism.tsx")
-    assert 'fetch("https://api.shieldbotsecurity.online/api/stats"' in mechanism
-    assert "setTimeout(() => controller.abort(), 10_000)" in mechanism
+    assert "useStats()" in mechanism and "fetch(" not in mechanism
     assert "CHECK_ORDER.map((key)" in mechanism
     for key in ("structural", "market", "behavioral", "honeypot", "intent", "signature"):
         assert f"{key}:" in mechanism
