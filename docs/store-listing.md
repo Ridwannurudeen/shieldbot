@@ -88,7 +88,7 @@ smoke test in section 3 has passed with them.
    on the `extension` folder, and check: name "ShieldAI Transaction Firewall", version 3.2.0,
    no Errors button. Then run the smoke test below. Its manual release gate remains outstanding on
    both MetaMask and Rabby.
-5. Developer Dashboard, Package tab: 3.2.0 was uploaded and is now served.
+5. After owner submission, confirm the Developer Dashboard Package tab lists 3.2.0 and the update service serves it.
 6. Store listing tab: check that the description matches the text above in every listed language. Do not name the
    chains one by one: the first 3.1.0 submission (2026-10-05) was rejected for keyword spam
    ("Yellow Argon") because the English, Chinese and Vietnamese descriptions listed all eight.
