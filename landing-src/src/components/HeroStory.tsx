@@ -99,8 +99,8 @@ export default function HeroStory() {
             <div className="story-loading absolute inset-0 hidden place-items-center sm:grid">
               <img
                 src="/hero-overlay-loading.webp"
-                width={440}
-                height={181}
+                width={490}
+                height={246}
                 loading="lazy"
                 alt="The ShieldBot extension's dialog while it checks the request. It reads Analyzing transaction..."
                 className="w-[380px] h-auto rounded"
@@ -117,8 +117,8 @@ export default function HeroStory() {
                   />
                   <img
                     src="/hero-overlay.webp"
-                    width={440}
-                    height={860}
+                    width={490}
+                    height={1019}
                     alt="The ShieldBot extension's warning dialog for a request that approves unlimited USDC spending on Ethereum. The verdict badge reads BLOCK RECOMMENDED — Safety: 0/100. The danger signals include Spender flagged by GoPlus: stealing_attack (SlowMist,BlockSec)."
                     className="block w-full h-auto"
                   />
@@ -132,7 +132,7 @@ export default function HeroStory() {
         Recorded reply of 26 September 2026, chain 1, BLOCK RECOMMENDED.
         Recorded examples, not live scans. The page, the cursor and the dimmed
         backdrop are drawn; the two dialogs are captures of the extension's
-        overlay at unreleased commit 44f8710, fed that reply.{" "}
+        overlay at unreleased commit 2b54a1b, fed that reply.{" "}
         <button
           type="button"
           onClick={() => setRun(run + 1)}

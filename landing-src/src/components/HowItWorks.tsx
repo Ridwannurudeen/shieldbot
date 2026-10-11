@@ -116,15 +116,16 @@ export default function HowItWorks() {
                 <img
                   src="/hero-overlay.webp"
                   width={490}
-                  height={954}
+                  height={1019}
                   loading="lazy"
                   alt="The ShieldBot extension's warning dialog for a request that approves unlimited USDC spending on Ethereum. The verdict badge reads BLOCK RECOMMENDED — Safety: 0/100. The danger signals include Spender flagged by GoPlus: stealing_attack (SlowMist,BlockSec)."
                   className="w-full h-auto rounded-2xl shadow-md ring-1 ring-line-strong"
                 />
               </picture>
               <figcaption className="mt-4 text-[13px] leading-relaxed text-muted">
-                The extension's 3.1.0 overlay (listed on the Chrome Web Store as
-                ShieldAI Transaction Firewall), fed
+                The extension's overlay at unreleased commit 2b54a1b (3.1.0 on the
+                Chrome Web Store, as ShieldAI Transaction Firewall, still shows the
+                earlier dark dialog), fed
                 the API's reply for this request on 26 September 2026. It
                 recommends blocking an unlimited USDC approval to the wallet
                 behind the 2021 BadgerDAO front-end attack, which GoPlus flags for
