@@ -1,11 +1,10 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="dark" />
-  <meta name="theme-color" content="#0F172A" />
-  <script>(function(){try{if(localStorage.getItem("shieldbot-theme")==="light"){var d=document;d.documentElement.setAttribute("data-theme","light");d.querySelector('meta[name="theme-color"]').setAttribute("content","#FFFFFF");d.querySelector('meta[name="color-scheme"]').setAttribute("content","light")}}catch(e){}})()</script>
+  <meta name="color-scheme" content="light" />
+  <meta name="theme-color" content="#FFFFFF" />
   <title>Security — ShieldAI Transaction Firewall</title>
   <meta name="description" content="How to report a security vulnerability in ShieldBot, what is in scope, what to expect after you report, and a note on the September 2026 antivirus flags." />
   <link rel="canonical" href="https://shieldbotsecurity.online/security.html" />
@@ -25,19 +24,9 @@
   <link rel="shortcut icon" href="/favicon.png">
   <style>
     :root {
-      --c-surface: 15 23 42; --c-surface-2: 10 16 32; --c-surface-3: 30 41 59;
-      --c-line: 39 51 73; --c-ink: 248 250 252; --c-body: 203 213 225; --c-muted: 148 163 184;
-      --c-emerald: 52 211 153; --c-emerald-tint: 15 42 34; --c-emerald-line: 31 95 71;
-      --c-safe-fg: 74 222 128; --c-safe-tint: 15 46 29;
-      --c-caution-fg: 250 204 21; --c-caution-tint: 48 39 8;
-      --c-high-fg: 251 146 60; --c-high-tint: 53 26 11;
-      --c-block-fg: 248 113 113; --c-block-tint: 58 20 24;
-      color-scheme: dark;
-    }
-    :root[data-theme="light"] {
-      --c-surface: 255 255 255; --c-surface-2: 246 248 250; --c-surface-3: 238 242 246;
-      --c-line: 227 232 239; --c-ink: 11 18 32; --c-body: 51 65 85; --c-muted: 71 85 105;
-      --c-emerald: 4 120 87; --c-emerald-tint: 236 253 245; --c-emerald-line: 167 243 208;
+      --c-surface: 255 255 255; --c-surface-2: 247 246 242; --c-surface-3: 247 246 242;
+      --c-line: 230 229 225; --c-ink: 20 20 20; --c-body: 20 20 20; --c-muted: 107 107 102;
+      --c-emerald: 163 22 143; --c-emerald-tint: 251 239 249; --c-emerald-line: 214 213 208;
       --c-safe-fg: 22 101 52; --c-safe-tint: 220 252 231;
       --c-caution-fg: 133 77 14; --c-caution-tint: 254 249 195;
       --c-high-fg: 154 52 18; --c-high-tint: 255 237 213;
@@ -45,24 +34,32 @@
       color-scheme: light;
     }
     @font-face {
-      font-family: "Manrope Variable";
+      font-family: "Geist";
       font-style: normal;
-      font-weight: 200 800;
+      font-weight: 400;
       font-display: swap;
-      src: url("/fonts/manrope-latin-wght-normal.woff2") format("woff2-variations");
+      src: url("/fonts/geist-latin-400-normal.woff2") format("woff2");
       unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
     }
     @font-face {
-      font-family: "Manrope Fallback";
+      font-family: "Geist";
+      font-style: normal;
+      font-weight: 500;
+      font-display: swap;
+      src: url("/fonts/geist-latin-500-normal.woff2") format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: "Geist Fallback";
       src: local("Arial");
-      size-adjust: 128.11%;
-      ascent-override: 83.21%;
-      descent-override: 23.42%;
+      size-adjust: 134.8%;
+      ascent-override: 74.56%;
+      descent-override: 21.88%;
       line-gap-override: 0%;
     }
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: "Manrope Variable", "Manrope Fallback", Arial, Helvetica, sans-serif;
+      font-family: "Geist", "Geist Fallback", Arial, Helvetica, sans-serif;
       background: rgb(var(--c-surface));
       color: rgb(var(--c-body));
       line-height: 1.7;

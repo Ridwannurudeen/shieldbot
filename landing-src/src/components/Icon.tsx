@@ -1,35 +1,155 @@
 import type { ReactNode } from "react";
 
-export type IconName = "shield" | "check" | "cross" | "question" | "info" | "search" | "pen" | "link" | "code" | "chat" | "bot" | "copy" | "external" | "chevron" | "pause" | "play" | "menu" | "close" | "grid" | "sun" | "moon";
+export type IconName =
+  | "shield"
+  | "check"
+  | "cross"
+  | "question"
+  | "info"
+  | "search"
+  | "pen"
+  | "link"
+  | "code"
+  | "chat"
+  | "bot"
+  | "copy"
+  | "external"
+  | "chevron"
+  | "pause"
+  | "play"
+  | "menu"
+  | "close"
+  | "grid";
 
+// Path data from @carbon/icons 11.90.0 (Apache-2.0), svg/32. "shield" draws Carbon's report glyph: no
+// shield imagery on the site.
 const PATHS: Record<IconName, ReactNode> = {
-  shield: <><path d="M12 1.5 3 6v6c0 5.8 3.84 11.21 9 12 5.16-.79 9-6.2 9-12V6l-9-4.5Z" /><path d="m9 12 2.25 2.25L15 9.75" /></>,
-  check: <path d="m5 12 4 4L19 6" />,
-  cross: <path d="m6 6 12 12M18 6 6 18" />,
-  question: <><path d="M9.1 9a3 3 0 1 1 5.8 1c0 2-2.9 2.1-2.9 4" /><path d="M12 18h.01" /></>,
-  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
-  search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
-  pen: <><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></>,
-  link: <><path d="M10 13a5 5 0 0 0 7.07.07l2-2a5 5 0 0 0-7.07-7.07l-1.14 1.14" /><path d="M14 11a5 5 0 0 0-7.07-.07l-2 2A5 5 0 0 0 12 20l1.14-1.14" /></>,
-  code: <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />,
-  chat: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z" />,
-  bot: <><rect x="7" y="7" width="10" height="10" rx="1" /><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4" /></>,
-  copy: <><rect x="9" y="9" width="10" height="10" rx="1" /><path d="M15 9V5H5v10h4" /></>,
-  external: <><path d="M14 5h5v5M19 5l-8 8" /><path d="M19 14v5H5V5h5" /></>,
-  chevron: <path d="m8 10 4 4 4-4" />,
-  pause: <path d="M9 5v14M15 5v14" />,
-  play: <path d="m9 5 10 7-10 7Z" />,
-  menu: <path d="M4 6h16M4 12h16M4 18h16" />,
-  close: <path d="m6 6 12 12M18 6 6 18" />,
-  grid: <><rect x="4" y="4" width="6" height="6" /><rect x="14" y="4" width="6" height="6" /><rect x="4" y="14" width="6" height="6" /><rect x="14" y="14" width="6" height="6" /></>,
-  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></>,
-  moon: <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />,
+  shield: (
+    <>
+      <path d="M10 18H18V20H10z" />
+      <path d="M10 13H22V15H10z" />
+      <path d="M10 23H15V25H10z" />
+      <path d="M25,5H22V4a2,2,0,0,0-2-2H12a2,2,0,0,0-2,2V5H7A2,2,0,0,0,5,7V28a2,2,0,0,0,2,2H25a2,2,0,0,0,2-2V7A2,2,0,0,0,25,5ZM12,4h8V8H12ZM25,28H7V7h3v3H22V7h3Z" />
+    </>
+  ),
+  check: (
+    <path d="M13 24 4 15 5.414 13.586 13 21.171 26.586 7.586 28 9 13 24z" />
+  ),
+  cross: (
+    <path d="M17.4141 16 24 9.4141 22.5859 8 16 14.5859 9.4143 8 8 9.4141 14.5859 16 8 22.5859 9.4143 24 16 17.4141 22.5859 24 24 22.5859 17.4141 16z" />
+  ),
+  question: (
+    <>
+      <path d="M16,2A14,14,0,1,0,30,16,14,14,0,0,0,16,2Zm0,26A12,12,0,1,1,28,16,12,12,0,0,1,16,28Z" />
+      <circle cx="16" cy="23.5" r="1.5" />
+      <path d="M17,8H15.5A4.49,4.49,0,0,0,11,12.5V13h2v-.5A2.5,2.5,0,0,1,15.5,10H17a2.5,2.5,0,0,1,0,5H15v4.5h2V17a4.5,4.5,0,0,0,0-9Z" />
+    </>
+  ),
+  info: (
+    <>
+      <path d="M17 22 17 14 13 14 13 16 15 16 15 22 12 22 12 24 20 24 20 22 17 22z" />
+      <path d="M16,8a1.5,1.5,0,1,0,1.5,1.5A1.5,1.5,0,0,0,16,8Z" />
+      <path d="M16,30A14,14,0,1,1,30,16,14,14,0,0,1,16,30ZM16,4A12,12,0,1,0,28,16,12,12,0,0,0,16,4Z" />
+    </>
+  ),
+  search: (
+    <path d="M29,27.5859l-7.5521-7.5521a11.0177,11.0177,0,1,0-1.4141,1.4141L27.5859,29ZM4,13a9,9,0,1,1,9,9A9.01,9.01,0,0,1,4,13Z" />
+  ),
+  pen: (
+    <>
+      <path d="M2 26H30V28H2z" />
+      <path d="M25.4,9c0.8-0.8,0.8-2,0-2.8c0,0,0,0,0,0l-3.6-3.6c-0.8-0.8-2-0.8-2.8,0c0,0,0,0,0,0l-15,15V24h6.4L25.4,9z M20.4,4L24,7.6 l-3,3L17.4,7L20.4,4z M6,22v-3.6l10-10l3.6,3.6l-10,10H6z" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="M29.25,6.76a6,6,0,0,0-8.5,0l1.42,1.42a4,4,0,1,1,5.67,5.67l-8,8a4,4,0,1,1-5.67-5.66l1.41-1.42-1.41-1.42-1.42,1.42a6,6,0,0,0,0,8.5A6,6,0,0,0,17,25a6,6,0,0,0,4.27-1.76l8-8A6,6,0,0,0,29.25,6.76Z" />
+      <path d="M4.19,24.82a4,4,0,0,1,0-5.67l8-8a4,4,0,0,1,5.67,0A3.94,3.94,0,0,1,19,14a4,4,0,0,1-1.17,2.85L15.71,19l1.42,1.42,2.12-2.12a6,6,0,0,0-8.51-8.51l-8,8a6,6,0,0,0,0,8.51A6,6,0,0,0,7,28a6.07,6.07,0,0,0,4.28-1.76L9.86,24.82A4,4,0,0,1,4.19,24.82Z" />
+    </>
+  ),
+  code: (
+    <>
+      <path d="M31 16 24 23 22.59 21.59 28.17 16 22.59 10.41 24 9 31 16z" />
+      <path d="M1 16 8 9 9.41 10.41 3.83 16 9.41 21.59 8 23 1 16z" />
+      <path d="M5.91 15H26.08V17H5.91z" transform="rotate(-75 15.996 16)" />
+    </>
+  ),
+  chat: (
+    <>
+      <path d="M17.74,30,16,29l4-7h6a2,2,0,0,0,2-2V8a2,2,0,0,0-2-2H6A2,2,0,0,0,4,8V20a2,2,0,0,0,2,2h9v2H6a4,4,0,0,1-4-4V8A4,4,0,0,1,6,4H26a4,4,0,0,1,4,4V20a4,4,0,0,1-4,4H21.16Z" />
+      <path d="M8 10H24V12H8z" />
+      <path d="M8 16H18V18H8z" />
+    </>
+  ),
+  bot: (
+    <>
+      <path d="M18 10H20V12H18z" />
+      <path d="M12 10H14V12H12z" />
+      <path d="M26,20H21V18h1a2.0023,2.0023,0,0,0,2-2V12h2V10H24V8a2.0023,2.0023,0,0,0-2-2H20V2H18V6H14V2H12V6H10A2.0023,2.0023,0,0,0,8,8v2H6v2H8v4a2.0023,2.0023,0,0,0,2,2h1v2H6a2.0023,2.0023,0,0,0-2,2v8H6V22H26v8h2V22A2.0023,2.0023,0,0,0,26,20ZM10,8H22v8H10Zm3,10h6v2H13Z" />
+    </>
+  ),
+  copy: (
+    <>
+      <path d="M28,10V28H10V10H28m0-2H10a2,2,0,0,0-2,2V28a2,2,0,0,0,2,2H28a2,2,0,0,0,2-2V10a2,2,0,0,0-2-2Z" />
+      <path d="M4,18H2V4A2,2,0,0,1,4,2H18V4H4Z" />
+    </>
+  ),
+  external: (
+    <>
+      <path d="M26,28H6a2.0027,2.0027,0,0,1-2-2V6A2.0027,2.0027,0,0,1,6,4H16V6H6V26H26V16h2V26A2.0027,2.0027,0,0,1,26,28Z" />
+      <path d="M20 2 20 4 26.586 4 18 12.586 19.414 14 28 5.414 28 12 30 12 30 2 20 2z" />
+    </>
+  ),
+  chevron: <path d="M16 22 6 12 7.4 10.6 16 19.2 24.6 10.6 26 12z" />,
+  pause: (
+    <>
+      <path d="M12,8V24H8V8h4m0-2H8A2,2,0,0,0,6,8V24a2,2,0,0,0,2,2h4a2,2,0,0,0,2-2V8a2,2,0,0,0-2-2Z" />
+      <path d="M24,8V24H20V8h4m0-2H20a2,2,0,0,0-2,2V24a2,2,0,0,0,2,2h4a2,2,0,0,0,2-2V8a2,2,0,0,0-2-2Z" />
+    </>
+  ),
+  play: (
+    <path d="M7,28a1,1,0,0,1-1-1V5a1,1,0,0,1,1.4819-.8763l20,11a1,1,0,0,1,0,1.7525l-20,11A1.0005,1.0005,0,0,1,7,28ZM8,6.6909V25.3088L24.9248,16Z" />
+  ),
+  menu: (
+    <>
+      <path d="M4 6H28V8H4z" />
+      <path d="M4 24H28V26H4z" />
+      <path d="M4 12H28V14H4z" />
+      <path d="M4 18H28V20H4z" />
+    </>
+  ),
+  close: (
+    <path d="M17.4141 16 24 9.4141 22.5859 8 16 14.5859 9.4143 8 8 9.4141 14.5859 16 8 22.5859 9.4143 24 16 17.4141 22.5859 24 24 22.5859 17.4141 16z" />
+  ),
+  grid: (
+    <>
+      <path d="M12,4H6A2,2,0,0,0,4,6v6a2,2,0,0,0,2,2h6a2,2,0,0,0,2-2V6A2,2,0,0,0,12,4Zm0,8H6V6h6Z" />
+      <path d="M26,4H20a2,2,0,0,0-2,2v6a2,2,0,0,0,2,2h6a2,2,0,0,0,2-2V6A2,2,0,0,0,26,4Zm0,8H20V6h6Z" />
+      <path d="M12,18H6a2,2,0,0,0-2,2v6a2,2,0,0,0,2,2h6a2,2,0,0,0,2-2V20A2,2,0,0,0,12,18Zm0,8H6V20h6Z" />
+      <path d="M26,18H20a2,2,0,0,0-2,2v6a2,2,0,0,0,2,2h6a2,2,0,0,0,2-2V20A2,2,0,0,0,26,18Zm0,8H20V20h6Z" />
+    </>
+  ),
 };
 
-export default function Icon({ name, size = 20, className }: { name: IconName; size?: 16 | 20 | 24; className?: string }) {
-  return <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>{PATHS[name]}</svg>;
-}
-
-export function Mark({ size = 28, className }: { size?: number; className?: string }) {
-  return <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}><path d="M12 1.5 3 6v6c0 5.8 3.84 11.21 9 12 5.16-.79 9-6.2 9-12V6l-9-4.5Z" fill="currentColor" /><path d="m9 12 2.25 2.25L15 9.75" className="text-onfill" /></svg>;
+export default function Icon({
+  name,
+  size = 20,
+  className,
+}: {
+  name: IconName;
+  size?: 16 | 20 | 24;
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 32 32"
+      width={size}
+      height={size}
+      fill="currentColor"
+      aria-hidden="true"
+      className={className}
+    >
+      {PATHS[name]}
+    </svg>
+  );
 }

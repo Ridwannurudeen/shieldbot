@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import Button from "./Button";
 import Icon from "./Icon";
-import SectionHeader from "./SectionHeader";
 
 const faqs = [
   {
@@ -62,59 +61,66 @@ const faqs = [
   },
 ];
 
+// Heading on the left, the questions on the right from 1024 px. One answer opens at a time; the panel opens from
+// 0fr to 1fr in 300 ms (index.css .acc-panel), so nothing measures height, and a closed answer is inert.
 export default function FAQ() {
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<number | null>(0);
 
   return (
-    <section id="faq" aria-labelledby="faq-title" className="bg-surface-2 py-14 md:py-[72px] lg:py-24">
-      <div className="max-w-3xl mx-auto px-4 sm:px-6">
-        <SectionHeader
-          id="faq-title"
-          eyebrow="FAQ"
-          title="Questions people ask"
-          lead="Everything about what ShieldBot checks, what it cannot, and what it does with your data."
-        />
+    <section id="faq" aria-labelledby="faq-title" className="border-t border-hairline bg-ground py-16 md:py-24">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
+        <div className="min-w-0 lg:sticky lg:top-28 lg:self-start">
+          <p className="text-sm font-medium text-accent">FAQ</p>
+          <h2 id="faq-title" className="mt-3 text-h2-sm md:text-h2 text-ink">
+            Questions people ask
+          </h2>
+          <p className="mt-4 max-w-[26em] text-[17px] md:text-lg leading-relaxed text-secondary">
+            What ShieldBot checks, what it cannot, and what it does with your data.
+          </p>
+          <Button variant="secondary" href="mailto:support@shieldbotsecurity.online" className="mt-7">
+            Ask us something else
+          </Button>
+        </div>
 
-        <motion.div
-          initial={{ y: 8, opacity: 0 }}
-          whileInView={{ y: 0, opacity: 1 }}
-          viewport={{ once: true, amount: 0.2 }}
-          transition={{ duration: 0.4, ease: [0.2, 0, 0, 1] }}
-          className="mt-10 space-y-3"
-        >
-          {faqs.map((faq, i) => (
-            <div key={i} className="rounded-xl border border-line bg-surface shadow-sm transition-colors hover:border-line-strong">
-              <h3>
-                <button
-                  type="button"
-                  onClick={() => setOpen(open === i ? null : i)}
-                  aria-expanded={open === i}
-                  aria-controls={`faq-answer-${i}`}
-                  className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
-                >
-                  <span className="text-base font-semibold text-ink">{faq.q}</span>
-                  <Icon name="chevron" size={20} className={`shrink-0 text-muted transition-transform duration-[250ms] ${open === i ? "rotate-180" : ""}`} />
-                </button>
-              </h3>
-
-              <AnimatePresence initial={false}>
-                {open === i && (
-                  <motion.div
-                    key="content"
-                    id={`faq-answer-${i}`}
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
-                    className="overflow-hidden"
+        <div className="min-w-0 border-b border-hairline">
+          {faqs.map((faq, i) => {
+            const expanded = open === i;
+            return (
+              <div key={i} className="border-t border-hairline">
+                <h3>
+                  <button
+                    type="button"
+                    id={`faq-question-${i}`}
+                    onClick={() => setOpen(expanded ? null : i)}
+                    aria-expanded={expanded}
+                    aria-controls={`faq-answer-${i}`}
+                    className="group flex w-full items-center justify-between gap-6 py-5 text-left"
                   >
-                    <p className="px-6 pb-5 text-[15px] leading-relaxed text-body [overflow-wrap:anywhere]">{faq.a}</p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          ))}
-        </motion.div>
+                    <span className="text-base font-medium leading-6 text-ink md:text-[17px]">{faq.q}</span>
+                    <span
+                      className={`grid h-8 w-8 shrink-0 place-items-center rounded-full border transition-colors duration-150 ease-out ${expanded ? "border-ink text-ink" : "border-hairline-strong text-secondary group-hover:border-ink group-hover:text-ink"}`}
+                      aria-hidden="true"
+                    >
+                      <Icon name="chevron" size={16} className={`transition-transform duration-300 ease-out ${expanded ? "rotate-180" : ""}`} />
+                    </span>
+                  </button>
+                </h3>
+                <div
+                  id={`faq-answer-${i}`}
+                  role="region"
+                  aria-labelledby={`faq-question-${i}`}
+                  data-open={expanded}
+                  inert={!expanded}
+                  className="acc-panel"
+                >
+                  <div>
+                    <p className="max-w-[44em] pb-6 pr-12 text-[15px] leading-relaxed text-secondary [overflow-wrap:anywhere]">{faq.a}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </section>
   );

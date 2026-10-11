@@ -9,6 +9,7 @@ make the user's decision for them.
 
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -353,6 +354,69 @@ def test_overlay_lives_in_a_closed_shadow_root_and_the_page_head_stays_clean():
     )
 
 
+# Properties that make IntersectionObserver v2 report the dialog as not visible when they sit on the
+# dialog or an ancestor; Proceed only works while it is visible.
+def _dialog_visibility_violations(css):
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+    def rules(text):
+        found, start = [], 0
+        while (brace := text.find("{", start)) != -1:
+            depth, end = 1, brace + 1
+            while depth:
+                depth += {"{": 1, "}": -1}.get(text[end], 0)
+                end += 1
+            prelude, body = text[start:brace].strip(), text[brace + 1 : end - 1]
+            found += rules(body) if prelude.startswith("@media") else [(prelude, body)]
+            start = end
+        return found
+
+    def declarations(body):
+        pairs = (part.split(":", 1) for part in body.split(";") if ":" in part)
+        return [(name.strip().lower(), value.strip()) for name, value in pairs]
+
+    all_rules = rules(css)
+    keyframes = {
+        prelude.split()[1]: [d for _, frame in rules(body) for d in declarations(frame)]
+        for prelude, body in all_rules
+        if prelude.startswith("@keyframes")
+    }
+
+    def offending(subject, name, value):
+        if name in ("transform", "filter", "backdrop-filter", "-webkit-backdrop-filter"):
+            if name.endswith("backdrop-filter") and subject == ".shieldai-overlay::before":
+                return False
+            return value != "none"
+        return name == "opacity" and float(value) < 1
+
+    violations = []
+    for prelude, body in all_rules:
+        if prelude.startswith("@"):
+            continue
+        for selector in prelude.split(","):
+            subject = re.split(r"[\s>+~]+", selector.strip())[-1]
+            if not re.match(r"(:host|\.shieldai-(modal|overlay))", subject):
+                continue
+            for name, value in declarations(body):
+                if offending(subject, name, value):
+                    violations.append(f"{subject} {{ {name}: {value} }}")
+                if name not in ("animation", "animation-name"):
+                    continue
+                for frame in re.findall(r"[\w-]+", value):
+                    if frame == "shieldai-fadein" and subject == ".shieldai-overlay":
+                        continue
+                    for key, step in keyframes.get(frame, []):
+                        if offending(subject, key, step):
+                            violations.append(f"{subject} animation {frame} {{ {key}: {step} }}")
+    return violations
+
+
+def test_the_dialog_and_overlay_carry_no_transform_filter_or_partial_opacity():
+    css = (ROOT / "extension" / "overlay.css").read_text(encoding="utf-8")
+    assert ".shieldai-modal {" in css and "@keyframes shieldai-pulse" in css
+    assert _dialog_visibility_violations(css) == []
+
+
 @pytest.mark.parametrize("kind", ["analysis", "signature", "error"])
 def test_synthetic_input_cannot_decide_for_the_user(kind):
     run_node(
@@ -570,6 +634,13 @@ def test_strict_mode_removes_proceed_on_errors_block_and_unknown_verdicts(policy
   await intercept('request');
   const html = overlay().innerHTML;
   const removed = policy === 'STRICT' && outcome !== 'CAUTION';
+  if (outcome === 'error') {
+    // A request the API did not check is Unknown, not a measured High Risk.
+    assert.deepEqual(overlay().querySelector('.shieldai-badge').className.split(/\s+/),
+      ['shieldai-badge', 'shieldai-badge-unknown'], html);
+    // The dialog takes the Unknown edge too, like the timed-out and unknown-structure dialogs.
+    assert(overlay().querySelector('.shieldai-modal').classList.contains('shieldai-modal-unknown'), html);
+  }
   assert.equal(html.includes('id="shieldai-proceed"'), !removed);
   assert.equal(html.includes('Strict mode is on'), removed);
   userClick(byId('shieldai-block'));
@@ -598,7 +669,7 @@ def test_overlay_is_a_modal_dialog_that_keeps_focus_and_rejects_on_escape(kind):
   assert.equal(modal.attrs.role, 'dialog');
   assert.equal(modal.attrs['aria-modal'], 'true');
   assert.equal(root.getElementById(modal.attrs['aria-labelledby']).tagName, 'H2');
-  assert.equal(root.activeElement, modal, 'focus did not move into the dialog');
+  assert.equal(root.activeElement, byId('shieldai-block'), 'focus did not start on Block');
   const buttons = modal.querySelectorAll('button');
   const seen = new Set();
   for (let i = 0; i < buttons.length + 1; i++) {
@@ -630,6 +701,8 @@ def test_focus_that_leaves_the_overlay_returns_to_the_dialog():
   const root = overlayRoot();
   const modal = overlay().querySelector('.shieldai-modal');
   const explain = byId('shieldai-explain');
+  // The explain row sits above the actions, yet the first focus is still Block.
+  assert.equal(root.activeElement, byId('shieldai-block'));
   explain.focus();
   explain.click();
   assert(explain.disabled, 'the explain button should disable itself');
@@ -970,6 +1043,24 @@ def test_unknown_result_has_its_own_badge_and_reason(state):
     )
 
 
+def test_a_partial_result_is_noted_in_the_unknown_register_from_the_stylesheet():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({partial: true, failed_sources: ['honeypot']})});
+  await intercept('request');
+  const html = overlay().innerHTML;
+  const box = overlay().querySelector('.shieldai-partial');
+  assert(box, html);
+  assert.deepEqual(box.className.split(/\s+/), ['shieldai-section', 'shieldai-partial']);
+  assert.equal(box.attrs.style, undefined, 'the partial note must take its look from the stylesheet');
+  assert.equal(box.querySelector('p').attrs.style, undefined);
+  assert(html.includes('honeypot'), html);
+"""
+    )
+
+
 @pytest.mark.parametrize("notes", ["two-notes", "html-note", "empty", "absent"])
 @pytest.mark.parametrize("kind", ["analysis", "signature"])
 def test_notes_are_shown_as_information_apart_from_the_danger_signals(kind, notes):
@@ -1035,6 +1126,8 @@ def test_a_request_that_cannot_be_read_is_shown_as_unknown_structure(policy):
   const html = overlay().innerHTML;
   assert(html.includes('UNKNOWN STRUCTURE'), html);
   assert(overlay().querySelector('.shieldai-badge').className.includes('shieldai-badge-high'));
+  // Nothing in it was checked, so the dialog is drawn in the Unknown register.
+  assert(overlay().querySelector('.shieldai-modal').classList.contains('shieldai-modal-unknown'), html);
   assert.equal(html.includes('id="shieldai-proceed"'), storage.policyMode !== 'STRICT');
   assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length, 1);
   assert.deepEqual(verdicts(), []);

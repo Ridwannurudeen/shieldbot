@@ -7,6 +7,7 @@ fail when a source changes without the site, or when the committed builds fall b
 
 import json
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -23,8 +24,7 @@ def read(path: Path) -> str:
 
 
 def landing_texts() -> dict:
-    files = list(COMPONENTS.glob("*.tsx")) + [
-        COMPONENTS / "verdictScenes.ts",
+    files = list(COMPONENTS.glob("*.tsx")) + list((LANDING_SRC / "src").glob("*.ts")) + [
         LANDING_SRC / "index.html",
         LANDING_SRC / "public" / "about.html",
         LANDING_SRC / "scripts" / "gen-og-image.mjs",
@@ -58,7 +58,7 @@ def test_every_chain_count_on_the_site_matches_the_registry():
             )
             statements += 1
     assert statements, "the site should state how many chains it supports"
-    assert "SUPPORTED_CHAINS = %d;" % len(chain_info()) in read(COMPONENTS / "LiveStats.tsx")
+    assert "SUPPORTED_CHAINS = %d;" % len(chain_info()) in read(COMPONENTS / "Chains.tsx")
 
 
 def test_mempool_chain_count_matches_the_monitor():
@@ -220,6 +220,7 @@ def test_the_site_shows_the_robinhood_contract_addresses():
     export_lines = [line for line in verification_code.splitlines() if line.startswith("export ")]
     assert len(export_lines) == 4
     assert "#" not in verification_code
+    # Recorded fixture JSON under landing-src/scripts/ is excluded on purpose: these are verbatim API replies whose only 64-hex values are public evidence hashes and calldata.
     source = "\n".join(read(path) for path in (LANDING_SRC / "src").rglob("*") if path.is_file())
     assert not re.search(r"0x[0-9a-fA-F]{64}", source)
     assert not re.search(r"0x[0-9a-fA-F]{64}", bundle)
@@ -238,36 +239,15 @@ def test_dashboard_links_the_registry_recorded_in_deployments():
 
 
 def test_evidence_links_are_not_fine_print():
-    assert "text-faint" not in read(COMPONENTS / "VerdictDemo.tsx")
     assert "min-h-[44px]" in read(COMPONENTS / "ContractCard.tsx")
     assert read(COMPONENTS / "ContractCard.tsx").count('name="external"') == 1
     assert "text-[13px] text-emerald" not in read(COMPONENTS / "OnChain.tsx")
 
 
-def test_verdict_badge_steps_down_where_the_column_is_narrowest():
-    badge = read(COMPONENTS / "Badge.tsx")
-    assert "min-[1024px]:text-xl" in badge
-    assert "min-[1100px]:text-2xl" in badge
-    assert badge.index("sm:text-2xl") < badge.index("min-[1024px]:text-xl")
-
-
-def test_exactly_one_theme_switch_outside_the_mobile_menu():
-    # Two switches would drift apart when the window crosses the breakpoint after a click,
-    # because the component holds its own state and the hidden one would then read a stale value.
-    navbar = read(COMPONENTS / "Navbar.tsx")
-    assert navbar.count("<ThemeToggle") == 1
-    assert navbar.index("<ThemeToggle") < navbar.index('id="mobile-menu"')
-    toggle = read(COMPONENTS / "ThemeToggle.tsx")
-    assert 'role="switch"' in toggle
-    assert 'aria-label="Dark theme"' in toggle
-    assert "h-11 w-11" in toggle
-
-
-def test_the_theme_default_is_dark_and_the_switch_suppresses_transitions():
-    assert 'data-theme="dark"' in read(LANDING_SRC / "index.html")
-    css = read(LANDING_SRC / "src" / "index.css")
-    assert ":root[data-theme-switching]" in css
-    assert ":root[data-theme=\"light\"]" in css
+def test_the_site_has_one_light_theme_and_no_theme_script():
+    for page in TWELVE_PAGES:
+        assert "data-theme" not in read(page), page
+    assert "[data-theme" not in read(LANDING_SRC / "src" / "index.css")
 
 
 def welcome_text() -> str:
@@ -394,7 +374,8 @@ def test_score_bands_on_the_site_match_the_classifier():
 
 
 def test_no_placeholder_numbers_stand_in_for_live_data():
-    assert "FALLBACK" not in read(COMPONENTS / "LiveStats.tsx")
+    for component in ("Mechanism.tsx", "TryIt.tsx", "WhyUnknown.tsx"):
+        assert "FALLBACK" not in read(COMPONENTS / component), component
     dashboard = read(DASHBOARD_SRC)
     for placeholder in ("SEED_KPI", "FALLBACK_CHAIN_DATA", "* 180", "* 0.08"):
         assert placeholder not in dashboard, placeholder
@@ -433,10 +414,24 @@ def test_structured_data_is_valid_and_matches_the_visible_faq():
         assert json.dumps(entity["acceptedAnswer"]["text"], ensure_ascii=False) in faq_source
 
 
-def test_hero_image_describes_its_recorded_api_reply():
-    # landing-src/scripts/capture-hero-overlay.py renders the extension's overlay from this reply; the figure lives in HowItWorks.tsx.
-    reply = json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-response.json"))
-    figure = read(COMPONENTS / "HowItWorks.tsx")
+HERO_CAPTURES = [
+    # (recorded reply, component whose alt text describes it, captures made from the reply)
+    ("hero-overlay-response.json", "HowItWorks.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
+    ("hero-overlay-response.json", "HeroStory.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
+    ("hero-overlay-safe-response.json", "TryIt.tsx", ("hero-overlay-safe.webp",)),
+    ("hero-overlay-unknown-response.json", "TryIt.tsx", ("hero-overlay-unknown.webp",)),
+    ("hero-overlay-unknown-response.json", "FeatureTabs.tsx", ("hero-overlay-unknown.webp",)),
+    ("hero-overlay-safe-response.json", "FeatureTabs.tsx", ("hero-overlay-safe.webp",)),
+    ("hero-overlay-response.json", "CtaCard.tsx", ("hero-overlay.webp",)),
+]
+
+
+@pytest.mark.parametrize("fixture, component, captures", HERO_CAPTURES)
+def test_hero_image_describes_its_recorded_api_reply(fixture, component, captures):
+    # landing-src/scripts/capture-hero-overlay.py renders the extension's overlay from each reply; each
+    # component showing a capture describes it in its alt text.
+    reply = json.loads(read(LANDING_SRC / "scripts" / fixture))
+    figure = read(COMPONENTS / component)
     messages = json.loads(read(ROOT / "extension" / "locales" / "en" / "messages.json"))
     # The overlay's rules in extension/content.js, applied below to the recorded reply.
     content = " ".join(read(ROOT / "extension" / "content.js").split())
@@ -488,10 +483,23 @@ def test_hero_image_describes_its_recorded_api_reply():
     if incomplete:
         reasons = "; ".join(filter(None, reply["coverage_reasons"].values()))
         assert f"{messages['unknownWhy']} {reasons or messages['unknownNoReason']}" in figure
-    for name in ("hero-overlay.webp", "hero-overlay-mobile.webp"):
+    for name in captures:
         assert f'"/{name}"' in figure
         source = (LANDING_SRC / "public" / name).read_bytes()
         assert (ROOT / "landing" / name).read_bytes() == source, f"landing/{name} is stale"
+
+
+def test_hero_story_shows_the_real_loading_dialog():
+    # The story's "Checking" frame is a capture of the extension's loading overlay (showLoadingOverlay in
+    # extension/content.js), so its alt text quotes that overlay's own string.
+    messages = json.loads(read(ROOT / "extension" / "locales" / "en" / "messages.json"))
+    assert '<p>${_t("overlayAnalyzing")}</p>' in read(ROOT / "extension" / "content.js")
+    story = read(COMPONENTS / "HeroStory.tsx")
+    assert f"It reads {messages['overlayAnalyzing']}" in story
+    assert '"/hero-overlay-loading.webp"' in story
+    source = (LANDING_SRC / "public" / "hero-overlay-loading.webp").read_bytes()
+    built = (ROOT / "landing" / "hero-overlay-loading.webp").read_bytes()
+    assert built == source, "landing/hero-overlay-loading.webp is stale"
 
 
 @pytest.mark.parametrize(
@@ -505,6 +513,8 @@ def test_hero_image_describes_its_recorded_api_reply():
         "sitemap.xml",
         ".well-known/security.txt",
         "js/plausible-init.js",
+        "try/index.html",
+        "try/harness.js",
     ],
 )
 def test_built_landing_copies_the_current_public_files(name):
@@ -517,6 +527,19 @@ ANALYTICS_TAGS = ('<script src="/js/plausible-init.js"></script>', '<script asyn
 
 
 LANDING_PAGES = [LANDING_SRC / "index.html", *sorted((LANDING_SRC / "public").glob("*.html"))]
+TWELVE_PAGES = [*LANDING_PAGES, *(ROOT / "landing" / page.name for page in LANDING_PAGES)]
+
+
+class InlineScriptChecker(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.has_disallowed_inline_script = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script":
+            attributes = dict(attrs)
+            if "src" not in attributes and attributes.get("type", "").lower() != "application/ld+json":
+                self.has_disallowed_inline_script = True
 
 
 @pytest.mark.parametrize("page", LANDING_PAGES, ids=lambda page: page.name)
@@ -546,28 +569,19 @@ def test_missing_pages_use_the_custom_404_page():
     assert "404.html" not in read(LANDING_SRC / "public" / "sitemap.xml")
 
 
-def test_the_theme_restore_script_is_allowed_by_the_content_security_policy():
-    # script-src is 'self' with no 'unsafe-inline' (deploy/nginx-shieldbotsecurity-new.conf), so the one
-    # inline script, which restores a stored light theme before first paint, is allowed by its hash.
-    import base64
-    import hashlib
+def test_no_inline_script_and_no_hash_in_the_policy():
+    # script-src is 'self' with no 'unsafe-inline' and no hash (deploy/nginx-shieldbotsecurity-new.conf), so no
+    # page may carry an inline script except JSON-LD; external scripts with src are allowed.
     conf = read(ROOT / "deploy" / "nginx-shieldbotsecurity-new.conf")
     csp = re.search(r'Content-Security-Policy "([^"]*)"', conf).group(1)
     script_src = re.search(r"script-src ([^;]*);", csp).group(1)
     assert "'unsafe-inline'" not in script_src
-    # One hash in the policy, and one script shared by every page: a conf carrying a stale hash
-    # beside the current one would otherwise let a mismatched built copy pass unnoticed.
-    assert script_src.count("'sha256-") == 1, script_src
-    pages = sorted({LANDING_SRC / "index.html", ROOT / "landing" / "index.html",
-                    *(LANDING_SRC / "public").glob("*.html"), *(ROOT / "landing").glob("*.html")})
-    digests = {}
-    for page in pages:
-        scripts = re.findall(r"<script>(.*?)</script>", read(page), re.DOTALL)
-        assert len(scripts) == 1, f"{page}: expected exactly one inline script"
-        assert '"shieldbot-theme"' in scripts[0], page
-        digests[page] = base64.b64encode(hashlib.sha256(scripts[0].encode("utf-8")).digest()).decode()
-    assert len(set(digests.values())) == 1, {str(k): v for k, v in digests.items()}
-    assert f"'sha256-{next(iter(digests.values()))}'" in script_src, "the inline script hash is not in the CSP"
+    assert script_src.count("'sha256-") == 0, script_src
+    for page in TWELVE_PAGES:
+        parser = InlineScriptChecker()
+        parser.feed(read(page))
+        parser.close()
+        assert not parser.has_disallowed_inline_script, page
 
 
 def test_privacy_policy_names_the_analytics_and_what_it_does_not_keep():
@@ -601,7 +615,7 @@ def test_built_landing_bundle_contains_the_current_faq():
     assert stated and {int(n) for n in stated} == {mempool_chain_count()}
 
 
-@pytest.mark.parametrize("component", ["HowItWorks.tsx", "AgentSecurity.tsx"])
+@pytest.mark.parametrize("component", ["HowItWorks.tsx", "AgentSecurity.tsx", "FeatureTabs.tsx"])
 def test_built_landing_bundle_contains_the_current_feature_copy(component):
     # The claims these sections make (what the extension refuses, ERC-20 approvals only) ship only in the
     # built bundle, so an edit to the source without `npm run build` must fail here, not go out stale.
@@ -617,6 +631,65 @@ def test_built_landing_bundle_contains_the_current_feature_copy(component):
         )
 
 
+HERO_SECTION_COPY = {
+    "HeroStory.tsx": (
+        "Recorded reply of 26 September 2026, chain 1, BLOCK RECOMMENDED.",
+        "Recorded examples, not live scans.",
+        "overlay at unreleased commit 2b54a1b, fed that reply.",
+    ),
+    "TryIt.tsx": (
+        "Checking, this can take up to 25 seconds",
+        "Too many checks from this connection. Wait a minute and try again.",
+        "Quick check: no sell simulation, so a token reads Unknown here.",
+        "Recorded /api/firewall reply of 11 October 2026, chain 42161, SAFE. Upper part of the dialog, overlay at "
+        "unreleased commit 2b54a1b.",
+        "Recorded /api/firewall reply of 11 October 2026, chain 4663, UNKNOWN. Upper part of the dialog, overlay at "
+        "unreleased commit 2b54a1b.",
+    ),
+    "Mechanism.tsx": (
+        "Each check runs, or it says it did not.",
+        "A source that is not running reads Unavailable, never 0.",
+        "GET /api/stats did not answer, so every figure reads Unavailable.",
+    ),
+    "WhyUnknown.tsx": (
+        "A check that did not run is not a pass.",
+        "The typed data could not be read, so the overlay says Unknown and why.",
+        "did not answer.",
+    ),
+    "Chains.tsx": (
+        "Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is "
+        "reported as Unknown, never as Safe.",
+        "It has been tested with Rabby; MetaMask testing is still outstanding.",
+    ),
+    "WorkedExample.tsx": (
+        "One token. Two transactions.",
+        "1 · Simulated sell to the pool",
+        "2 · Simulated transfer to a fresh address",
+    ),
+    "OnChain.tsx": (
+        "Newest confirmed records in the registry",
+        "Records of the newest launches ShieldBot blocked",
+        "/api/verdicts/recent?chain_id=4663&limit=",
+    ),
+    "CtaCard.tsx": (
+        "Check before you sign.",
+        "Ask the registry before funds move.",
+    ),
+}
+
+
+@pytest.mark.parametrize("component", sorted(HERO_SECTION_COPY))
+def test_built_landing_bundle_contains_the_current_hero_section_copy(component):
+    # The hero, try-it, mechanism and chain sections ship only in the built bundle, so their copy is pinned in
+    # both the source and the bundle: a source edit without `npm run build` fails here.
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    source = read(COMPONENTS / component)
+    assert bundle
+    for text in HERO_SECTION_COPY[component]:
+        assert text in source, f"{component} no longer says {text[:60]!r}; update the pin"
+        assert text in bundle, f"landing bundle is stale: missing {component} text {text[:60]!r}"
+
+
 def test_no_unbacked_marketing_claims_anywhere_on_the_site():
     # The brand is honesty: no detection rate, insurance or coverage promise, user or loss count, audit claim,
     # or aggregate figure that no document in this repository backs, in any source page or in the built bundle.
@@ -625,6 +698,9 @@ def test_no_unbacked_marketing_claims_anywhere_on_the_site():
         r"\btrustless\b", r"\bunhackable\b", r"enterprise-grade", r"\b\d[\d,]*\+? users\b", r"10 of 66",
         r"0 false positives", r"818 tokens", r"3 honeypots", r"496,628", r"2,091",
         r"records each Robinhood Chain verdict",
+        # Others already cover Robinhood Chain and agents (plan section 0): never "first" or "only" about either.
+        r"\b(first|only) (transaction firewall|firewall|security (tool|layer)|product)\b[^.]*Robinhood",
+        r"\b(first|only)\b[^.]*\b(MCP|agents?)\b",
     ]
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
     pages = {
@@ -634,10 +710,14 @@ def test_no_unbacked_marketing_claims_anywhere_on_the_site():
         "landing-src/public/terms.html": read(LANDING_SRC / "public" / "terms.html"),
         "landing-src/public/security.html": read(LANDING_SRC / "public" / "security.html"),
         "landing-src/public/404.html": read(LANDING_SRC / "public" / "404.html"),
+        "landing-src/public/try/index.html": read(LANDING_SRC / "public" / "try" / "index.html"),
+        "landing-src/public/try/harness.js": read(LANDING_SRC / "public" / "try" / "harness.js"),
         "landing/privacy.html": read(ROOT / "landing" / "privacy.html"),
         "landing/terms.html": read(ROOT / "landing" / "terms.html"),
         "landing/security.html": read(ROOT / "landing" / "security.html"),
         "landing/404.html": read(ROOT / "landing" / "404.html"),
+        "landing/try/index.html": read(ROOT / "landing" / "try" / "index.html"),
+        "landing/try/harness.js": read(ROOT / "landing" / "try" / "harness.js"),
         "bundle": bundle,
     }
     for name, text in pages.items():
@@ -658,22 +738,33 @@ def test_fonts_are_self_hosted_and_the_build_copies_them():
         assert "fonts.googleapis.com" not in html and "fonts.gstatic.com" not in html, page.name
     fonts = sorted(path.name for path in (LANDING_SRC / "public" / "fonts").glob("*.woff2"))
     assert fonts == [
-        "jetbrains-mono-latin-400-normal.woff2",
-        "jetbrains-mono-latin-700-normal.woff2",
-        "manrope-latin-wght-normal.woff2",
+        "geist-latin-400-normal.woff2",
+        "geist-latin-500-normal.woff2",
+        "ibm-plex-mono-latin-400-normal.woff2",
     ]
     for name in fonts:
         built = (ROOT / "landing" / "fonts" / name).read_bytes()
         assert built == (LANDING_SRC / "public" / "fonts" / name).read_bytes(), f"landing/fonts/{name} is stale"
-    assert 'href="/fonts/manrope-latin-wght-normal.woff2" as="font"' in read(LANDING_SRC / "index.html")
+    assert 'href="/fonts/geist-latin-400-normal.woff2" as="font"' in read(LANDING_SRC / "index.html")
 
 
-def test_every_static_page_declares_its_manrope_face():
+def test_every_static_page_declares_its_geist_face():
     for name in ("404.html", "about.html", "privacy.html", "terms.html", "security.html"):
         for page in (LANDING_SRC / "public" / name, ROOT / "landing" / name):
             html = read(page)
             assert not any(line.startswith("+") for line in html.splitlines()), page
-            assert re.search(r"^\s*@font-face\s*\{[^}]*Manrope Variable", html, re.MULTILINE), page
+            assert re.search(r"^\s*@font-face\s*\{[^}]*Geist", html, re.MULTILINE), page
+
+
+def test_the_site_ships_without_framer_motion():
+    # Plan 1.2 and row D2: every animation is CSS in the bundle, so the motion library is gone from the
+    # dependencies, the sources and the built bundle.
+    package = json.loads(read(LANDING_SRC / "package.json"))
+    assert "framer-motion" not in {**package.get("dependencies", {}), **package.get("devDependencies", {})}
+    source = "\n".join(read(path) for path in (LANDING_SRC / "src").rglob("*") if path.is_file())
+    assert "framer-motion" not in source and "MotionConfig" not in source
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert bundle and "framer" not in bundle
 
 
 def test_the_site_describes_the_quick_scan_as_the_readme_does():
@@ -693,21 +784,36 @@ def test_the_site_says_which_verdicts_reach_the_registry():
 
 
 def test_hero_demo_shows_documented_examples_and_makes_no_request():
-    # The demo in the hero plays recorded examples. Each address must be the one the repository documents, the
-    # labels must say the examples are recorded or modelled, and the component must not talk to the network.
-    scenes = read(COMPONENTS / "verdictScenes.ts")
-    demo = read(COMPONENTS / "VerdictDemo.tsx")
-    fixture = json.loads(read(ROOT / "tests" / "fixtures" / "arbitrum_simulation" / "v2_honeypot.json"))
-    assert fixture["token"] in scenes
+    # The hero story plays captures of recorded replies, says so, and does not talk to the network. TryIt.tsx is
+    # the one hero component that calls the API (POST /api/scan). The VIRTUAL guard example left the page with
+    # verdictScenes.ts in PR C and is in FeatureTabs.tsx since PR D1 (plan 3.3).
+    story = read(COMPONENTS / "HeroStory.tsx")
+    assert "Recorded examples, not live scans" in story
+    for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
+        assert forbidden not in story, forbidden
+    try_it = read(COMPONENTS / "TryIt.tsx")
+    assert "https://api.shieldbotsecurity.online/api/scan" in try_it
+    for forbidden in ("XMLHttpRequest", "WebSocket", "EventSource"):
+        assert forbidden not in try_it, forbidden
+    # The VIRTUAL guard example is in the feature tabs, with the answer docs/SUBMISSION.md records (plan 3.3).
+    tabs = read(COMPONENTS / "FeatureTabs.tsx")
     deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
     subject = re.search(r"`subject\(\)` is VIRTUAL \(`(0x[0-9a-fA-F]{40})`\)", deployments).group(1)
-    assert subject.lower() in scenes.lower()
-    assert "Recorded examples, not live scans" in demo
-    assert "Modelled example from the judge guide" in scenes
-    assert "allowed=True, reason=0" in scenes and "allowed=True, reason=0" in read(ROOT / "docs" / "SUBMISSION.md")
-    for source in (scenes, demo):
-        for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
-            assert forbidden not in source, forbidden
+    assert subject.lower() in tabs.lower()
+    assert "allowed=True, reason=0" in tabs and "allowed=True, reason=0" in read(ROOT / "docs" / "SUBMISSION.md")
+    assert "Derived, not a recorded call" in tabs
+    for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
+        assert forbidden not in tabs, forbidden
+    # ARBROKER, the documented Arbitrum honeypot, is shown in the Arbitrum coverage note.
+    fixture = json.loads(read(ROOT / "tests" / "fixtures" / "arbitrum_simulation" / "v2_honeypot.json"))
+    assert fixture["token"] in read(COMPONENTS / "Chains.tsx")
+    # The SAFE fixture is the ARB approval of docs/SUBMISSION.md; the UNKNOWN one has incomplete coverage.
+    scripts = LANDING_SRC / "scripts"
+    safe = json.loads(read(scripts / "hero-overlay-safe-request.json"))
+    assert safe["chainId"] == 42161 and f"(`{safe['to']}`)" in read(ROOT / "docs" / "SUBMISSION.md")
+    assert json.loads(read(scripts / "hero-overlay-safe-response.json"))["classification"] == "SAFE"
+    unknown = json.loads(read(scripts / "hero-overlay-unknown-response.json"))
+    assert unknown["status"] != "ok" and any(unknown["coverage_reasons"].values())
 
 
 def test_built_dashboard_contains_the_current_source_strings():

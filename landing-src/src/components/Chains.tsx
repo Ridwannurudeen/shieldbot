@@ -1,5 +1,4 @@
-import type { ReactNode } from "react";
-import SectionHeader from "./SectionHeader";
+import type { CSSProperties, ReactNode } from "react";
 
 // Per-chain coverage. tests/test_website_claims.py checks each row against the chain adapters
 // (sell simulation), services/mempool_service.py (mempool) and services/launch_discovery.py.
@@ -13,6 +12,9 @@ interface Chain {
   simulationScope?: string;
   logo: ReactNode;
 }
+
+// Chains the scanner accepts (utils/chain_info.py). tests/test_website_claims.py keeps this in sync.
+const SUPPORTED_CHAINS = 8;
 
 const chains: Chain[] = [
   {
@@ -124,52 +126,79 @@ const chains: Chain[] = [
 
 export default function Chains() {
   return (
-    <section id="chains" aria-labelledby="chains-title" className="bg-surface-2 py-14 md:py-[72px] lg:py-24">
+    <section id="chains" aria-labelledby="chains-title" className="bg-ground-alt py-14 md:py-[72px] lg:py-24">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        <SectionHeader
-          id="chains-title"
-          eyebrow="Coverage"
-          title="Coverage by chain"
-          lead="Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is reported as Unknown, never as Safe."
-        />
+        <div className="mx-auto max-w-3xl text-center">
+          <p className="text-sm font-medium text-accent">Coverage</p>
+          <h2 id="chains-title" className="mt-3 text-h2-sm md:text-h2 text-ink">8 chains</h2>
+          <p className="mt-4 text-[17px] md:text-lg leading-relaxed text-secondary">
+            Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is reported as Unknown, never as Safe.
+          </p>
+        </div>
 
-        <div className="mt-10 max-w-4xl overflow-x-auto rounded-2xl border border-line bg-surface px-3 py-2 shadow-sm sm:px-6" tabIndex={0} aria-label="Coverage by chain">
+        <div className="orbit relative mt-6 h-[300px] overflow-hidden md:h-[420px]" aria-hidden="true">
+          <svg className="absolute inset-0 hidden h-full w-full md:block" viewBox="0 0 1104 420" preserveAspectRatio="none">
+            <ellipse cx="552" cy="226" rx="360" ry="92" fill="none" stroke="rgb(var(--c-hairline-strong))" />
+            <ellipse cx="552" cy="222" rx="250" ry="62" fill="none" stroke="rgb(var(--c-hairline-strong))" strokeDasharray="2 6" />
+            <ellipse cx="552" cy="232" rx="470" ry="124" fill="none" stroke="rgb(var(--c-hairline-strong))" strokeDasharray="2 6" />
+          </svg>
+          <div className="absolute left-1/2 top-[38%] z-10 -translate-x-1/2 -translate-y-1/2 text-center md:top-1/2">
+            <b className="block font-medium text-[64px] leading-none tracking-[-0.04em] text-ink md:text-[88px]">{SUPPORTED_CHAINS}</b>
+            <span className="mt-1.5 block text-[15px] text-secondary">EVM chains</span>
+          </div>
+          <div className="orbit-tilt">
+            <ul className="orbit-ring">
+              {chains.map((c, i) => (
+                <li key={c.name} className="orbit-item" style={{ "--a": `${i * 45}deg`, "--d": `${i * -1500}ms` } as CSSProperties}>
+                  <div className="orbit-face">
+                    <span className="orbit-pill inline-flex items-center gap-2.5 whitespace-nowrap rounded-full border border-hairline bg-ground p-1.5 text-[15px] font-medium text-ink shadow-md md:h-[52px] md:py-0 md:pl-2 md:pr-[18px]">
+                      <span className="grid h-9 w-9 flex-none place-items-center rounded-full bg-ground-alt">{c.logo}</span>
+                      <span className="hidden md:inline">{c.name}</span>
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="mt-10 max-w-4xl overflow-x-auto rounded-2xl border border-hairline bg-ground px-3 py-2 shadow-sm sm:px-6" tabIndex={0} aria-label="Coverage by chain">
           <table className="w-full text-[13px] sm:text-sm">
             <caption className="sr-only">
               Which checks run on each supported chain
             </caption>
             <thead>
-              <tr className="text-left text-[11px] uppercase text-muted md:tracking-wider sm:text-xs">
-                <th scope="col" className="py-3 pr-1.5 font-semibold sm:pr-2">Chain</th>
-                <th scope="col" className="py-3 px-1.5 sm:px-2 font-semibold">Sell simulation</th>
-                <th scope="col" className="py-3 px-1.5 sm:px-2 font-semibold">Mempool watch</th>
-                <th scope="col" className="py-3 pl-1.5 sm:pl-2 font-semibold">Launch scans</th>
+              <tr className="text-left text-[11px] uppercase text-secondary md:tracking-wider sm:text-xs">
+                <th scope="col" className="py-3 pr-1.5 font-medium sm:pr-2">Chain</th>
+                <th scope="col" className="py-3 px-1.5 sm:px-2 font-medium">Sell simulation</th>
+                <th scope="col" className="py-3 px-1.5 sm:px-2 font-medium">Mempool watch</th>
+                <th scope="col" className="py-3 pl-1.5 sm:pl-2 font-medium">Launch scans</th>
               </tr>
             </thead>
             <tbody>
               {chains.map((c) => (
-                <tr key={c.name} className="border-t border-line">
-                  <th scope="row" className="py-3 pr-1.5 text-left font-semibold text-ink sm:pr-2">
+                <tr key={c.name} className="border-t border-hairline">
+                  <th scope="row" className="py-3 pr-1.5 text-left font-medium text-ink sm:pr-2">
                     <span className="flex items-center gap-1.5 sm:gap-3">
                       {c.logo}
                       {c.name}
                     </span>
                   </th>
-                  <td className={`py-3 px-1.5 sm:px-2 ${c.simulation ? "text-body" : "text-caution-fg"}`}>
+                  <td className="py-3 px-1.5 text-ink sm:px-2">
                     {c.simulation ?? "None"}
                     {c.simulationScope && (
-                      <span className="block text-xs text-muted">{c.simulationScope}</span>
+                      <span className="block text-xs text-secondary">{c.simulationScope}</span>
                     )}
                   </td>
-                  <td className="py-3 px-1.5 text-body sm:px-2">{c.mempool ? "Yes" : "No"}</td>
-                  <td className="py-3 pl-1.5 text-body sm:pl-2">{c.launches ? "Yes" : "No"}</td>
+                  <td className="py-3 px-1.5 text-ink sm:px-2">{c.mempool ? "Yes" : "No"}</td>
+                  <td className="py-3 pl-1.5 text-ink sm:pl-2">{c.launches ? "Yes" : "No"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        <ul className="mt-6 max-w-3xl space-y-2 text-sm leading-relaxed text-muted">
+        <ul className="mt-6 max-w-3xl space-y-2 text-sm leading-relaxed text-secondary">
           <li>
             <span className="text-ink">Sell simulation:</span> honeypot.is
             simulates a buy and a sell on Ethereum, BNB Chain and Base, and
@@ -179,7 +208,10 @@ export default function Chains() {
             Where it says None, and for an Arbitrum token with no such pool (for
             example one traded only on Camelot, or only against stablecoins),
             honeypot and tax flags come from GoPlus alone, and they read Unknown
-            when GoPlus has no answer.
+            when GoPlus has no answer. ARBROKER
+            (<span className="font-mono text-[13px] break-all">0x8328ffdecbd36294b4fcc50c1c25cde18f4a8b2b</span>)
+            is the case that shows why: GoPlus reported it as not a honeypot on 29 September 2026, and
+            ShieldBot's own simulation found that its sell reverts.
           </li>
           <li>
             <span className="text-ink">Mempool watch:</span> pending

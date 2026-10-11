@@ -164,43 +164,22 @@ After an edit: `nginx -t && systemctl reload nginx`.
 
 The landing vhost's reference is `nginx-shieldbotsecurity-new.conf` (below).
 
-### Theme restore: the policy hash must be mirrored by hand
+### No inline script: the policy carries no hash
 
-The landing pages carry one inline script that restores a stored light theme before first paint.
-`script-src` is `'self'` with no `'unsafe-inline'`, so the script is allowed **by its hash**, and
-`nginx-shieldbotsecurity-new.conf` carries that hash. **The live vhost does not get it
-automatically** — this file is mirrored manually, so the hash must be copied across in the same
-change that deploys a dark build.
+The landing pages have no inline script (the site has one white theme, so the theme restore script
+and its hash are gone). `script-src` is `'self'` with no `'unsafe-inline'` and no `'sha256-` in
+`nginx-shieldbotsecurity-new.conf`. `tests/test_website_claims.py` fails if any of the twelve pages
+(the six sources under `landing-src/` and their six built copies under `landing/`) gains a bare
+`<script>` or the reference policy gains a hash.
 
-Until it is, the browser refuses the script and anyone who chose the light theme gets the dark
-one on **every** visit. There is no recovery in the page: the switch reads the attribute on the
-document, not storage, so it cannot correct a refusal on mount. The only symptom is one console
-line, which nobody is watching.
-
-**Mandatory after any deploy that touches the landing pages:**
+The live vhost may still carry the old theme hash. It is inert once the new build is live, because no
+page has the script it allows, so it may be dropped at any time; the safe order is to cut over first,
+then edit the live vhost to `script-src 'self'` and run `nginx -t && systemctl reload nginx`. No gap
+and no symptom either way. After the vhost edit this must print `0`:
 
 ```
-H=$(grep -o "sha256-[A-Za-z0-9+/=]*" deploy/nginx-shieldbotsecurity-new.conf | head -1)
-curl -sI https://shieldbotsecurity.online/ | grep -cF "$H"
+curl -sI https://shieldbotsecurity.online/ | grep -c sha256
 ```
-
-It must print `1`. `-F` is required, not optional: the pattern above admits `+` and `/`, which are not
-literal in a basic regular expression, so a hash containing either would make a correct vhost report `0`.
-If it prints `0`, the live vhost is missing the hash: add it to `script-src`,
-then `nginx -t && systemctl reload nginx`, and re-run the check.
-
-`tests/test_website_claims.py` keeps the reference conf and all **twelve** pages in agreement — the six
-sources under `landing-src/` and their six built copies under `landing/` — recomputing the hash from
-each and requiring exactly one hash in the policy, so a reformatted script or a stale built copy fails
-the suite rather than breaking the live site silently. The test cannot see the live vhost, which is why
-the curl above is not optional.
-
-**Changing the hash later has an unavoidable gap.** That test requires *exactly one* `'sha256-` in
-`script-src`, so the policy cannot carry the old and new hashes side by side across a cutover. The order
-is therefore: cut over first, then edit the vhost and reload immediately after. Between those two steps
-the new script is refused and light-choosers see dark. Keep the gap to seconds, and verify with the curl
-above once the reload is done. This does not apply to the first deploy of a dark build, because the live
-site has no inline script yet and the hash can be added before the cutover, inert until the swap.
 
 ### Custom 404 page
 
