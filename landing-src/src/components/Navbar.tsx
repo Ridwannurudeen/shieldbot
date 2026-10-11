@@ -30,7 +30,10 @@ export default function Navbar() {
     if (!open) return;
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        document.querySelector<HTMLButtonElement>('button[aria-controls="mobile-menu"]')?.focus();
+      }
     }
 
     window.addEventListener("keydown", closeOnEscape);

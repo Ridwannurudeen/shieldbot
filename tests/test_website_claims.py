@@ -7,6 +7,7 @@ fail when a source changes without the site, or when the committed builds fall b
 
 import json
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -500,6 +501,18 @@ LANDING_PAGES = [LANDING_SRC / "index.html", *sorted((LANDING_SRC / "public").gl
 TWELVE_PAGES = [*LANDING_PAGES, *(ROOT / "landing" / page.name for page in LANDING_PAGES)]
 
 
+class InlineScriptChecker(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.has_disallowed_inline_script = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script":
+            attributes = dict(attrs)
+            if "src" not in attributes and attributes.get("type", "").lower() != "application/ld+json":
+                self.has_disallowed_inline_script = True
+
+
 @pytest.mark.parametrize("page", LANDING_PAGES, ids=lambda page: page.name)
 def test_every_page_counts_visits_through_this_domain(page):
     for html in (read(page), read(ROOT / "landing" / page.name)):
@@ -529,14 +542,17 @@ def test_missing_pages_use_the_custom_404_page():
 
 def test_no_inline_script_and_no_hash_in_the_policy():
     # script-src is 'self' with no 'unsafe-inline' and no hash (deploy/nginx-shieldbotsecurity-new.conf), so no
-    # page may carry an inline script; <script type=...> blocks (JSON-LD) and <script src=...> tags are not matched.
+    # page may carry an inline script except JSON-LD; external scripts with src are allowed.
     conf = read(ROOT / "deploy" / "nginx-shieldbotsecurity-new.conf")
     csp = re.search(r'Content-Security-Policy "([^"]*)"', conf).group(1)
     script_src = re.search(r"script-src ([^;]*);", csp).group(1)
     assert "'unsafe-inline'" not in script_src
     assert script_src.count("'sha256-") == 0, script_src
     for page in TWELVE_PAGES:
-        assert re.findall(r"<script>(.*?)</script>", read(page), re.DOTALL) == [], page
+        parser = InlineScriptChecker()
+        parser.feed(read(page))
+        parser.close()
+        assert not parser.has_disallowed_inline_script, page
 
 
 def test_privacy_policy_names_the_analytics_and_what_it_does_not_keep():
