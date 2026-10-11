@@ -251,23 +251,10 @@ def test_verdict_badge_steps_down_where_the_column_is_narrowest():
     assert badge.index("sm:text-2xl") < badge.index("min-[1024px]:text-xl")
 
 
-def test_exactly_one_theme_switch_outside_the_mobile_menu():
-    # Two switches would drift apart when the window crosses the breakpoint after a click,
-    # because the component holds its own state and the hidden one would then read a stale value.
-    navbar = read(COMPONENTS / "Navbar.tsx")
-    assert navbar.count("<ThemeToggle") == 1
-    assert navbar.index("<ThemeToggle") < navbar.index('id="mobile-menu"')
-    toggle = read(COMPONENTS / "ThemeToggle.tsx")
-    assert 'role="switch"' in toggle
-    assert 'aria-label="Dark theme"' in toggle
-    assert "h-11 w-11" in toggle
-
-
-def test_the_theme_default_is_dark_and_the_switch_suppresses_transitions():
-    assert 'data-theme="dark"' in read(LANDING_SRC / "index.html")
-    css = read(LANDING_SRC / "src" / "index.css")
-    assert ":root[data-theme-switching]" in css
-    assert ":root[data-theme=\"light\"]" in css
+def test_the_site_has_one_light_theme_and_no_theme_script():
+    for page in TWELVE_PAGES:
+        assert "data-theme" not in read(page), page
+    assert "[data-theme" not in read(LANDING_SRC / "src" / "index.css")
 
 
 def welcome_text() -> str:
@@ -517,6 +504,7 @@ ANALYTICS_TAGS = ('<script src="/js/plausible-init.js"></script>', '<script asyn
 
 
 LANDING_PAGES = [LANDING_SRC / "index.html", *sorted((LANDING_SRC / "public").glob("*.html"))]
+TWELVE_PAGES = [*LANDING_PAGES, *(ROOT / "landing" / page.name for page in LANDING_PAGES)]
 
 
 @pytest.mark.parametrize("page", LANDING_PAGES, ids=lambda page: page.name)
@@ -546,28 +534,16 @@ def test_missing_pages_use_the_custom_404_page():
     assert "404.html" not in read(LANDING_SRC / "public" / "sitemap.xml")
 
 
-def test_the_theme_restore_script_is_allowed_by_the_content_security_policy():
-    # script-src is 'self' with no 'unsafe-inline' (deploy/nginx-shieldbotsecurity-new.conf), so the one
-    # inline script, which restores a stored light theme before first paint, is allowed by its hash.
-    import base64
-    import hashlib
+def test_no_inline_script_and_no_hash_in_the_policy():
+    # script-src is 'self' with no 'unsafe-inline' and no hash (deploy/nginx-shieldbotsecurity-new.conf), so no
+    # page may carry an inline script; <script type=...> blocks (JSON-LD) and <script src=...> tags are not matched.
     conf = read(ROOT / "deploy" / "nginx-shieldbotsecurity-new.conf")
     csp = re.search(r'Content-Security-Policy "([^"]*)"', conf).group(1)
     script_src = re.search(r"script-src ([^;]*);", csp).group(1)
     assert "'unsafe-inline'" not in script_src
-    # One hash in the policy, and one script shared by every page: a conf carrying a stale hash
-    # beside the current one would otherwise let a mismatched built copy pass unnoticed.
-    assert script_src.count("'sha256-") == 1, script_src
-    pages = sorted({LANDING_SRC / "index.html", ROOT / "landing" / "index.html",
-                    *(LANDING_SRC / "public").glob("*.html"), *(ROOT / "landing").glob("*.html")})
-    digests = {}
-    for page in pages:
-        scripts = re.findall(r"<script>(.*?)</script>", read(page), re.DOTALL)
-        assert len(scripts) == 1, f"{page}: expected exactly one inline script"
-        assert '"shieldbot-theme"' in scripts[0], page
-        digests[page] = base64.b64encode(hashlib.sha256(scripts[0].encode("utf-8")).digest()).decode()
-    assert len(set(digests.values())) == 1, {str(k): v for k, v in digests.items()}
-    assert f"'sha256-{next(iter(digests.values()))}'" in script_src, "the inline script hash is not in the CSP"
+    assert script_src.count("'sha256-") == 0, script_src
+    for page in TWELVE_PAGES:
+        assert re.findall(r"<script>(.*?)</script>", read(page), re.DOTALL) == [], page
 
 
 def test_privacy_policy_names_the_analytics_and_what_it_does_not_keep():
