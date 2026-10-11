@@ -7,7 +7,7 @@ import AgentSecurity from "./components/AgentSecurity";
 import FAQ from "./components/FAQ";
 import Footer from "./components/Footer";
 import OnChain from "./components/OnChain";
-import LiveStats from "./components/LiveStats";
+import Mechanism from "./components/Mechanism";
 
 export default function App() {
   return (
@@ -22,10 +22,10 @@ export default function App() {
         <Navbar />
         <main id="main" tabIndex={-1} className="focus:outline-none">
           <Hero />
-          <OnChain />
-          <HowItWorks />
+          <Mechanism />
           <Chains />
-          <LiveStats />
+          <HowItWorks />
+          <OnChain />
           <AgentSecurity />
           <FAQ />
         </main>

@@ -1,7 +1,6 @@
 import CodeBlock from "./CodeBlock";
 import ContractCard from "./ContractCard";
 import SectionHeader from "./SectionHeader";
-import StatTile from "./StatTile";
 import Icon from "./Icon";
 
 const contracts = [
@@ -119,7 +118,12 @@ export default function OnChain() {
         <div className="mt-12">
           <h3 className="text-xl font-semibold text-ink">What we saw on the chain</h3>
           <div className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
-            {figures.map((figure) => <StatTile key={figure.label} {...figure} />)}
+            {figures.map((figure) => (
+              <div key={figure.label} className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+                <div className="font-mono text-2xl md:text-[28px] leading-none tracking-tight text-ink tabular-nums">{figure.value}</div>
+                <div className="mt-2 text-[13px] text-muted">{figure.label}</div>
+              </div>
+            ))}
           </div>
           <p className="mt-4 text-[13px] text-muted">Observed from 14 to 22 September 2026, about 8.6 days. These figures describe the chain, not ShieldBot scans. A token is counted when it first appears in a liquidity pool, not when it is deployed, and missing evidence is reported as unknown, never as zero. <a className="text-emerald underline underline-offset-4 hover:text-emerald-deep" href="https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/census-4663.md" target="_blank" rel="noopener noreferrer">Method and limits</a></p>
         </div>

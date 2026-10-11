@@ -1,33 +1,29 @@
-import { motion } from "framer-motion";
 import Button from "./Button";
-import Icon from "./Icon";
-import VerdictDemo from "./VerdictDemo";
+import HeroStory from "./HeroStory";
+import TryIt from "./TryIt";
 
 export default function Hero() {
   return (
-    <section className="relative pt-24 md:pt-28 lg:pt-32 pb-14 md:pb-[72px] lg:pb-24 border-b border-line">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-16 items-start">
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
-          className="min-w-0"
-        >
-          <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald">
-            Chrome extension, Telegram bot and API for 8 EVM chains
+    <section className="relative border-b border-hairline bg-ground-alt pt-28 pb-14 md:pt-32 md:pb-20">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 items-start gap-12 xl:grid-cols-[minmax(0,1fr)_540px] xl:gap-14">
+        <div className="min-w-0">
+          <p className="flex items-center gap-4 text-sm font-medium text-accent after:h-px after:flex-1 after:bg-hairline-strong">
+            Transaction firewall for wallets, contracts and agents
           </p>
-          <h1 className="mt-4 text-display-sm md:text-display text-ink">
-            Know before you sign.
-            <br />
-            <span className="text-emerald">And know when we&nbsp;don't.</span>
+          <h1 className="mt-[18px] max-w-[13em] text-[36px] leading-[1.12] tracking-[-0.028em] font-medium text-ink md:text-[48px] md:tracking-[-0.032em]">
+            Know before you sign. And know when we&nbsp;don't.
           </h1>
-          <p className="mt-6 max-w-[560px] text-lg md:text-xl leading-[1.55] text-body">
-            ShieldBot checks a transaction before your wallet signs it and tells
-            you what it found, in plain English. When a check cannot run, it
-            says Unknown instead of Safe.
+          <p className="mt-5 max-w-[34em] text-base leading-[26px] text-secondary md:text-lg md:leading-7">
+            ShieldBot checks a transaction before your wallet signs it and says
+            what it found. When a check cannot run it says Unknown, never Safe.
+            Its published Robinhood Chain verdicts live in a public registry any
+            contract can read.
           </p>
-          <div className="mt-8 flex flex-col sm:flex-row gap-3">
-            <Button href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk">
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            <Button
+              href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk"
+              className="sm:min-w-[200px]"
+            >
               <svg
                 width="16"
                 height="16"
@@ -51,18 +47,22 @@ export default function Hero() {
               </svg>
               Add to Chrome
             </Button>
-            <Button variant="secondary" href="https://t.me/shieldbot_bnb_bot">
-              <Icon name="chat" size={16} />
-              Open the Telegram bot
+            <Button
+              variant="secondary"
+              href="#on-chain"
+              className="sm:min-w-[200px]"
+            >
+              Read the registry
             </Button>
           </div>
-          <p className="mt-5 text-sm text-muted">
+          <p className="mt-4 text-sm text-secondary">
             Free, no account. ShieldBot{" "}
-            <span className="font-semibold text-body">never</span> asks for your
+            <span className="font-medium text-ink">never</span> asks for your
             private keys or seed phrase.
           </p>
-        </motion.div>
-        <div className="min-w-0"><VerdictDemo /></div>
+          <TryIt />
+        </div>
+        <HeroStory />
       </div>
     </section>
   );

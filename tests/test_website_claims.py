@@ -25,7 +25,6 @@ def read(path: Path) -> str:
 
 def landing_texts() -> dict:
     files = list(COMPONENTS.glob("*.tsx")) + [
-        COMPONENTS / "verdictScenes.ts",
         LANDING_SRC / "index.html",
         LANDING_SRC / "public" / "about.html",
         LANDING_SRC / "scripts" / "gen-og-image.mjs",
@@ -59,7 +58,7 @@ def test_every_chain_count_on_the_site_matches_the_registry():
             )
             statements += 1
     assert statements, "the site should state how many chains it supports"
-    assert "SUPPORTED_CHAINS = %d;" % len(chain_info()) in read(COMPONENTS / "LiveStats.tsx")
+    assert "SUPPORTED_CHAINS = %d;" % len(chain_info()) in read(COMPONENTS / "Chains.tsx")
 
 
 def test_mempool_chain_count_matches_the_monitor():
@@ -239,7 +238,6 @@ def test_dashboard_links_the_registry_recorded_in_deployments():
 
 
 def test_evidence_links_are_not_fine_print():
-    assert "text-faint" not in read(COMPONENTS / "VerdictDemo.tsx")
     assert "min-h-[44px]" in read(COMPONENTS / "ContractCard.tsx")
     assert read(COMPONENTS / "ContractCard.tsx").count('name="external"') == 1
     assert "text-[13px] text-emerald" not in read(COMPONENTS / "OnChain.tsx")
@@ -375,7 +373,8 @@ def test_score_bands_on_the_site_match_the_classifier():
 
 
 def test_no_placeholder_numbers_stand_in_for_live_data():
-    assert "FALLBACK" not in read(COMPONENTS / "LiveStats.tsx")
+    for component in ("Mechanism.tsx", "TryIt.tsx"):
+        assert "FALLBACK" not in read(COMPONENTS / component), component
     dashboard = read(DASHBOARD_SRC)
     for placeholder in ("SEED_KPI", "FALLBACK_CHAIN_DATA", "* 180", "* 0.08"):
         assert placeholder not in dashboard, placeholder
@@ -414,10 +413,21 @@ def test_structured_data_is_valid_and_matches_the_visible_faq():
         assert json.dumps(entity["acceptedAnswer"]["text"], ensure_ascii=False) in faq_source
 
 
-def test_hero_image_describes_its_recorded_api_reply():
-    # landing-src/scripts/capture-hero-overlay.py renders the extension's overlay from this reply; the figure lives in HowItWorks.tsx.
-    reply = json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-response.json"))
-    figure = read(COMPONENTS / "HowItWorks.tsx")
+HERO_CAPTURES = [
+    # (recorded reply, component whose alt text describes it, captures made from the reply)
+    ("hero-overlay-response.json", "HowItWorks.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
+    ("hero-overlay-response.json", "HeroStory.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
+    ("hero-overlay-safe-response.json", "TryIt.tsx", ("hero-overlay-safe.webp",)),
+    ("hero-overlay-unknown-response.json", "TryIt.tsx", ("hero-overlay-unknown.webp",)),
+]
+
+
+@pytest.mark.parametrize("fixture, component, captures", HERO_CAPTURES)
+def test_hero_image_describes_its_recorded_api_reply(fixture, component, captures):
+    # landing-src/scripts/capture-hero-overlay.py renders the extension's overlay from each reply; each
+    # component showing a capture describes it in its alt text.
+    reply = json.loads(read(LANDING_SRC / "scripts" / fixture))
+    figure = read(COMPONENTS / component)
     messages = json.loads(read(ROOT / "extension" / "locales" / "en" / "messages.json"))
     # The overlay's rules in extension/content.js, applied below to the recorded reply.
     content = " ".join(read(ROOT / "extension" / "content.js").split())
@@ -469,10 +479,23 @@ def test_hero_image_describes_its_recorded_api_reply():
     if incomplete:
         reasons = "; ".join(filter(None, reply["coverage_reasons"].values()))
         assert f"{messages['unknownWhy']} {reasons or messages['unknownNoReason']}" in figure
-    for name in ("hero-overlay.webp", "hero-overlay-mobile.webp"):
+    for name in captures:
         assert f'"/{name}"' in figure
         source = (LANDING_SRC / "public" / name).read_bytes()
         assert (ROOT / "landing" / name).read_bytes() == source, f"landing/{name} is stale"
+
+
+def test_hero_story_shows_the_real_loading_dialog():
+    # The story's "Checking" frame is a capture of the extension's loading overlay (showLoadingOverlay in
+    # extension/content.js), so its alt text quotes that overlay's own string.
+    messages = json.loads(read(ROOT / "extension" / "locales" / "en" / "messages.json"))
+    assert '<p>${_t("overlayAnalyzing")}</p>' in read(ROOT / "extension" / "content.js")
+    story = read(COMPONENTS / "HeroStory.tsx")
+    assert f"It reads {messages['overlayAnalyzing']}" in story
+    assert '"/hero-overlay-loading.webp"' in story
+    source = (LANDING_SRC / "public" / "hero-overlay-loading.webp").read_bytes()
+    built = (ROOT / "landing" / "hero-overlay-loading.webp").read_bytes()
+    assert built == source, "landing/hero-overlay-loading.webp is stale"
 
 
 @pytest.mark.parametrize(
@@ -678,21 +701,27 @@ def test_the_site_says_which_verdicts_reach_the_registry():
 
 
 def test_hero_demo_shows_documented_examples_and_makes_no_request():
-    # The demo in the hero plays recorded examples. Each address must be the one the repository documents, the
-    # labels must say the examples are recorded or modelled, and the component must not talk to the network.
-    scenes = read(COMPONENTS / "verdictScenes.ts")
-    demo = read(COMPONENTS / "VerdictDemo.tsx")
+    # The hero story plays captures of recorded replies, says so, and does not talk to the network. TryIt.tsx is
+    # the one hero component that calls the API (POST /api/scan). The VIRTUAL guard example left the page with
+    # verdictScenes.ts in PR C and returns in FeatureTabs.tsx (plan 3.3, PR D1).
+    story = read(COMPONENTS / "HeroStory.tsx")
+    assert "Recorded examples, not live scans" in story
+    for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
+        assert forbidden not in story, forbidden
+    try_it = read(COMPONENTS / "TryIt.tsx")
+    assert "https://api.shieldbotsecurity.online/api/scan" in try_it
+    for forbidden in ("XMLHttpRequest", "WebSocket", "EventSource"):
+        assert forbidden not in try_it, forbidden
+    # ARBROKER, the documented Arbitrum honeypot, is shown in the Arbitrum coverage note.
     fixture = json.loads(read(ROOT / "tests" / "fixtures" / "arbitrum_simulation" / "v2_honeypot.json"))
-    assert fixture["token"] in scenes
-    deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
-    subject = re.search(r"`subject\(\)` is VIRTUAL \(`(0x[0-9a-fA-F]{40})`\)", deployments).group(1)
-    assert subject.lower() in scenes.lower()
-    assert "Recorded examples, not live scans" in demo
-    assert "Modelled example from the judge guide" in scenes
-    assert "allowed=True, reason=0" in scenes and "allowed=True, reason=0" in read(ROOT / "docs" / "SUBMISSION.md")
-    for source in (scenes, demo):
-        for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
-            assert forbidden not in source, forbidden
+    assert fixture["token"] in read(COMPONENTS / "Chains.tsx")
+    # The SAFE fixture is the ARB approval of docs/SUBMISSION.md; the UNKNOWN one has incomplete coverage.
+    scripts = LANDING_SRC / "scripts"
+    safe = json.loads(read(scripts / "hero-overlay-safe-request.json"))
+    assert safe["chainId"] == 42161 and f"(`{safe['to']}`)" in read(ROOT / "docs" / "SUBMISSION.md")
+    assert json.loads(read(scripts / "hero-overlay-safe-response.json"))["classification"] == "SAFE"
+    unknown = json.loads(read(scripts / "hero-overlay-unknown-response.json"))
+    assert unknown["status"] != "ok" and any(unknown["coverage_reasons"].values())
 
 
 def test_built_dashboard_contains_the_current_source_strings():
