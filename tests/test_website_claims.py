@@ -625,6 +625,46 @@ def test_built_landing_bundle_contains_the_current_feature_copy(component):
         )
 
 
+HERO_SECTION_COPY = {
+    "HeroStory.tsx": (
+        "Recorded reply of 26 September 2026, chain 1, BLOCK RECOMMENDED.",
+        "Recorded examples, not live scans.",
+        "overlay at unreleased commit 2b54a1b, fed that reply.",
+    ),
+    "TryIt.tsx": (
+        "Checking, this can take up to 25 seconds",
+        "Too many checks from this connection. Wait a minute and try again.",
+        "Quick check: no sell simulation, so a token reads Unknown here.",
+        "Recorded /api/firewall reply of 11 October 2026, chain 42161, SAFE. Upper part of the dialog, overlay at "
+        "unreleased commit 2b54a1b.",
+        "Recorded /api/firewall reply of 11 October 2026, chain 4663, UNKNOWN. Upper part of the dialog, overlay at "
+        "unreleased commit 2b54a1b.",
+    ),
+    "Mechanism.tsx": (
+        "Each check runs, or it says it did not.",
+        "A source that is not running reads Unavailable, never 0.",
+        "GET /api/stats did not answer, so every figure reads Unavailable.",
+    ),
+    "Chains.tsx": (
+        "Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is "
+        "reported as Unknown, never as Safe.",
+        "It has been tested with Rabby; MetaMask testing is still outstanding.",
+    ),
+}
+
+
+@pytest.mark.parametrize("component", sorted(HERO_SECTION_COPY))
+def test_built_landing_bundle_contains_the_current_hero_section_copy(component):
+    # The hero, try-it, mechanism and chain sections ship only in the built bundle, so their copy is pinned in
+    # both the source and the bundle: a source edit without `npm run build` fails here.
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    source = read(COMPONENTS / component)
+    assert bundle
+    for text in HERO_SECTION_COPY[component]:
+        assert text in source, f"{component} no longer says {text[:60]!r}; update the pin"
+        assert text in bundle, f"landing bundle is stale: missing {component} text {text[:60]!r}"
+
+
 def test_no_unbacked_marketing_claims_anywhere_on_the_site():
     # The brand is honesty: no detection rate, insurance or coverage promise, user or loss count, audit claim,
     # or aggregate figure that no document in this repository backs, in any source page or in the built bundle.
@@ -633,6 +673,9 @@ def test_no_unbacked_marketing_claims_anywhere_on_the_site():
         r"\btrustless\b", r"\bunhackable\b", r"enterprise-grade", r"\b\d[\d,]*\+? users\b", r"10 of 66",
         r"0 false positives", r"818 tokens", r"3 honeypots", r"496,628", r"2,091",
         r"records each Robinhood Chain verdict",
+        # Others already cover Robinhood Chain and agents (plan section 0): never "first" or "only" about either.
+        r"\b(first|only) (transaction firewall|firewall|security (tool|layer)|product)\b[^.]*Robinhood",
+        r"\b(first|only)\b[^.]*\b(MCP|agents?)\b",
     ]
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
     pages = {
