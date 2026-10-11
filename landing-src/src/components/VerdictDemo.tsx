@@ -244,7 +244,7 @@ export default function VerdictDemo() {
                   .filter(Boolean)
                   .join(" ")}
               >
-                <Badge verdict={item.verdict.tone} variant="solid" size="lg">
+                <Badge verdict={item.verdict.tone} size="lg">
                   {item.verdict.label}
                 </Badge>
                 <div className="mt-3 flex flex-wrap items-center gap-2">

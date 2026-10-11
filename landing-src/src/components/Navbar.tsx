@@ -1,17 +1,27 @@
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import Button from "./Button";
-import Icon, { Mark } from "./Icon";
+import Icon from "./Icon";
 
 const links = [
   { label: "How it works", href: "#how-it-works" },
-  { label: "Robinhood Chain", href: "#on-chain" },
   { label: "Coverage", href: "#chains" },
+  { label: "On-chain registry", href: "#on-chain" },
   { label: "For builders", href: "#agent-security" },
-  { label: "Threat dashboard", href: "/dashboard" },
+  { label: "Dashboard", href: "/dashboard" },
 ];
 
 const chromeStoreUrl = "https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk";
+
+function ChromeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2a10 10 0 0 1 8.66 5H12a5 5 0 0 0-4.58 3H3.34A10 10 0 0 1 12 2z" opacity=".6" />
+      <path d="M12 22A10 10 0 0 1 3.34 17H7.42A5 5 0 0 0 12 19.92V22z" opacity=".6" />
+      <path d="M22 12a10 10 0 0 1-5.34 8.9l-2.08-3.6A5 5 0 0 0 17 12h5z" opacity=".6" />
+    </svg>
+  );
+}
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
@@ -28,42 +38,40 @@ export default function Navbar() {
   }, [open]);
 
   return (
-    <nav aria-label="Main" className="fixed top-0 inset-x-0 z-50 bg-surface/90 backdrop-blur border-b border-line">
+    <nav aria-label="Main" className="fixed top-0 inset-x-0 z-50 bg-ground/90 backdrop-blur border-b border-hairline">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         <a href="#top" className="flex items-center gap-2 min-h-[44px]">
-          <Mark size={28} className="text-emerald" />
-          <span className="text-lg font-bold"><span className="text-ink">Shield</span><span className="text-emerald">Bot</span></span>
+          <span className="mark-slot inline-block w-6 h-6" aria-hidden="true" />
+          <span className="text-[22px] leading-none font-medium tracking-[-0.03em] text-ink">ShieldBot</span>
         </a>
 
         <div className="flex items-center gap-1 lg:gap-6">
           <div className="hidden lg:flex items-center gap-6">
             {links.map((link) => (
-              <a key={link.label} href={link.href} className="text-sm font-medium text-muted hover:text-ink hover:underline underline-offset-[6px] transition-colors duration-150 ease-out">
+              <a key={link.label} href={link.href} className="text-[15px] font-medium text-ink hover:text-accent transition-colors duration-150 ease-out">
                 {link.label}
               </a>
             ))}
           </div>
-          <Button href={chromeStoreUrl} size="sm" className="hidden lg:inline-flex">Add to Chrome</Button>
+          <Button href={chromeStoreUrl} variant="secondary" size="sm" className="hidden lg:inline-flex"><ChromeIcon />Add to Chrome</Button>
           <Button variant="ghost" size="sm" className="lg:hidden h-11 w-11 min-w-11 !px-0" onClick={() => setOpen(!open)} ariaLabel="Menu" ariaExpanded={open} ariaControls="mobile-menu">
             <Icon name={open ? "close" : "menu"} size={24} />
           </Button>
         </div>
       </div>
 
-      <AnimatePresence>
-        {open && (
-          <motion.div id="mobile-menu" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }} className="lg:hidden overflow-hidden bg-surface border-b border-line">
-            <div className="max-w-6xl mx-auto px-4 sm:px-6 py-2 flex flex-col">
-              {links.map((link) => (
-                <a key={link.label} href={link.href} className="flex items-center min-h-12 text-sm font-medium text-muted hover:text-ink transition-colors duration-150 ease-out" onClick={() => setOpen(false)}>
-                  {link.label}
-                </a>
-              ))}
-              <Button href={chromeStoreUrl} className="w-full mt-2 mb-3" onClick={() => setOpen(false)}>Add to Chrome</Button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div id="mobile-menu" inert={!open} className={`lg:hidden grid transition-[grid-template-rows] duration-[250ms] ease-out ${open ? "grid-rows-[1fr] border-b border-hairline" : "grid-rows-[0fr]"}`}>
+        <div className="overflow-hidden bg-ground">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-2 flex flex-col">
+            {links.map((link) => (
+              <a key={link.label} href={link.href} className="flex items-center min-h-12 text-[15px] font-medium text-ink hover:text-accent transition-colors duration-150 ease-out" onClick={() => setOpen(false)}>
+                {link.label}
+              </a>
+            ))}
+            <Button href={chromeStoreUrl} variant="secondary" className="w-full mt-2 mb-3" onClick={() => setOpen(false)}><ChromeIcon />Add to Chrome</Button>
+          </div>
+        </div>
+      </div>
     </nav>
   );
 }

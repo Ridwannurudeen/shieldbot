@@ -2,48 +2,41 @@ import type { ReactNode } from "react";
 
 export type Verdict = "safe" | "caution" | "high" | "block" | "unknown";
 
+// Five verdicts on three hues, told apart by shape as well as colour: BLOCK a solid red fill, HIGH RISK a
+// heavy red edge with "!", CAUTION a grey hairline with "!", SAFE a green hairline, UNKNOWN a solid grey
+// fill with a dashed edge and "?".
+const shapes: Record<Verdict, { classes: string; glyph?: string }> = {
+  block: { classes: "bg-block text-white border border-block" },
+  high: { classes: "text-block-text border-2 border-block", glyph: "!" },
+  caution: { classes: "text-ink border border-unknown", glyph: "!" },
+  safe: { classes: "text-safe-text border border-safe" },
+  unknown: { classes: "bg-unknown text-ink border border-dashed border-ink", glyph: "?" },
+};
+
 export default function Badge({
   verdict,
-  variant = "soft",
   size = "md",
   children,
   className,
 }: {
   verdict: Verdict;
-  variant?: "soft" | "solid";
   size?: "md" | "lg";
   children: ReactNode;
   className?: string;
 }) {
-  const tones =
-    variant === "soft"
-      ? {
-          safe: "bg-safe-tint text-safe-fg border-safe-line",
-          caution: "bg-caution-tint text-caution-fg border-caution-line",
-          high: "bg-high-tint text-high-fg border-high-line",
-          block: "bg-block-tint text-block-fg border-block-line",
-          unknown: "bg-unknown-hatch text-unknown-fg border-dashed border-unknown-line",
-        }
-      : {
-          safe: "bg-safe-fg text-onfill border-safe-fg",
-          caution: "bg-caution-fg text-onfill border-caution-fg",
-          high: "bg-high-fg text-onfill border-high-fg",
-          block: "bg-block-fg text-onfill border-block-fg",
-          unknown: "bg-unknown-hatch-solid text-white border-dashed border-unknown-line",
-        };
-
+  const { classes, glyph } = shapes[verdict];
   return (
     <span
       className={[
-        size === "md"
-          ? "inline-flex items-center rounded-md px-2.5 py-1 text-xs font-bold uppercase tracking-[0.08em] border"
-          : "inline-flex items-center rounded-lg px-3 py-1.5 text-lg min-[390px]:text-xl sm:text-2xl min-[1024px]:text-xl min-[1100px]:text-2xl font-extrabold uppercase tracking-[0.02em] leading-[1.15] border",
-        tones[verdict],
+        "inline-flex items-center gap-1 rounded font-medium",
+        size === "md" ? "px-2 py-0.5 text-xs tracking-[0.04em]" : "px-3 py-1.5 text-lg sm:text-xl leading-[1.15]",
+        classes,
         className,
       ]
         .filter(Boolean)
         .join(" ")}
     >
+      {glyph && <span aria-hidden="true">{glyph}</span>}
       {children}
     </span>
   );
