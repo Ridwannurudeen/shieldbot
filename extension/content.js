@@ -659,7 +659,7 @@
     overlay.innerHTML = `
       <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" aria-busy="true" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <span class="shieldai-logo" aria-hidden="true"></span>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
         <div class="shieldai-loading">
@@ -950,7 +950,7 @@
     overlay.innerHTML = `
       <div class="shieldai-modal ${classification === "BLOCK_RECOMMENDED" ? "shieldai-modal-danger" : classification === "UNKNOWN" ? "shieldai-modal-unknown" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <span class="shieldai-logo" aria-hidden="true"></span>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
@@ -1071,7 +1071,7 @@
     overlay.innerHTML = `
       <div class="shieldai-modal ${isBlock ? "shieldai-modal-danger" : classification === "UNKNOWN" ? "shieldai-modal-unknown" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <span class="shieldai-logo" aria-hidden="true"></span>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
 
@@ -1132,6 +1132,18 @@
           ${escapeHtml(verdictText)}
         </div>` : ""}
 
+        ${classification === "SAFE" ? "" : `
+        <div class="shieldai-explain-row">
+          <button class="shieldai-btn shieldai-btn-explain" id="shieldai-explain">
+            ${_t("overlayBtnWhy") || "Why is this risky?"}
+          </button>
+        </div>
+        <div class="shieldai-explain-response" id="shieldai-explain-response" style="display:none;">
+          <p class="shieldai-explain-loading" id="shieldai-explain-loading">${_t("overlayExplainAnalyzing")}</p>
+          <p class="shieldai-explain-text" id="shieldai-explain-text"></p>
+        </div>
+        `}
+
         <div class="shieldai-actions">
           <button class="shieldai-btn shieldai-btn-block" id="shieldai-block">
             ${_t("overlayBtnBlock")}
@@ -1149,18 +1161,6 @@
         ${hold ? `<p class="shieldai-hold-note" id="shieldai-hold-note">${_t("overlayHoldNote")}</p>` : ""}
         ${COVERED_NOTE}
         ${canProceed ? "" : `<p class="shieldai-strict-note">${chainUnknown ? _t("overlayChainNoProceed") : _t("overlayStrictNoProceed")}</p>`}
-
-        ${classification === "SAFE" ? "" : `
-        <div class="shieldai-explain-row">
-          <button class="shieldai-btn shieldai-btn-explain" id="shieldai-explain">
-            ${_t("overlayBtnWhy") || "Why is this risky?"}
-          </button>
-        </div>
-        <div class="shieldai-explain-response" id="shieldai-explain-response" style="display:none;">
-          <p class="shieldai-explain-loading" id="shieldai-explain-loading">${_t("overlayExplainAnalyzing")}</p>
-          <p class="shieldai-explain-text" id="shieldai-explain-text"></p>
-        </div>
-        `}
       </div>
     `;
 
@@ -1245,10 +1245,10 @@
     overlay.innerHTML = `
       <div class="shieldai-modal ${delegation ? "shieldai-modal-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <span class="shieldai-logo" aria-hidden="true"></span>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
-        <div class="shieldai-badge ${delegation ? "shieldai-badge-block" : "shieldai-badge-high"}">
+        <div class="shieldai-badge ${delegation ? "shieldai-badge-block" : "shieldai-badge-unknown"}">
           ${delegation ? _t("classBlock") : _t("overlayAnalysisUnavail")}
         </div>
         ${batchNote(tx)}
@@ -1294,9 +1294,9 @@
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
     overlay.innerHTML = `
-      <div class="shieldai-modal" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
+      <div class="shieldai-modal shieldai-modal-unknown" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <span class="shieldai-logo" aria-hidden="true"></span>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
         <div class="shieldai-badge shieldai-badge-high">${_t("overlayUnknownStructure")}</div>
@@ -1338,7 +1338,7 @@
     overlay.innerHTML = `
       <div class="shieldai-modal shieldai-modal-unknown" role="dialog" aria-modal="true" aria-labelledby="shieldai-title" tabindex="-1">
         <div class="shieldai-header">
-          <div class="shieldai-logo" aria-hidden="true">&#128737;</div>
+          <span class="shieldai-logo" aria-hidden="true"></span>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
         <div class="shieldai-badge shieldai-badge-unknown">${_t("overlayTimedOut")}</div>
