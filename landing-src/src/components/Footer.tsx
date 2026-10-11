@@ -131,7 +131,7 @@ export default function Footer() {
         </div>
       </div>
       <p
-        className="mx-auto -mb-[0.2em] max-w-6xl select-none whitespace-nowrap px-4 text-center text-[clamp(64px,19vw,232px)] font-medium leading-none tracking-[-0.04em] text-transparent [-webkit-text-stroke:1px_rgb(var(--c-hairline-strong))] sm:px-6"
+        className="mx-auto -mb-[0.2em] max-w-6xl select-none whitespace-nowrap px-4 text-center text-[clamp(64px,21vw,262px)] font-medium leading-none tracking-[-0.04em] text-transparent [-webkit-text-stroke:1px_rgb(var(--c-hairline-strong))] sm:px-6"
         aria-hidden="true"
       >
         ShieldBot

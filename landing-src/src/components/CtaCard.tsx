@@ -120,9 +120,10 @@ export default function CtaCard() {
               <p className="text-on-panel-2">
                 reverts with NotAllowed(subject, reason)
               </p>
-              <p className="mt-3 border-t border-white/15 pt-3 text-accent-on-panel">
-                0 ALLOWED · 1 NO_RECORD · 2 UNKNOWN · 3 HIGH · 4 HONEYPOT · 5
-                EXPIRED · 6 FUTURE_TIMESTAMP
+              <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 border-t border-white/15 pt-3 text-accent-on-panel">
+                {["0 ALLOWED", "1 NO_RECORD", "2 UNKNOWN", "3 HIGH", "4 HONEYPOT", "5 EXPIRED", "6 FUTURE_TIMESTAMP"].map((code) => (
+                  <span key={code} className="whitespace-nowrap">{code}</span>
+                ))}
               </p>
             </div>
           </div>

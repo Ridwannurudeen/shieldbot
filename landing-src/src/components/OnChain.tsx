@@ -117,13 +117,7 @@ function verdictTag(verdict: string) {
 
 type Row = { subject: string; record: RegistryRecord | null | undefined };
 
-function Cell({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+function Cell({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-w-0 items-baseline justify-between gap-4 lg:block">
       <span className="text-xs text-secondary lg:sr-only">{label}</span>
@@ -254,9 +248,13 @@ function RecentRecords() {
         </ol>
       )}
       <p className="border-t border-hairline bg-ground-alt px-5 py-3 text-xs leading-[18px] text-secondary">
-        {fallback
-          ? `Live from GET /api/launches/4663?outcome=blocked&limit=5, then GET /api/verdict/4663/{address} for each launch${at}. Each row is that token's newest record.`
-          : `Live from GET /api/verdicts/recent?chain_id=4663&limit=5${at}: confirmed records, newest first.`}
+        {recent === null
+          ? "GET /api/verdicts/recent?chain_id=4663&limit=5 did not answer."
+          : fallback && launches === null
+            ? "GET /api/launches/4663?outcome=blocked&limit=5 did not answer."
+            : fallback
+              ? `Live from GET /api/launches/4663?outcome=blocked&limit=5, then GET /api/verdict/4663/{address} for each launch${at}. Each row is that token's newest record.`
+              : `Live from GET /api/verdicts/recent?chain_id=4663&limit=5${at}: confirmed records, newest first.`}
       </p>
     </div>
   );

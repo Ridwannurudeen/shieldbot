@@ -3,13 +3,18 @@ import Icon from "./Icon";
 import SectionHeader from "./SectionHeader";
 
 const guardCall = `interface IShieldBotVerdictGuard {
-    function check(address subject, uint64 maxAge) external view returns (bool allowed, uint8 reason);
-    function requireAllowed(address subject, uint64 maxAge) external view;
+    function check(address subject, uint64 maxAge)
+        external view returns (bool allowed, uint8 reason);
+    function requireAllowed(address subject, uint64 maxAge)
+        external view;
 }
 
-// Robinhood Chain (4663). Reverts with NotAllowed(subject, reason) unless the token's newest
-// record is LOW or MEDIUM and was published in the last 900 seconds.
-IShieldBotVerdictGuard(0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e).requireAllowed(token, 900);`;
+// ShieldBotVerdictGuard on Robinhood Chain (4663)
+address constant GUARD = 0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e;
+
+// Reverts with NotAllowed(subject, reason) unless the token's
+// newest record is LOW or MEDIUM, published in the last 900 s.
+IShieldBotVerdictGuard(GUARD).requireAllowed(token, 900);`;
 
 const features: { title: string; desc: string; link?: { label: string; href: string } }[] = [
   {
