@@ -338,22 +338,23 @@ class ContractService:
                     return None
                 return max(0.0, deadline - EXPLORER_RESULT_RESERVE_SECONDS - time.monotonic())
 
+            # Verification + source code, and contract age. Below this call both lookups are shielded
+            # and cached, so one still running at the deadline fills the caches when it ends.
+            # Verification starts first; it does not depend on the launch table.
+            lookups = {}
+            if exemption is None:
+                lookups['is_verified'] = start(self.web3_client.is_verified_contract(address, chain_id=chain_id))
+
             # On Robinhood Chain the launch table can date the token without the explorer's creation
-            # lookup. Verification is looked up as everywhere else.
+            # lookup.
             launch = None
             if exemption is None and chain_id == 4663 and self.db is not None:
                 launch = await self._launch_age(address, chain_id)
             if launch is not None:
                 results['contract_age_days'] = launch
                 results['field_providers'] = {'contract_age_days': 'launch_table'}
-
-            # Verification + source code, and contract age. Below this call both lookups are shielded
-            # and cached, so one still running at the deadline fills the caches when it ends.
-            lookups = {}
-            if exemption is None:
-                lookups['is_verified'] = start(self.web3_client.is_verified_contract(address, chain_id=chain_id))
-                if launch is None:
-                    lookups['contract_age_days'] = start(creation_lookup())
+            elif exemption is None:
+                lookups['contract_age_days'] = start(creation_lookup())
 
             # Scam DB (external APIs, not BscScan — no delay needed)
             scam_matches = await self.scam_db.check_address(address, chain_id=chain_id)
