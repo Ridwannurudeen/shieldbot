@@ -81,6 +81,10 @@ CACHE_TTL_SECONDS = 6 * 3600
 # After a failed fetch the list is not asked for again for five minutes, so scans do not each wait on it.
 RETRY_SECONDS = 300
 TIMEOUT_SECONDS = 10
+# How long a scan's analyzers wait for a list not yet loaded (just after a deploy, or while the list API
+# is down) before going on without it: a cached list answers within a few event-loop turns, and without
+# one an official stock gets the full scan, as when the list is unavailable.
+OFFICIAL_LIST_WAIT_SECONDS = 0.05
 # The list was 163 KB on 2026-09-24, and a symbol() and name() reply is two short ABI strings.
 MAX_LIST_BYTES = 1_000_000
 MAX_RPC_REPLY_BYTES = 65_536
@@ -569,18 +573,18 @@ class RobinhoodAssets:
         self._lock = asyncio.Lock()
         self._refreshing = None
 
-    async def listed(self) -> Optional[Dict[str, Tuple[str, str]]]:
+    async def listed(self, wait: Optional[float] = None) -> Optional[Dict[str, Tuple[str, str]]]:
         """The official tokens by address, or None while no fetch has succeeded.
 
-        Only a first load is waited on. Once a list is held, a due refresh (a fetch of up to
-        TIMEOUT_SECONDS) runs in the background and the held list is served meanwhile, so the scans
-        that read it do not wait on it.
+        A due fetch (up to TIMEOUT_SECONDS) runs in the background. Once a list is held it is served
+        meanwhile. Before one is, the caller waits for the fetch, or at most ``wait`` seconds, after
+        which it goes on without the list while the fetch runs on.
         """
-        if self._listed is None:
-            await self._refresh()
-        elif self._due() and (self._refreshing is None or self._refreshing.done()):
+        if self._due() and (self._refreshing is None or self._refreshing.done()):
             self._refreshing = asyncio.create_task(self._refresh())
             self._refreshing.add_done_callback(_log_refresh_error)
+        if self._listed is None and not self._refreshing.done():
+            await asyncio.wait((self._refreshing,), timeout=wait)
         return self._listed
 
     def _due(self) -> bool:
@@ -669,11 +673,11 @@ class RobinhoodAssets:
 
         Only the address is read, so a token that merely calls itself USDG or NVDA is never official.
         Without the list only the canonical tokens are known: an official stock token is None then, and
-        keeps the full scan.
+        keeps the full scan. A list not yet loaded is waited on for OFFICIAL_LIST_WAIT_SECONDS at most.
         """
         if chain_id != CHAIN_ID:
             return None
-        check = await self.check(address, None, None)
+        check = check_token(address, None, None, await self.listed(wait=OFFICIAL_LIST_WAIT_SECONDS))
         return check if check["status"] == "official" else None
 
     async def check_onchain(self, address: str, timeout: float) -> Dict:

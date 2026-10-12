@@ -10,6 +10,7 @@ from typing import Optional
 from eth_utils import keccak
 
 from adapters.evm_base import BURN_ADDRESSES
+from services.robinhood_assets import OFFICIAL_LIST_WAIT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +32,6 @@ BSCSCAN_DELAY = 0.25
 # analyzers' deadline, so the analyzer returns before the registry cancels it, with only the fields
 # still unanswered named as gaps. Its work after that wait is local.
 EXPLORER_RESULT_RESERVE_SECONDS = 0.5
-# A cached official Robinhood token list answers within a few event-loop turns. A cold one (a fetch
-# of up to 10 s) does not hold up the explorer lookups, which start beside it.
-OFFICIAL_LIST_WAIT_SECONDS = 0.05
 # Robinhood Chain launches ShieldBot's own discovery recorded (core.database discovered_launches). A
 # launchpad's creation event is the token's creation, so its block dates the token exactly. A pool's
 # creation (Uniswap V2 PairCreated, V4 Initialize) needs the token to exist already, so it bounds the
