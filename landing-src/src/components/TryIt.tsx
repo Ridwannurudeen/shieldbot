@@ -235,7 +235,7 @@ export default function TryIt() {
           </div>
           <p className="mt-3 text-xs leading-[18px] text-secondary">
             Quick check: no sell simulation, so a token reads Unknown here. The
-            extension and POST /api/firewall run the full check.
+            extension runs the full check.
           </p>
         </form>
       </div>

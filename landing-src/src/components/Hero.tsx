@@ -14,10 +14,10 @@ export default function Hero() {
           </h1>
           <div className="min-w-0">
             <p className="text-base leading-[26px] text-secondary md:text-lg md:leading-7">
-              ShieldBot checks a transaction before your wallet signs it and
-              says what it found. When a check cannot run it says Unknown, never
-              Safe. Its published Robinhood Chain verdicts live in a public
-              registry any contract can read.
+              ShieldBot checks a transaction before your wallet signs it. When a
+              check cannot run it says Unknown, never Safe. The verdicts it
+              publishes on Robinhood Chain sit in a public registry any contract
+              can read.
             </p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <Button

@@ -68,8 +68,8 @@ const captions: Record<Pick, string> = {
   block:
     "Recorded reply of 26 September 2026, chain 1, BLOCK RECOMMENDED. The dialog is a capture of the extension's overlay at unreleased commit 2b54a1b, fed that reply.",
   unknown:
-    "Recorded reply of 11 October 2026, chain 4663, UNKNOWN. Upper part of the dialog, a capture of the extension's overlay at unreleased commit 2b54a1b, fed that reply.",
-  safe: "Recorded reply of 11 October 2026, chain 42161, SAFE. Upper part of the dialog, a capture of the extension's overlay at unreleased commit 2b54a1b, fed that reply.",
+    "Recorded reply of 11 October 2026, chain 4663, UNKNOWN. Upper dialog: a capture of the extension's overlay at unreleased commit 2b54a1b, fed that reply.",
+  safe: "Recorded reply of 11 October 2026, chain 42161, SAFE. Upper dialog: a capture of the extension's overlay at unreleased commit 2b54a1b, fed that reply.",
 };
 
 // The commit card's record: the registry's newest confirmed record, or in the feed's fallback the newest blocked
@@ -209,7 +209,6 @@ export default function HeroRecord() {
             recordedAt={reply.sent_at}
             chain={{ id: reply.chain_id, name: reply.network }}
             evidenceHash={reply.evidence_hash}
-            source="Fields of the recorded POST /api/firewall reply, as served."
           />
         </div>
         <figure className="min-w-0 max-lg:order-first">
@@ -258,11 +257,7 @@ export default function HeroRecord() {
             <Commit />
           </div>
           <figcaption className="mt-3 text-xs leading-[18px] text-secondary">
-            {captions[pick]}{" "}
-            {
-              "Recorded examples, not live scans. The extension's loading dialog, shown first, is a capture too."
-            }{" "}
-            The signing card is an illustration: a placeholder dApp asking to
+            {captions[pick]} Recorded examples, not live scans. The signing card is an illustration: a placeholder dApp asking to
             sign the recorded call.
           </figcaption>
         </figure>
