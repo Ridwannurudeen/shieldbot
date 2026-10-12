@@ -1,5 +1,6 @@
 """Offline regressions for coverage-aware product consumers."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -87,7 +88,62 @@ async def test_fresh_response_persists_unknowns(consumer_api, incomplete_output)
     metadata = stored['category_scores']['_scan_metadata']
     assert metadata['status'] == 'unknown'
     assert metadata['coverage'] == incomplete_output['coverage']
-    assert services.registry.run_all.call_args.args[0].extra['is_verified'] is None
+    assert await services.registry.run_all.call_args.args[0].extra['verification'] is None
+
+
+@pytest.mark.asyncio
+async def test_the_analyzers_do_not_wait_for_the_verification_lookup(consumer_api, incomplete_output):
+    # Sourcify and Blockscout take up to 8 s on Robinhood Chain; the honeypot simulation's own
+    # round-trips must run beside that wait, not after it, while the signer waits.
+    api, services = consumer_api
+    release = asyncio.Event()
+    seen = {}
+
+    async def verification(*args, **kwargs):
+        await release.wait()
+        return (True, None)
+
+    async def run_all(ctx, **kwargs):
+        seen['started_before_verification'] = not release.is_set()
+        release.set()
+        seen['verified'] = await ctx.extra['verification']
+        return []
+
+    api.web3_client.is_verified_contract = verification
+    services.registry.run_all = run_all
+    api.risk_engine.compute_from_results.return_value = incomplete_output
+    await asyncio.wait_for(api.firewall(
+        api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40),
+        SimpleNamespace(headers={}),
+    ), timeout=5)
+    assert seen == {'started_before_verification': True, 'verified': True}
+    api.risk_engine.compute_from_results.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('data, value', [('0xdeadbeef', '0'), ('0x4e71d92d', hex(10**17))], ids=['unknown-selector', 'payable'])
+async def test_verification_is_settled_first_when_the_intent_analyzer_reads_it(consumer_api, incomplete_output, data, value):
+    # Its wait is then not spent inside the analyzers' deadline, so the intent verdict is the same.
+    api, services = consumer_api
+    order = []
+
+    async def verification(*args, **kwargs):
+        await asyncio.sleep(0.01)
+        order.append('verification')
+        return (False, None)
+
+    async def run_all(ctx, **kwargs):
+        order.append('analyzers')
+        return []
+
+    api.web3_client.is_verified_contract = verification
+    services.registry.run_all = run_all
+    api.risk_engine.compute_from_results.return_value = incomplete_output
+    await api.firewall(
+        api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40, data=data, value=value),
+        SimpleNamespace(headers={}),
+    )
+    assert order == ['verification', 'analyzers']
 
 
 @pytest.mark.asyncio
@@ -993,7 +1049,8 @@ async def test_verification_lookup_failure_stays_unknown(consumer_api, surface):
     else:
         await api._analyze_router_swap(req, req.to, req.sender,
             {'params': {'path': ['0x' + 'c' * 40]}}, 'Router', 0)
-    assert services.registry.run_all.call_args.args[0].extra['is_verified'] is None
+    from analyzers.intent import _verified
+    assert await _verified(services.registry.run_all.call_args.args[0]) is None
 
 
 @pytest.mark.parametrize('compact', [True, False], ids=['compact', 'dashboard'])

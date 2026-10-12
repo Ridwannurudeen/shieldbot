@@ -1,5 +1,6 @@
 """Tests for IntentMismatchAnalyzer."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -118,6 +119,57 @@ async def test_unknown_selector_tristate_reaches_risk(analyzer, verified):
         assert risk['risk_level'] == 'MEDIUM'
         assert risk['coverage_reasons']['intent']
         assert risk['risk_archetype'] == 'unknown'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('verified', [None, True, False])
+async def test_unknown_selector_reads_a_verification_still_running(analyzer, verified):
+    # The firewall hands over its verification lookup as a task that runs beside the analyzers.
+    async def lookup():
+        await asyncio.sleep(0.01)
+        return verified
+
+    result = await analyzer.analyze(AnalysisContext(
+        address='0x' + 'b' * 40,
+        extra={'calldata': '0xdeadbeef', 'verification': asyncio.create_task(lookup())},
+    ))
+    assert result.score == (20 if verified is False else 0)
+    assert result.data['status'] == ('unknown' if verified is None else 'ok')
+
+
+@pytest.mark.parametrize('calldata, value, reads', [
+    ('0xdeadbeef', '0', True),
+    ('0x095ea7b3' + '0' * 128, '0', False),
+    ('0x095ea7b3' + '0' * 128, hex(10**17), True),
+    ('0x', hex(10**17), False),
+    ('0x', '0', False),
+], ids=['unknown-selector', 'approval', 'approval-with-value', 'native-transfer', 'empty'])
+def test_reads_verification_names_the_calls_that_read_it(calldata, value, reads):
+    from analyzers.intent import reads_verification
+
+    assert reads_verification(calldata, value) is reads
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_intent_leaves_the_verification_running(analyzer):
+    # The registry cancels an analyzer past its deadline; the lookup it was waiting on is the
+    # firewall's own and must still finish for the firewall.
+    release = asyncio.Event()
+
+    async def lookup():
+        await release.wait()
+        return True
+
+    verification = asyncio.create_task(lookup())
+    intent = asyncio.create_task(analyzer.analyze(AnalysisContext(
+        address='0x' + 'b' * 40, extra={'calldata': '0xdeadbeef', 'verification': verification},
+    )))
+    await asyncio.sleep(0.01)
+    intent.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await intent
+    release.set()
+    assert await verification is True
 
 
 TOKEN = '0x' + 'a' * 40

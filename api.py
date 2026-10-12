@@ -32,6 +32,7 @@ from utils.scam_db import BLACKLIST_RELOAD_SECONDS
 from core.risk_engine import HONEYPOT_FLOOR, apply_local_match, database_matches, medium_matches, scam_match_floor
 from services import rpc_guard
 from services.counterparty_service import code_kind
+from analyzers.intent import reads_verification
 from services.mempool_service import supports_pending_transactions
 from core import verdicts
 from core.auth import TIER_LIMITS, hash_key
@@ -1178,6 +1179,17 @@ async def _firewall_events(req: FirewallRequest, request: Request, started: floa
         logger.info("Firewall stream %s", json.dumps(timings, sort_keys=True))
 
 
+async def _target_verification(address: str, chain_id: int, code: Optional[str]) -> Optional[bool]:
+    """Whether the target's source is verified; None when it could not be read."""
+    try:
+        result = await web3_client.is_verified_contract(address, chain_id=chain_id, code=code)
+    except UnsupportedChainError:
+        raise
+    except Exception:
+        return None
+    return result[0] if isinstance(result, tuple) else result
+
+
 async def _firewall_verdict(
     req: FirewallRequest, request: Request, trail: Dict, progress: Optional[FirstVerdictProgress] = None,
 ) -> Dict:
@@ -1312,7 +1324,7 @@ async def _firewall_verdict(
             # bridges, governance) should not be penalized by token-specific
             # checks (honeypot simulation, DEX liquidity, etc.)
             is_token = None
-            is_verified = None
+            verification = None
             # The target's code, read once. A wallet (no code, or an EIP-7702 delegation) has no
             # source to verify and takes payments with no contract to judge; for a contract, the
             # verification's clone check reads this code instead of fetching it again.
@@ -1331,14 +1343,14 @@ async def _firewall_verdict(
                     raise
                 except Exception:
                     pass
+            # Verification takes up to 8 s on Robinhood Chain (Sourcify and Blockscout) and 16 s
+            # on an Etherscan chain, so it runs beside the analyzers. When the intent analyzer will
+            # read it, it is settled first, as before, so that wait is not spent inside the
+            # analyzers' deadline.
             if is_contract is not False:
-                try:
-                    verified_result = await web3_client.is_verified_contract(to_addr, chain_id=req.chainId, code=code)
-                    is_verified = verified_result[0] if isinstance(verified_result, tuple) else verified_result
-                except UnsupportedChainError:
-                    raise
-                except Exception:
-                    pass
+                verification = asyncio.create_task(_target_verification(to_addr, req.chainId, code))
+                if reads_verification(req.data, req.value):
+                    await verification
 
             ctx = AnalysisContext(
                 address=to_addr, chain_id=req.chainId, from_address=from_addr,
@@ -1348,7 +1360,7 @@ async def _firewall_verdict(
                     'value': req.value,
                     'typed_data': req.typedData,
                     'sign_method': req.signMethod,
-                    'is_verified': is_verified,
+                    'verification': verification,
                     'is_contract': is_contract,
                     'authorization_list': req.authorizationList,
                 },
@@ -1383,6 +1395,8 @@ async def _firewall_verdict(
                 )
                 analyzer_results = None
                 simulation_result = None
+            if verification is not None:
+                await verification
 
             # Compute risk from analyzer results
             if analyzer_results is not None:

@@ -750,7 +750,7 @@ async def test_the_target_code_is_read_once_and_a_wallet_is_not_verified(
         api.web3_client.is_verified_contract.assert_awaited_once_with(target, chain_id=56, code=code)
     else:
         api.web3_client.is_verified_contract.assert_not_awaited()
-        assert ctx.extra["is_verified"] is None
+        assert ctx.extra["verification"] is None
 
 
 APPROVE = {
