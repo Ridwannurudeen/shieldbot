@@ -372,26 +372,19 @@ export default function Chains() {
             simulates a buy and a sell on Ethereum, BNB Chain and Base, and
             ShieldBot runs its own on supported Arbitrum and Robinhood Chain pool
             routes. On Arbitrum those are pools pairing the token with WETH on
-            Uniswap V3, Uniswap V2 or SushiSwap.
-            Where it says GoPlus flags only, and for an Arbitrum token with no such pool (for
-            example one traded only on Camelot, or only against stablecoins),
-            honeypot and tax flags come from GoPlus alone, and they read Unknown
-            when GoPlus has no answer. ARBROKER
-            (<span className="font-mono text-[13px] break-all">0x8328ffdecbd36294b4fcc50c1c25cde18f4a8b2b</span>)
-            is the case that shows why: GoPlus reported it as not a honeypot on 29 September 2026, and
-            ShieldBot's own simulation found that its sell reverts.
+            Uniswap V3, Uniswap V2 or SushiSwap. Elsewhere honeypot and tax flags
+            come from GoPlus alone and read Unknown when GoPlus has no answer.
+            <details className="disclose">
+              <summary>Why ShieldBot simulates on Arbitrum itself</summary>
+              <p>
+                ARBROKER (<span className="font-mono text-[13px] break-all">0x8328ffdecbd36294b4fcc50c1c25cde18f4a8b2b</span>):
+                GoPlus reported it as not a honeypot on 29 September 2026;
+                ShieldBot's own simulation found that its sell reverts.
+              </p>
+            </details>
           </li>
           <li>
-            <span className="text-ink">Mempool watch:</span> pending
-            transactions are watched on the 4 chains with a public mempool.
-          </li>
-          <li>
-            <span className="text-ink">Launch scans:</span> new Robinhood
-            Chain tokens are found as their pools open and reported with
-            /launchalerts in Telegram.
-          </li>
-          <li>
-            Version 3.1.0 of the browser extension, on the Chrome Web Store, asks the wallet which chain it is on and sends Robinhood Chain requests to the API for analysis. It has been tested with Rabby; MetaMask testing is still outstanding.
+            Extension 3.1.0 sends Robinhood Chain requests to the API for analysis. It has been tested with Rabby; MetaMask testing is still outstanding.
           </li>
         </ul>
       </div>
