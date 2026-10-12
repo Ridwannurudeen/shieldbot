@@ -267,28 +267,46 @@
   // --- Overlay Management ---
 
   // A font declared in a shadow root's stylesheet is not loaded, so the
-  // dialog's two families are registered on the document, once, under names no
-  // page uses, when the first overlay, banner or notice is shown. Where the Font
-  // Loading API is missing the dialog keeps overlay.css's fallback stack.
-  let _fontsAdded = false;
-  function addFonts() {
-    if (_fontsAdded || typeof FontFace !== "function" || !document.fonts) return;
-    _fontsAdded = true;
-    for (const [family, file, weight] of [
-      ["ShieldBot Geist", "geist-latin-400-normal.woff2", "400"],
-      ["ShieldBot Geist", "geist-latin-500-normal.woff2", "500"],
-      ["ShieldBot Plex Mono", "ibm-plex-mono-latin-400-normal.woff2", "400"],
-    ]) {
-      document.fonts.add(new FontFace(family, `url("${chrome.runtime.getURL(`fonts/${file}`)}")`, { weight }));
+  // dialog's two families are registered on the document, under names no page
+  // uses, while an overlay, banner or notice is on it. They are taken out of
+  // document.fonts again once none is left, so a page cannot find them there
+  // afterwards and learn that ShieldBot ran. Where the Font Loading API is
+  // missing the dialog keeps overlay.css's fallback stack.
+  let _fontFaces = null;
+  const _fontHosts = new Set();
+  function addFonts(host) {
+    if (typeof FontFace !== "function" || !document.fonts) return;
+    if (_fontFaces === null) {
+      _fontFaces = [
+        ["ShieldBot Geist", "geist-latin-400-normal.woff2", "400"],
+        ["ShieldBot Geist", "geist-latin-500-normal.woff2", "500"],
+        ["ShieldBot Plex Mono", "ibm-plex-mono-latin-400-normal.woff2", "400"],
+      ].map(([family, file, weight]) =>
+        new FontFace(family, `url("${chrome.runtime.getURL(`fonts/${file}`)}")`, { weight }));
     }
+    _fontHosts.add(host);
+    for (const face of _fontFaces) {
+      if (!document.fonts.has(face)) document.fonts.add(face);
+    }
+  }
+
+  // Called when a ShieldBot element leaves the page: the faces go once no
+  // overlay, banner or notice remains in the document.
+  function releaseFonts() {
+    if (_fontFaces === null) return;
+    for (const host of _fontHosts) {
+      if (!document.contains(host)) _fontHosts.delete(host);
+    }
+    if (_fontHosts.size) return;
+    for (const face of _fontFaces) document.fonts.delete(face);
   }
 
   // The overlay and the phishing banner live in closed shadow roots. The page
   // sees the host element in its DOM but cannot reach, click or restyle
   // anything inside, and the stylesheet link stays out of the page's head.
   function createShadow() {
-    addFonts();
     const host = document.createElement("div");
+    addFonts(host);
     const root = host.attachShadow({ mode: "closed" });
     const style = document.createElement("link");
     style.rel = "stylesheet";
@@ -365,6 +383,7 @@
       _awaitingRequestId = null;
       postVerdict(requestId, "block");
     }
+    releaseFonts();
   }
 
   function sendVerdict(requestId, action) {
@@ -1424,7 +1443,10 @@
     notice.setAttribute("role", "status");
     notice.textContent = _t(key);
     const { host, root } = createShadow();
-    notice.addEventListener("animationend", () => host.remove());
+    notice.addEventListener("animationend", () => {
+      host.remove();
+      releaseFonts();
+    });
     root.appendChild(notice);
     (document.body || document.documentElement).appendChild(host);
   }
@@ -1483,6 +1505,7 @@
     root.getElementById("shieldai-dismiss").addEventListener("click", (event) => {
       if (!event.isTrusted) return;
       host.remove();
+      releaseFonts();
     });
   }
 

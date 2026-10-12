@@ -924,7 +924,7 @@
     animation: none;
     box-shadow: 0 0 0 4px rgba(194, 31, 48, .4), 0 24px 64px rgba(0, 0, 0, .45);
   }
-  .shieldai-sweep span { animation: none; width: 100%; background: #8b8b86; }
+  .shieldai-sweep span { animation: none; display: none; }
   .shieldai-btn, .shieldai-calldata-chevron, .shieldai-btn-explain,
   .shieldai-phishing-btn-leave, .shieldai-phishing-btn-dismiss { transition-duration: 0s !important; }
 }
