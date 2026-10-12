@@ -10,6 +10,7 @@ from typing import Optional
 from eth_utils import keccak
 
 from adapters.evm_base import BURN_ADDRESSES
+from services.launch_discovery import SOURCES, LaunchDiscoveryError, _decode_log, _quantity
 from services.robinhood_assets import OFFICIAL_LIST_WAIT_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -33,14 +34,18 @@ BSCSCAN_DELAY = 0.25
 # still unanswered named as gaps. Its work after that wait is local.
 EXPLORER_RESULT_RESERVE_SECONDS = 0.5
 # Robinhood Chain launches ShieldBot's own discovery recorded (core.database discovered_launches). A
-# launchpad's creation event is the token's creation, so its block dates the token exactly. A pool's
-# creation (Uniswap V2 PairCreated, V4 Initialize) needs the token to exist already, so it bounds the
-# token's age from below; only a bound of at least the risk rules' 7-day line decides it.
-LAUNCH_CREATION_SOURCES = ('long', 'doppler', 'liquidity_launcher')
-LAUNCH_POOL_SOURCES = ('uniswap_v2', 'uniswap_v4')
-LAUNCH_LOWER_BOUND_MIN_DAYS = 7
+# launchpad's creation event (LONG, Doppler, Uniswap LiquidityLauncher) is the token's creation, so its
+# block dates the token exactly. A pool's creation (Uniswap V2 PairCreated, V4 Initialize) never calls
+# the token, so a pool can be made for a predicted address before the token exists: it dates nothing.
+# A row is dated from its earliest event across sources, so its creation event is proven from the
+# transaction's receipt before its age is used.
+LAUNCH_CREATION_SOURCES = {source.name: source for source in SOURCES if source.name in (
+    'long', 'doppler', 'liquidity_launcher',
+)}
 # The launch row is one primary-key read; past this the explorer path runs as before.
 LAUNCH_AGE_READ_TIMEOUT_SECONDS = 0.25
+# The receipt is one read-RPC request; past this the explorer path runs as before.
+LAUNCH_RECEIPT_TIMEOUT_SECONDS = 0.5
 
 # Words the source line reports, each attributed to a function the deployed code dispatches to
 SOURCE_PATTERNS = [
@@ -188,26 +193,59 @@ class ContractService:
         self.scam_db = scam_db
         # The database with ShieldBot's launch table; the container sets it.
         self.db = None
+        # Each token's proven creation block timestamp, by (chain, token): a creation never changes.
+        self._proven_creations = {}
 
-    async def _launch_age(self, address: str, chain_id: int) -> Optional[tuple]:
-        """(age in days, provider) from the launch table, or None where it does not decide the age:
-        no row, a pool younger than LAUNCH_LOWER_BOUND_MIN_DAYS, or a read that failed or was slow."""
+    async def _launch_age(self, address: str, chain_id: int) -> Optional[int]:
+        """The token's age in days from a launchpad creation event in the launch table, proven by the
+        receipt of the row's transaction; None otherwise (no row, a pool row, an unproven row, or a
+        read that failed or was slow), and the explorer path runs as before."""
+        key = (chain_id, address.lower())
+        created_at = self._proven_creations.get(key)
+        if created_at is None:
+            created_at = await self._proven_creation(address, chain_id)
+            if created_at is None:
+                return None
+            self._proven_creations[key] = created_at
+        created = datetime.fromtimestamp(created_at, tz=timezone.utc)
+        # The same day count as an explorer creation date (adapters.evm_base _date_creation).
+        return (datetime.now(timezone.utc) - created).days
+
+    async def _proven_creation(self, address: str, chain_id: int) -> Optional[int]:
+        """The row's block timestamp when the receipt of its transaction, in its block, holds a
+        launchpad's creation event for this token, read where discovery reads it."""
         try:
             launch = await asyncio.wait_for(
                 self.db.get_launch(chain_id, address), LAUNCH_AGE_READ_TIMEOUT_SECONDS,
             )
+            if launch is None or launch['source'] not in LAUNCH_CREATION_SOURCES:
+                return None
+            receipt = await asyncio.wait_for(
+                self.web3_client.get_transaction_receipt(launch['tx_hash'], chain_id=chain_id),
+                LAUNCH_RECEIPT_TIMEOUT_SECONDS,
+            )
         except Exception as e:
-            logger.warning("Launch table read failed for %s: %s", address, type(e).__name__)
+            logger.warning("Launch creation could not be read for %s: %s", address, type(e).__name__)
             return None
-        if launch is None:
+        block = launch['block_number']
+        try:
+            if not isinstance(receipt, dict) or _quantity(receipt.get('blockNumber')) != block:
+                return None
+            logs = receipt.get('logs')
+            # Only a launchpad's own creation event counts: its emitter, its topic, and the token where
+            # discovery reads it. Other logs in the transaction (pools, positions) also name the token.
+            # A LONG launch goes through Doppler, so either launchpad's event proves the creation.
+            for log in logs if isinstance(logs, list) else ():
+                for source in LAUNCH_CREATION_SOURCES.values():
+                    try:
+                        tokens, _ = _decode_log(source, log, block, block)
+                    except LaunchDiscoveryError:
+                        continue
+                    if address.lower() in tokens:
+                        return launch['block_timestamp']
+        except LaunchDiscoveryError:
             return None
-        created = datetime.fromtimestamp(launch['block_timestamp'], tz=timezone.utc)
-        # The same day count as an explorer creation date (adapters.evm_base _date_creation).
-        age = (datetime.now(timezone.utc) - created).days
-        if launch['source'] in LAUNCH_CREATION_SOURCES:
-            return age, 'launch_table'
-        if launch['source'] in LAUNCH_POOL_SOURCES and age >= LAUNCH_LOWER_BOUND_MIN_DAYS:
-            return age, 'launch_table_lower_bound'
+        logger.warning("Launch creation of %s not in its transaction's receipt", address)
         return None
 
     async def fetch_contract_data(
@@ -293,8 +331,8 @@ class ContractService:
                 launch = await self._launch_age(address, chain_id)
             sourcify = None
             if launch is not None:
-                results['contract_age_days'], provider = launch
-                results['field_providers'] = {'contract_age_days': provider}
+                results['contract_age_days'] = launch
+                results['field_providers'] = {'contract_age_days': 'launch_table'}
                 sourcify = start(self.web3_client.is_sourcify_verified(address, chain_id=chain_id))
 
             # Verification + source code, and contract age. Below this call both lookups are shielded

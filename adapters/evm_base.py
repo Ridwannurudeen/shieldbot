@@ -226,6 +226,16 @@ class EvmAdapter(ChainAdapter):
             logger.error("[%s] Error checking if contract: %s", self._chain_name, type(e).__name__)
             return None
 
+    async def get_transaction_receipt(self, tx_hash: str) -> Optional[dict]:
+        """The transaction's receipt as the node sent it (hex quantities, raw logs), from the read RPC;
+        None when the node has none. One request, not retried."""
+        response = await self._call_with_retry(
+            self.w3.provider.make_request, 'eth_getTransactionReceipt', [tx_hash], retries=1,
+        )
+        if 'error' in response:
+            raise ValueError(response['error'])
+        return response.get('result')
+
     async def get_bytecode(self, address: str) -> Optional[str]:
         try:
             code = await self._call_with_retry(self.w3.eth.get_code, Web3.to_checksum_address(address))

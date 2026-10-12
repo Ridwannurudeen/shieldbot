@@ -134,6 +134,9 @@ class Web3Client:
     ) -> Tuple[Optional[bool], Optional[str]]:
         return await self._get_adapter(chain_id).is_verified_contract(address, code=code)
 
+    async def get_transaction_receipt(self, tx_hash: str, chain_id: int = 56) -> Optional[Dict]:
+        return await self._get_adapter(chain_id).get_transaction_receipt(tx_hash)
+
     async def is_sourcify_verified(self, address: str, chain_id: int = 56) -> Tuple[Optional[bool], Optional[str]]:
         """Sourcify's verification alone, without the chain's explorer."""
         return await self._get_adapter(chain_id)._sourcify_verification(address)
