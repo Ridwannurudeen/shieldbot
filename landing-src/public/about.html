@@ -248,6 +248,15 @@
     .compare-card.shield { border-color: var(--hairline-strong); }
     .compare-card ul { margin-left: 16px; }
     .compare-card li { font-size: 13px; margin-bottom: 6px; }
+    .census-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px 24px;
+      margin: 16px 0;
+    }
+    .census-grid > div { border-top: 1px solid var(--hairline); padding-top: 12px; }
+    .census-grid dt { color: var(--ink); font-size: 32px; font-weight: 500; line-height: 1; }
+    .census-grid dd { margin: 10px 0 0; color: var(--secondary); font-size: 14px; }
     .error-page { max-width: 680px; min-height: 360px; }
     .error-page .hero { margin-bottom: 0; }
     .error-state { margin-top: 24px; }
@@ -494,6 +503,27 @@
     <p>Testing across every wallet is still in progress.</p>
     <p>Chains supported for scans: Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Version 3.1.0 of the browser extension, on the Chrome Web Store, asks the wallet which chain it is on and sends Robinhood Chain requests to the API for analysis. It has been tested with Rabby; MetaMask testing is still outstanding.</p>
     <p>The hook is injected into the page's MAIN world before any DApp code runs — contracts cannot detect or remove it from within a transaction.</p>
+
+    <h2>What we saw on the chain</h2>
+    <dl class="census-grid">
+      <div>
+        <dt>68,666</dt>
+        <dd>new tokens first seen in a liquidity pool</dd>
+      </div>
+      <div>
+        <dt>~8,000</dt>
+        <dd>new tokens a day</dd>
+      </div>
+      <div>
+        <dt>28.76%</dt>
+        <dd>of mature tokens met a minimal liquidity or activity bar</dd>
+      </div>
+      <div>
+        <dt>49%</dt>
+        <dd>could not be resolved either way and are reported as unknown</dd>
+      </div>
+    </dl>
+    <p>Observed from 14 to 22 September 2026, about 8.6 days. These figures describe the chain, not ShieldBot scans. A token is counted when it first appears in a liquidity pool, not when it is deployed, and missing evidence is reported as unknown, never as zero. <a href="https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/census-4663.md" target="_blank" rel="noopener noreferrer">Method and limits</a></p>
 
   </main>
 
