@@ -9,7 +9,7 @@ from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
 from services.counterparty_service import (
     UnavailableCounterparty, approval_grant, judge_delegate, judge_spender, within_timeout,
 )
-from utils.calldata_decoder import CalldataDecoder, UNLIMITED_THRESHOLD
+from utils.calldata_decoder import CalldataDecoder
 
 logger = logging.getLogger(__name__)
 

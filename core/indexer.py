@@ -9,7 +9,7 @@ from typing import Optional
 from adapters.evm_base import _get_explorer_backend
 from core.telegram_alert import send_alert
 from core.telegram_formatter import escape_markdown
-from services.explorer_service import _is_address, explorer_service
+from services.explorer_service import BACKGROUND, _is_address, explorer_service
 from utils.web3_client import UnsupportedChainError
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,7 @@ class DeployerIndexer:
 
     async def _worker(self):
         """Process queue items."""
+        BACKGROUND.set(True)
         while self._running:
             try:
                 address, chain_id = await asyncio.wait_for(

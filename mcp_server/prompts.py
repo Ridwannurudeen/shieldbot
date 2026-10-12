@@ -84,7 +84,7 @@ def _render_security_analysis(args: Dict[str, str]) -> Dict:
     if tx_hash:
         target_description += f"Transaction: {tx_hash}\n"
         tool_calls.append(
-            f'3. If you have the transaction details, use `simulate_transaction` with its chain_id to check for hidden asset changes.'
+            '3. If you have the transaction details, use `simulate_transaction` with its chain_id to check for hidden asset changes.'
         )
 
     if not target_description:

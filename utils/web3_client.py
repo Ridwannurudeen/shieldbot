@@ -143,7 +143,7 @@ class Web3Client:
     async def get_token_info(self, address: str, chain_id: int = 56) -> Dict:
         return await self._get_adapter(chain_id).get_token_info(address)
 
-    async def can_transfer_token(self, address: str, chain_id: int = 56) -> bool:
+    async def can_transfer_token(self, address: str, chain_id: int = 56) -> Optional[bool]:
         w3 = self.get_web3(chain_id)
 
         def read_decimals():
@@ -156,7 +156,9 @@ class Web3Client:
             await asyncio.get_running_loop().run_in_executor(None, read_decimals)
             return True
         except Exception:
-            return False
+            # A revert (decimals() is optional in EIP-20), a timeout or a 429 says nothing about whether the
+            # token can be bought or sold.
+            return None
 
     async def get_ownership_info(self, address: str, chain_id: int = 56) -> Dict:
         return await self._get_adapter(chain_id).get_ownership_info(address)

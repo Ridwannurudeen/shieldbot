@@ -4,11 +4,10 @@ Covers SSE connection, tool listing/execution, resources, prompts,
 auth, connection limits, and JSON-RPC error handling.
 """
 
-import asyncio
 import json
 import pytest
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient

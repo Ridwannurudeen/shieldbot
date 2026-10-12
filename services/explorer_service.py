@@ -4,6 +4,9 @@ import asyncio
 import os
 import re
 import time
+from collections import deque
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -12,14 +15,16 @@ from cachetools import TLRUCache
 
 from core.circuit_breaker import CircuitOpenError, provider_breakers
 from core.unknown_ledger import unknown_ledger
+from utils.chain_info import CHAIN_INFO
 
 
 # Public Blockscout instances that answer without an API key; other chains go through the keyed
 # PRO gateway. optimism.blockscout.com redirects here, and requests do not follow redirects, so the
 # map names the final host. scripts/check_blockscout_instances.py notices when an instance moves.
 BLOCKSCOUT_INSTANCES = {
-    8453: "https://base.blockscout.com",
-    10: "https://explorer.optimism.io",
+    chain_id: info["blockscout_instance"]
+    for chain_id, info in CHAIN_INFO.items()
+    if info["blockscout_instance"] is not None
 }
 
 
@@ -60,6 +65,77 @@ def _redact_api_key(value, api_key: str):
     return value
 
 
+# True in background work (the deployer indexer, the hunter's sweep, the launch watch), whose
+# Blockscout lookups wait behind any a user is waiting on.
+BACKGROUND: ContextVar[bool] = ContextVar("explorer_background", default=False)
+# After this many turns in a row to user lookups, the oldest waiting background lookup gets one, so
+# a stream of scans cannot starve the indexer, the hunter or the launch watch.
+USER_TURNS_BEFORE_BACKGROUND = 4
+
+
+class _Lane:
+    """One Blockscout request at a time, like the lock it replaces. When it frees, a waiting lookup
+    a user is waiting on goes before waiting background ones, each kind in arrival order, except
+    that every USER_TURNS_BEFORE_BACKGROUND user turns in a row a background one goes next."""
+
+    def __init__(self):
+        self._held = False
+        self._users: deque = deque()
+        self._background: deque = deque()
+        self._waiting = {}
+        self._user_turns = 0
+
+    @asynccontextmanager
+    async def hold(self, background: bool, key=None):
+        if self._held:
+            turn = asyncio.get_running_loop().create_future()
+            queue = self._background if background else self._users
+            queue.append(turn)
+            self._waiting[turn] = key
+            try:
+                await turn
+            except asyncio.CancelledError:
+                for queue in (self._users, self._background):
+                    try:
+                        queue.remove(turn)
+                    except ValueError:
+                        continue
+                    break
+                self._waiting.pop(turn, None)
+                # Handed the lane as it was cancelled: pass it on.
+                if turn.done() and not turn.cancelled():
+                    self._release()
+                raise
+            else:
+                self._waiting.pop(turn, None)
+        else:
+            self._held = True
+        try:
+            yield
+        finally:
+            self._release()
+
+    def promote(self, key):
+        for turn in self._background:
+            if self._waiting.get(turn) == key and not turn.done():
+                self._background.remove(turn)
+                self._users.append(turn)
+                return
+
+    def _release(self):
+        queues = (self._users, self._background)
+        if self._user_turns >= USER_TURNS_BEFORE_BACKGROUND:
+            queues = (self._background, self._users)
+        for queue in queues:
+            while queue:
+                turn = queue.popleft()
+                if not turn.done():
+                    self._user_turns = self._user_turns + 1 if queue is self._users else 0
+                    turn.set_result(None)
+                    return
+        self._held = False
+
+
 class ExplorerService:
     """Cache provider responses (five minutes, a failure 30 seconds); pace each Blockscout host.
 
@@ -69,19 +145,20 @@ class ExplorerService:
 
     def __init__(self):
         self._cache = TLRUCache(maxsize=2048, ttu=_result_ttu)
-        self._blockscout_locks: dict[str, asyncio.Lock] = {}
+        self._blockscout_lanes: dict[str, _Lane] = {}
         self._inflight: dict[tuple, asyncio.Task] = {}
         self._last_request: dict[str, float] = {}
 
     async def _request(
-        self, provider: str, url: str, params: dict, chain_id: int
+        self, provider: str, url: str, params: dict, chain_id: int, cache_key=None
     ) -> ExplorerResult:
-        cache_key = (
-            url,
-            tuple(
-                sorted((key, value) for key, value in params.items() if key != "apikey")
-            ),
-        )
+        if cache_key is None:
+            cache_key = (
+                url,
+                tuple(
+                    sorted((key, value) for key, value in params.items() if key != "apikey")
+                ),
+            )
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
@@ -152,14 +229,14 @@ class ExplorerService:
         # cached nor shared, so lookups resume as soon as it closes, and it counts as failed.
         try:
             if provider == "blockscout":
-                lock = self._blockscout_locks.get(host)
-                if lock is None:
-                    lock = self._blockscout_locks[host] = asyncio.Lock()
-                async with lock:
+                lane = self._blockscout_lanes.get(host)
+                if lane is None:
+                    lane = self._blockscout_lanes[host] = _Lane()
+                async with lane.hold(BACKGROUND.get(), cache_key):
                     cached = self._cache.get(cache_key)
                     if cached is not None:
                         return cached
-                    # Inside the host's lock, so a lookup queued behind the one that opened the
+                    # Inside the host's lane, so a lookup queued behind the one that opened the
                     # breaker sends nothing.
                     provider_breakers.check(provider, chain_id)
                     return self._keep(provider, chain_id, cache_key, await fetch())
@@ -209,17 +286,43 @@ class ExplorerService:
             return ExplorerResult(
                 "unknown", reason="BLOCKSCOUT_API_KEY is missing", provider="blockscout"
             )
+        url, request_params, cache_key = self._blockscout_request_details(
+            path, chain_id, params
+        )
+        return await self._request(
+            "blockscout", url, request_params, chain_id, cache_key
+        )
+
+    def _blockscout_request_details(self, path, chain_id, params=None):
         instance = BLOCKSCOUT_INSTANCES.get(chain_id)
         if instance:
-            return await self._request(
-                "blockscout", f"{instance}/api/v2/{path}", params or {}, chain_id
-            )
-        return await self._request(
-            "blockscout",
-            f"https://api.blockscout.com/{chain_id}/api/v2/{path}",
-            {**(params or {}), "apikey": os.getenv("BLOCKSCOUT_API_KEY")},
-            chain_id,
+            url = f"{instance}/api/v2/{path}"
+            request_params = params or {}
+        else:
+            url = f"https://api.blockscout.com/{chain_id}/api/v2/{path}"
+            request_params = {**(params or {}), "apikey": os.getenv("BLOCKSCOUT_API_KEY")}
+        cache_key = (
+            url,
+            tuple(
+                sorted(
+                    (key, value)
+                    for key, value in request_params.items()
+                    if key != "apikey"
+                )
+            ),
         )
+        return url, request_params, cache_key
+
+    def _contract_creation_request_details(self, address, chain_id):
+        return self._blockscout_request_details(f"addresses/{address.lower()}", chain_id)
+
+    def promote_contract_creation_lookup(self, address: str, chain_id: int) -> None:
+        if not _is_address(address):
+            return
+        url, _, cache_key = self._contract_creation_request_details(address, chain_id)
+        lane = self._blockscout_lanes.get(urlsplit(url).hostname)
+        if lane is not None:
+            lane.promote(cache_key)
 
     async def get_sourcify_verification(
         self, address: str, chain_id: int
@@ -358,7 +461,12 @@ class ExplorerService:
     ) -> ExplorerResult:
         if not _is_address(address):
             return ExplorerResult("unknown", reason="Invalid address")
-        result = await self._blockscout(f"addresses/{address.lower()}", chain_id)
+        if not self.can_reach_blockscout(chain_id):
+            return ExplorerResult(
+                "unknown", reason="BLOCKSCOUT_API_KEY is missing", provider="blockscout"
+            )
+        url, params, cache_key = self._contract_creation_request_details(address, chain_id)
+        result = await self._request("blockscout", url, params, chain_id, cache_key)
         if result.status == "unknown":
             return result
         data = result.data

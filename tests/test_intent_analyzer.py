@@ -246,7 +246,6 @@ async def test_permit_calldata_judges_the_spender_not_the_owner(calldata, floor)
 
 @pytest.mark.asyncio
 async def test_unknown_spender_code_is_unknown_without_a_floor():
-    from core.analyzer import AnalyzerResult
     from core.risk_engine import RiskEngine
 
     reason = 'Spender facts unknown: code (RPC)'

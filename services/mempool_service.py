@@ -13,12 +13,15 @@ import aiohttp
 from web3 import Web3
 
 from services.counterparty_service import UnavailableCounterparty
+from utils.chain_info import CHAIN_INFO
 
 logger = logging.getLogger(__name__)
 
 # Chains whose RPC serves a public mempool through txpool_content. Base, Arbitrum, Optimism and
 # Robinhood Chain reject txpool calls; their sequencers keep no public mempool to watch.
-PENDING_TRANSACTION_CHAINS = frozenset({56, 1, 137, 204})
+PENDING_TRANSACTION_CHAINS = frozenset(
+    chain_id for chain_id, info in CHAIN_INFO.items() if info["pending_transactions"]
+)
 
 
 def supports_pending_transactions(chain_id: int) -> bool:

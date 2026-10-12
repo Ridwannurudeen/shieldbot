@@ -4,12 +4,9 @@ Links deployers across chains, detects coordinated scam campaigns by clustering
 contracts based on shared funders, deployers and temporal patterns.
 """
 
-import asyncio
 import json
 import logging
-import time
-from collections import defaultdict
-from typing import Dict, List, Optional, Set
+from typing import Dict, List
 
 from core.database import _lift_scan_metadata
 

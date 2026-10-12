@@ -176,7 +176,7 @@ async def _handle_tools_call(container, params: Dict, key_info: Dict) -> Dict:
             ],
             "isError": True,
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("Tool execution error: %s", tool_name)
         return {
             "content": [
@@ -292,7 +292,7 @@ async def process_jsonrpc(container, body: Dict, key_info: Dict) -> Optional[Dic
         return _jsonrpc_result(request_id, result)
     except ValueError as exc:
         return _jsonrpc_error(request_id, INVALID_PARAMS, str(exc))
-    except Exception as exc:
+    except Exception:
         logger.exception("JSON-RPC handler error for method %s", method)
         return _jsonrpc_error(request_id, INTERNAL_ERROR, "Internal server error")
 

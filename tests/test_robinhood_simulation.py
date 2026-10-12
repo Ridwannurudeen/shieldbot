@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import dataclasses
 import json
 import logging
 import re
@@ -17,8 +18,11 @@ from analyzers.honeypot import HoneypotAnalyzer
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert
 from core.risk_engine import RiskEngine
+from core.unknown_ledger import UnknownLedger
+import services.robinhood_simulation as robinhood_simulation
 from services.honeypot_service import HoneypotService
 from services.robinhood_simulation import (
+    ERROR_STRING,
     HOOKLESS_V4_FEE_TICK_SPACINGS,
     LOG_WINDOW_BLOCKS,
     MAX_LOG_WINDOWS,
@@ -34,6 +38,7 @@ from services.robinhood_simulation import (
     build_simulation_request,
     call_labels,
     evaluate_simulation,
+    _error_string,
     tax_percent,
 )
 from utils.scam_db import ScamDatabase
@@ -256,6 +261,25 @@ def test_unattributed_sell_revert_on_a_hookless_usdg_pool_stays_undecided():
     assert "sell reverted with an unattributed error" in outcome["reason"]
 
 
+def test_error_string_with_invalid_utf8_is_unreadable():
+    data = ERROR_STRING + encode(["bytes"], [b"\xff\xfe\xfdbad"])
+    assert _error_string(data) is None
+
+
+def test_invalid_utf8_plain_transfer_revert_does_not_crash_sell_trap_attribution():
+    fixture = failed_sell(
+        load("v2_honeypot_sell_reverts"), error_string("TransferHelper: TRANSFER_FROM_FAILED")
+    )
+    invalid_utf8 = "0x" + (ERROR_STRING + encode(["bytes"], [b"\xff\xfe\xfdbad"])).hex()
+    make_revert(calls_by_label(fixture)["transfer"], invalid_utf8)
+
+    outcome = evaluate(fixture)
+
+    assert outcome["can_sell"] is False
+    assert outcome["is_honeypot"] is True
+    assert "plain transfer to a fresh address also reverted" in outcome["reason"]
+
+
 def test_every_route_has_a_token_refused_string():
     assert set(TOKEN_REFUSED) == set(ROUTES)
 
@@ -366,6 +390,7 @@ def test_a_duplicated_sell_swap_event_leaves_the_sell_tax_unmeasured():
     outcome = evaluate(fixture)
     assert outcome["can_sell"] is True
     assert outcome["sell_tax"] is None
+    assert outcome["simulation_failed"] is False
     assert "sell tax unmeasurable" in outcome["reason"]
 
 
@@ -496,6 +521,8 @@ def test_untraced_native_transfers_make_the_sell_unknown_instead_of_a_trap(name)
     assert outcome["can_sell"] is None
     assert outcome["is_honeypot"] is None
     assert "tracing unavailable" in outcome["reason"]
+    # The RPC ignored traceTransfers: a failure of the RPC, not something the token did.
+    assert (outcome["rpc_failed"], outcome["simulation_failed"]) == (True, False)
 
 
 def test_a_reverting_sell_is_still_a_honeypot_without_transfer_tracing():
@@ -669,6 +696,7 @@ def test_v4_sell_without_the_router_swap_event_has_unknown_sell_tax():
     outcome = evaluate(fixture)
     assert outcome["sell_tax"] is None
     assert outcome["can_sell"] is True
+    assert outcome["simulation_failed"] is False
     assert "sell tax unmeasurable" in outcome["reason"]
 
 
@@ -712,6 +740,7 @@ def test_inconsistent_pool_balances_leave_the_tax_unknown():
     outcome = evaluate(fixture)
     assert outcome["sell_tax"] is None
     assert outcome["can_sell"] is True
+    assert outcome["simulation_failed"] is False
 
 
 @pytest.mark.parametrize("result", [None, [], [{}], [{"number": "0x1", "calls": []}], "bad"])
@@ -722,6 +751,7 @@ def test_malformed_simulation_output_is_unknown(result):
     )
     assert all(outcome[field] is None for field in FIELDS)
     assert "malformed" in outcome["reason"].lower()
+    assert (outcome["rpc_failed"], outcome["simulation_failed"]) == (True, False)
 
 
 # --- tax arithmetic -------------------------------------------------------------------------
@@ -850,6 +880,55 @@ def test_failed_pool_does_not_mask_a_measured_high_tax():
     assert result["sell_tax"] == 80.0
 
 
+def test_a_pool_the_rpc_could_not_simulate_leaves_a_benign_pool_undecided_without_a_failed_simulation():
+    benign = outcome(can_buy=True, can_sell=True, is_honeypot=False, buy_tax=0.0, sell_tax=0.0)
+    unsimulated = outcome(pool="0xrpc", rpc_failed=True, reason="eth_simulateV1 failed (JSON-RPC error -32603)")
+    result = aggregate_outcomes([benign, unsimulated], [])
+    # The pool nobody observed may be the one that traps, so only the benign pool's buy stands.
+    assert {field: result[field] for field in FIELDS} == {
+        "is_honeypot": None,
+        "buy_tax": None,
+        "sell_tax": None,
+        "can_buy": True,
+        "can_sell": None,
+    }
+    assert result["rpc_failed"] is True
+    assert "simulation_failed" not in result
+
+
+def test_a_pool_the_rpc_could_not_simulate_masks_neither_a_proven_trap_nor_a_measured_tax():
+    unsimulated = outcome(pool="0xrpc", rpc_failed=True, reason="RPC HTTP 503")
+    trap = outcome(can_buy=True, can_sell=False, is_honeypot=True, buy_tax=0.0)
+    result = aggregate_outcomes([trap, unsimulated], [])
+    # The trap stands; its zero buy tax does not, since the other pool's may be higher.
+    assert (result["is_honeypot"], result["can_sell"], result["buy_tax"]) == (True, False, None)
+    taxed = outcome(can_buy=True, can_sell=True, is_honeypot=False, buy_tax=12.0, sell_tax=80.0)
+    result = aggregate_outcomes([taxed, unsimulated], [])
+    assert (result["buy_tax"], result["sell_tax"]) == (12.0, 80.0)
+    assert (result["is_honeypot"], result["can_sell"]) == (None, None)
+
+
+def test_a_sell_with_an_unmeasured_tax_keeps_another_pools_zero_tax_from_standing_for_the_token():
+    measured = outcome(can_buy=True, can_sell=True, is_honeypot=False, buy_tax=0.0, sell_tax=0.0)
+    unmeasured = outcome(
+        pool="0xunmeasured",
+        can_buy=True,
+        can_sell=True,
+        is_honeypot=False,
+        buy_tax=0.0,
+        reason="buy and sell succeeded: sold 1 token units for 1 wei ETH; sell tax unmeasurable",
+    )
+    result = aggregate_outcomes([measured, unmeasured], [])
+    assert {field: result[field] for field in FIELDS} == {
+        "is_honeypot": False,
+        "buy_tax": 0.0,
+        "sell_tax": None,
+        "can_buy": True,
+        "can_sell": True,
+    }
+    assert "simulation_failed" not in result and "rpc_failed" not in result
+
+
 def test_all_resolved_benign_pools_remain_complete():
     result = aggregate_outcomes(
         [
@@ -890,6 +969,42 @@ async def test_failed_pool_stays_unknown_through_honeypot_risk_and_extension():
     extension = format_extension_alert(risk)
     assert data["status"] == analyzed.data["status"] == risk["status"] == "unknown"
     assert data["buy_tax"] is data["sell_tax"] is None
+    assert risk["risk_level"] != "LOW"
+    assert extension["risk_classification"] != "SAFE"
+
+
+@pytest.mark.asyncio
+async def test_a_pool_the_rpc_could_not_simulate_stays_unknown_through_risk_and_extension_without_the_failure_score():
+    from adapters.robinhood import RobinhoodAdapter
+
+    simulation = aggregate_outcomes(
+        [
+            outcome(can_buy=True, can_sell=True, is_honeypot=False, buy_tax=0.0, sell_tax=0.0),
+            outcome(pool="0xrpc", rpc_failed=True, reason="RPC HTTP 503"),
+        ],
+        [],
+    )
+    simulation["observed_at"] = 1000
+    with patch("adapters.evm_base.Web3"):
+        adapter = RobinhoodAdapter()
+    adapter._simulator.simulate = AsyncMock(return_value=simulation)
+    honeypot = await adapter.check_honeypot(TOKEN)
+    taxes = await adapter.get_tax_info(TOKEN)
+    assert honeypot["status"] == taxes["status"] == "unknown"
+    assert "simulation_failed" not in honeypot and "simulation_failed" not in taxes
+    service = HoneypotService(client_with(adapter))
+    unavailable = AsyncMock(return_value={"status": "unknown", "reason": "GoPlus has no data", "data": {}})
+    with patch.object(ScamDatabase, "fetch_token_security", new=unavailable):
+        data = await service.fetch_honeypot_data(TOKEN, chain_id=4663)
+        analyzed = await HoneypotAnalyzer(service).analyze(AnalysisContext(TOKEN, chain_id=4663))
+    # At full weight: at its own 0.15 the missing weight alone would keep the verdict from LOW.
+    risk = RiskEngine().compute_from_results([dataclasses.replace(analyzed, weight=1.0)])
+    extension = format_extension_alert(risk)
+    assert data["status"] == analyzed.data["status"] == risk["status"] == "unknown"
+    assert data["is_honeypot"] is data["can_sell"] is data["buy_tax"] is data["sell_tax"] is None
+    assert data["simulation_failed"] is False
+    assert analyzed.score == 0
+    assert not any("treat as suspicious" in flag for flag in analyzed.flags)
     assert risk["risk_level"] != "LOW"
     assert extension["risk_classification"] != "SAFE"
 
@@ -966,6 +1081,21 @@ async def test_malformed_rpc_envelope_is_unavailable(payload):
     with pytest.raises(SimulationUnavailable, match="Malformed"):
         await simulator._request(
             http_session(http_response(200, payload)), [("eth_blockNumber", [])]
+        )
+
+
+@pytest.mark.asyncio
+async def test_batch_response_with_a_boolean_id_is_malformed():
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    rows = [
+        {"jsonrpc": "2.0", "id": 0, "result": "0x0"},
+        {"jsonrpc": "2.0", "id": True, "result": "0x1"},
+        {"jsonrpc": "2.0", "id": 2, "result": "0x2"},
+    ]
+    with pytest.raises(SimulationUnavailable, match="Malformed RPC response"):
+        await simulator._request(
+            http_session(http_response(200, rows)),
+            [("eth_blockNumber", []), ("eth_chainId", []), ("eth_getBalance", [])],
         )
 
 
@@ -1047,6 +1177,11 @@ def doppler_state(key=None, numeraire=ZERO, status=0):
 def pool_state_slot(key):
     pool_id = keccak(encode(["address", "address", "uint24", "int24", "address"], list(key)))
     return "0x" + keccak(pool_id + (6).to_bytes(32, "big")).hex()
+
+
+def hookless_pool_slots(key, liquidity):
+    slot = pool_state_slot(key)
+    return {slot[2:]: 1 << 100, f"{(int(slot, 16) + 3):064x}": liquidity}
 
 
 class FakeRpc:
@@ -1159,6 +1294,8 @@ def rpc_for(fixture, **overrides):
     }
     if fixture["route"] == "v4-native":
         options["slot0"] = 1 << 100
+        state_slot = pool_state_slot(tuple(fixture["key"]))
+        options["pool_slots"] = {f"{(int(state_slot, 16) + 3):064x}": 1}
     elif fixture["route"] == "v4-doppler":
         options["state"] = doppler_state(tuple(fixture["key"]), fixture["numeraire"], status=2)
     elif fixture["route"] == "v4-usdg":
@@ -1207,15 +1344,170 @@ async def test_liquidity_launcher_lookup_reads_the_derived_pool_slot():
         if method == "eth_call"
         and params[0]["data"].startswith("0x" + selector("extsload(bytes32)").hex())
     ]
-    assert extsload[0] == (
-        "0x" + selector("extsload(bytes32)").hex() + pool_state_slot(tuple(fixture["key"]))[2:]
-    )
-    assert extsload[1:] == [
-        "0x" + selector("extsload(bytes32)").hex()
-        + f"{(int(pool_state_slot((USDG, fixture['token'], fee, spacing, ZERO)), 16) + offset):064x}"
+    keys = [
+        (ZERO, fixture["token"], fee, spacing, ZERO)
         for fee, spacing in HOOKLESS_V4_FEE_TICK_SPACINGS
+    ]
+    keys += [
+        (*sorted((fixture["token"], robinhood_simulation.WETH)), fee, spacing, ZERO)
+        for fee, spacing in HOOKLESS_V4_FEE_TICK_SPACINGS
+    ]
+    keys += [
+        (*sorted((fixture["token"], USDG)), fee, spacing, ZERO)
+        for fee, spacing in HOOKLESS_V4_FEE_TICK_SPACINGS
+    ]
+    assert extsload == [
+        "0x" + selector("extsload(bytes32)").hex()
+        + f"{(int(pool_state_slot(key), 16) + offset):064x}"
+        for key in keys
         for offset in (0, 3)
     ]
+    assert len(rpc.requests[0]) == 33
+
+
+@pytest.mark.asyncio
+async def test_direct_hookless_native_pool_is_found_without_log_scan():
+    fixture = load("v4_native_liquidity_launcher")
+    token = fixture["token"]
+    key = (ZERO, token, 3000, 60, ZERO)
+    pool = Pool("v4-native", ZERO, key=key)
+    request = build_simulation_request(
+        pool, token, fixture["amount"], fixture["buyer"], fixture["receiver"]
+    )
+    rpc = FakeRpc(
+        token,
+        fixture["amount"] * 1_000_000,
+        pool_slots=hookless_pool_slots(key, 100),
+        simulations=[([request, "latest"], {"error": {"code": -32000, "message": "rejected"}})],
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(token)
+
+    pool_id = keccak(encode(["address", "address", "uint24", "int24", "address"], list(key)))
+    methods = [method for calls in rpc.requests for method, _ in calls]
+    assert f"v4-native pool 0x{pool_id.hex()}" in result["reason"]
+    assert methods.count("eth_simulateV1") == 1
+    assert "eth_getLogs" not in methods
+    assert rpc.simulations == []
+
+
+@pytest.mark.asyncio
+async def test_direct_hookless_weth_pool_is_found_without_log_scan():
+    fixture = load("v4_weth_hookless")
+    token = fixture["token"]
+    weth = robinhood_simulation.WETH
+    key = (*sorted((token, weth)), 2500, 25, ZERO)
+    pool = Pool("v4-weth", weth, key=key)
+    request = build_simulation_request(
+        pool, token, fixture["amount"], fixture["buyer"], fixture["receiver"]
+    )
+    rpc = FakeRpc(
+        token,
+        fixture["amount"] * 1_000_000,
+        pool_slots=hookless_pool_slots(key, 100),
+        simulations=[([request, "latest"], {"error": {"code": -32000, "message": "rejected"}})],
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(token)
+
+    pool_id = keccak(encode(["address", "address", "uint24", "int24", "address"], list(key)))
+    methods = [method for calls in rpc.requests for method, _ in calls]
+    assert f"v4-weth pool 0x{pool_id.hex()}" in result["reason"]
+    assert methods.count("eth_simulateV1") == 1
+    assert "eth_getLogs" not in methods
+    assert rpc.simulations == []
+
+
+@pytest.mark.asyncio
+async def test_initialized_empty_native_pool_is_simulated_when_no_other_pool_is_found():
+    fixture = load("v4_native_liquidity_launcher")
+    token = fixture["token"]
+    key = tuple(fixture["key"])
+    rpc = rpc_for(fixture, pool_slots=hookless_pool_slots(key, 0))
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(token)
+
+    pool_id = keccak(encode(["address", "address", "uint24", "int24", "address"], list(key)))
+    simulation_calls = [
+        params for calls in rpc.requests for method, params in calls if method == "eth_simulateV1"
+    ]
+    expected_request = replay(fixture)[0][0]
+    assert f"hookless v4-native pool 0x{pool_id.hex()} initialized but empty" in result["reason"]
+    assert "No supported pool found" not in result["reason"]
+    assert simulation_calls == [[expected_request, hex(rpc.head)]]
+
+
+@pytest.mark.asyncio
+async def test_pool_cap_keeps_route_diversity_before_a_second_native_pool():
+    fixture = load("v4_native_liquidity_launcher")
+    token, amount = fixture["token"], fixture["amount"]
+    tiers = ((100, 1, 100), (500, 10, 500), (2500, 25, 300))
+    slots = {}
+    for fee, spacing, liquidity in tiers:
+        key = (ZERO, token, fee, spacing, ZERO)
+        slots.update(hookless_pool_slots(key, liquidity))
+    pair = "0x" + "55" * 20
+    selected = [
+        Pool("v4-native", ZERO, key=(ZERO, token, 500, 10, ZERO)),
+        Pool("v2", ZERO, pair=pair),
+        Pool("v4-native", ZERO, key=(ZERO, token, 2500, 25, ZERO)),
+    ]
+    simulations = [
+        (
+            [
+                build_simulation_request(
+                    pool, token, amount, fixture["buyer"], fixture["receiver"]
+                ),
+                "latest",
+            ],
+            {"error": {"code": -32000, "message": "rejected"}},
+        )
+        for pool in selected
+    ]
+    rpc = FakeRpc(
+        token,
+        amount * 1_000_000,
+        pair=pair,
+        reserves=(1, 1),
+        pool_slots=slots,
+        simulations=simulations,
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+
+    with fresh_addresses(fixture, fixture, fixture):
+        result = await simulator.simulate(token)
+
+    native_ids = [
+        keccak(
+            encode(
+                ["address", "address", "uint24", "int24", "address"],
+                list(pool.key),
+            )
+        ).hex()
+        for pool in (selected[0], selected[2])
+    ]
+    labels = [
+        f"v4-native pool 0x{native_ids[0]}",
+        f"v2 pool {pair}",
+        f"v4-native pool 0x{native_ids[1]}",
+    ]
+    methods = [method for calls in rpc.requests for method, _ in calls]
+    positions = [result["reason"].index(label) for label in labels]
+    assert positions == sorted(positions)
+    assert "1 more pool not simulated (cap of 3 pools)" in result["reason"]
+    assert methods.count("eth_simulateV1") == 3
+    assert "eth_getLogs" not in methods
+    assert rpc.simulations == []
 
 
 @pytest.mark.asyncio
@@ -1404,6 +1696,7 @@ async def test_every_found_pool_is_simulated_and_a_trap_pool_wins():
         native["amount"] * 1_000_000,
         pair=v2["pair"],
         reserves=(10**20, 10**27),
+        pool_slots=hookless_pool_slots(tuple(native["key"]), 1),
         slot0=1 << 100,
         simulations=[replay(native), replay(trap)],
     )
@@ -1419,6 +1712,56 @@ async def test_every_found_pool_is_simulated_and_a_trap_pool_wins():
     assert result["can_buy"] is True
     assert "TransferHelper: TRANSFER_FROM_FAILED" in result["reason"]
     assert "buy and sell succeeded" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_pool_evaluation_error_keeps_another_pools_trap(monkeypatch, caplog):
+    native = load("v4_native_liquidity_launcher")
+    v2 = load("v2_router02")
+    token = native["token"]
+    v2 = json.loads(json.dumps(v2).replace(v2["token"][2:], token[2:]))
+    v2["amount"] = native["amount"]
+    pair_swap_topic = "0x" + keccak(text="Swap(address,uint256,uint256,uint256,uint256,address)").hex()
+    set_uint(calls_by_label(v2)["delivered"], native["amount"])
+    (pair_swap,) = [
+        log for log in calls_by_label(v2)["buy"]["logs"] if log["topics"][0] == pair_swap_topic
+    ]
+    words = [pair_swap["data"][2 + 64 * index : 2 + 64 * (index + 1)] for index in range(4)]
+    words[3] = encode(["uint256"], [native["amount"]]).hex()
+    pair_swap["data"] = "0x" + "".join(words)
+    trap = failed_sell(v2, error_string("TransferHelper: TRANSFER_FROM_FAILED"))
+    rpc = FakeRpc(
+        token,
+        native["amount"] * 1_000_000,
+        pair=trap["pair"],
+        reserves=(10**20, 10**27),
+        pool_slots=hookless_pool_slots(tuple(native["key"]), 1),
+        slot0=1 << 100,
+        simulations=[replay(native), replay(trap)],
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    evaluate_pool = robinhood_simulation.evaluate_simulation
+
+    def evaluate_one(pool, *args, **kwargs):
+        if pool.route == "v4-native":
+            raise KeyError("details are not logged")
+        return evaluate_pool(pool, *args, **kwargs)
+
+    monkeypatch.setattr(robinhood_simulation, "evaluate_simulation", evaluate_one)
+    caplog.set_level(logging.ERROR, logger="services.robinhood_simulation")
+
+    with fresh_addresses(native, trap):
+        result = await simulator.simulate(token)
+
+    assert (result["is_honeypot"], result["can_sell"]) == (True, False)
+    assert result["simulation_failed"] is True
+    assert "rpc_failed" not in result
+    assert "Simulation result could not be evaluated (KeyError)" in result["reason"]
+    assert "details are not logged" not in caplog.text
+    assert [record.getMessage() for record in caplog.records] == [
+        "Robinhood simulation result could not be evaluated: KeyError"
+    ]
 
 
 @pytest.mark.asyncio
@@ -1624,7 +1967,8 @@ async def test_a_failed_follow_up_keeps_the_buy_evidence_and_stays_unknown():
     assert result["buy_tax"] == 12.0
     assert result["can_sell"] is None
     assert result["is_honeypot"] is None
-    assert result["simulation_failed"] is True
+    assert result["rpc_failed"] is True
+    assert "simulation_failed" not in result
     assert "not sizeable in one request" in result["reason"]
     assert "eth_simulateV1 failed" in result["reason"]
 
@@ -1717,6 +2061,28 @@ async def test_simulate_v1_unsupported_is_unknown():
         result = await simulator.simulate(fixture["token"])
     assert all(result[field] is None for field in FIELDS)
     assert "eth_simulateV1 unsupported" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_pool_the_rpc_could_not_simulate_is_unknown_scores_nothing_and_is_counted_failed(monkeypatch):
+    ledger = UnknownLedger()
+    monkeypatch.setattr("services.robinhood_simulation.unknown_ledger", ledger)
+    fixture = load("v2_router02")
+    request, _ = replay(fixture)
+    crashed = {"error": {"code": -32603, "message": "method handler crashed"}}
+    adapter = adapter_with(rpc_for(fixture, simulations=[(request, crashed)]))
+    service = HoneypotService(client_with(adapter))
+    unavailable = AsyncMock(return_value={"status": "unknown", "reason": "GoPlus has no data", "data": {}})
+    with fresh_addresses(fixture), patch.object(ScamDatabase, "fetch_token_security", new=unavailable):
+        result = await HoneypotAnalyzer(service).analyze(AnalysisContext(fixture["token"], chain_id=4663))
+    assert all(result.data[field] is None for field in FIELDS)
+    assert result.data["status"] == "unknown"
+    assert result.data["simulation_failed"] is False
+    assert "eth_simulateV1 failed (JSON-RPC error -32603)" in result.data["reason"]
+    assert result.score == 0
+    assert not any("treat as suspicious" in flag for flag in result.flags)
+    counts = ledger.for_chain(4663)["eth_simulateV1"]
+    assert (counts["answered"], counts["unknown"], counts["failed"]) == (0, 0, 1)
 
 
 @pytest.mark.asyncio

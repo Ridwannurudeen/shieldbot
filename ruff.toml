@@ -1,0 +1,3 @@
+# pytest fixtures are imported with `noqa: F401` and then named as test parameters, which F811 reports.
+[lint.per-file-ignores]
+"tests/*" = ["F811"]

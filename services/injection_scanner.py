@@ -18,7 +18,7 @@ import math
 import re
 import unicodedata
 from collections import Counter
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from services.injection_patterns import (
     INJECTION_PATTERNS,

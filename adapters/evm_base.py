@@ -47,21 +47,14 @@ BURN_ADDRESSES = {
     '0x000000000000000000000000000000000000dead',
 }
 
-# 'etherscan': verification and creation from Etherscan, with Sourcify's deployment record dating a
-# contract when Etherscan does not answer (its free tier refuses getcontractcreation on BNB Chain,
-# which no public Blockscout serves). 'etherscan_blockscout': verification from Etherscan, creation
-# from Blockscout, because Etherscan's free tier refuses getcontractcreation on Base and Optimism.
-EXPLORER_BACKENDS = {
-    1: 'etherscan', 56: 'etherscan', 8453: 'etherscan_blockscout',
-    42161: 'etherscan', 137: 'etherscan', 10: 'etherscan_blockscout', 204: 'etherscan',
-    4663: 'sourcify_blockscout',
-}
-
 
 def _get_explorer_backend(chain_id: int) -> str:
-    if chain_id not in EXPLORER_BACKENDS:
+    # Imported here: the utils package imports the chain adapters, which import this module.
+    from utils.chain_info import CHAIN_INFO
+
+    if chain_id not in CHAIN_INFO:
         raise ValueError(f"Unsupported explorer chain: {chain_id}")
-    return EXPLORER_BACKENDS[chain_id]
+    return CHAIN_INFO[chain_id]['explorer_backend']
 
 
 def _decimal(value) -> Optional[int]:
@@ -363,16 +356,44 @@ class EvmAdapter(ChainAdapter):
         if cached is not None:
             return dict(cached)
         flight_key = (asyncio.get_running_loop(), key)
-        if flight_key not in self._creation_inflight:
-            self._creation_inflight[flight_key] = asyncio.create_task(
-                self._lookup_creation_info(address, key, flight_key)
+        flight = self._creation_inflight.get(flight_key)
+        if flight is None:
+            promoted = asyncio.Event()
+            task = asyncio.create_task(
+                self._lookup_creation_info(address, key, flight_key, promoted)
             )
-        info = await asyncio.shield(self._creation_inflight[flight_key])
+            flight = (task, promoted)
+            self._creation_inflight[flight_key] = flight
+        else:
+            from services.explorer_service import BACKGROUND
+
+            task, promoted = flight
+            if not BACKGROUND.get():
+                promoted.set()
+                if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
+                    self._explorer_service.promote_contract_creation_lookup(
+                        address, self._chain_id
+                    )
+        info = await asyncio.shield(flight[0])
         return dict(info) if info else info
 
-    async def _lookup_creation_info(self, address: str, key: tuple, flight_key: tuple) -> Optional[Dict]:
+    async def _lookup_creation_info(
+        self, address: str, key: tuple, flight_key: tuple, promoted: asyncio.Event
+    ) -> Optional[Dict]:
         try:
-            info = await self._fetch_creation_info(address)
+            from services.explorer_service import BACKGROUND
+
+            token = (
+                BACKGROUND.set(False)
+                if promoted.is_set()
+                and self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout')
+                else None
+            )
+            try:
+                info = await self._fetch_creation_info(address)
+            finally:
+                if token is not None:
+                    BACKGROUND.reset(token)
         finally:
             self._creation_inflight.pop(flight_key, None)
         if info and info.get('age_days') is not None:
@@ -386,7 +407,9 @@ class EvmAdapter(ChainAdapter):
         """
         try:
             if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
-                result = await self._explorer_service.get_contract_creation_info(address, self._chain_id)
+                result = await self._explorer_service.get_contract_creation_info(
+                    address, self._chain_id
+                )
                 if result.status == 'unknown':
                     logger.warning("[%s] Creation unknown: %s", self._chain_name, result.reason)
                     return None
@@ -491,10 +514,23 @@ class EvmAdapter(ChainAdapter):
             contract = self.w3.eth.contract(
                 address=Web3.to_checksum_address(address), abi=ERC20_ABI,
             )
-            name = await self._call_with_retry(contract.functions.name().call)
-            symbol = await self._call_with_retry(contract.functions.symbol().call)
-            decimals = await self._call_with_retry(contract.functions.decimals().call)
-            total_supply = await self._call_with_retry(contract.functions.totalSupply().call)
+            # The four reads are independent, so they are in flight together rather than costing
+            # four round trips in a row. A failed read still loses the whole answer, and the first
+            # failure in this field order is the one raised and logged, as when they ran in turn.
+            # Each read keeps _call_with_retry's three attempts, so a rate limit outlasting them
+            # costs up to 12 requests for one token where the reads in turn stopped after 3; with a
+            # single attempt, one passing 429 on any read would lose the answer instead.
+            reads = await asyncio.gather(
+                self._call_with_retry(contract.functions.name().call),
+                self._call_with_retry(contract.functions.symbol().call),
+                self._call_with_retry(contract.functions.decimals().call),
+                self._call_with_retry(contract.functions.totalSupply().call),
+                return_exceptions=True,
+            )
+            for read in reads:
+                if isinstance(read, BaseException):
+                    raise read
+            name, symbol, decimals, total_supply = reads
             return {
                 'name': name, 'symbol': symbol,
                 'decimals': decimals, 'total_supply': total_supply / (10 ** decimals),

@@ -95,6 +95,29 @@ async def test_cap_applies_to_admission_and_explicit_reentry(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cap_counts_only_the_subjects_own_chain(db, monkeypatch):
+    monkeypatch.setattr("core.database.GUARD_WATCH_MAX_SUBJECTS", 1)
+    await db._db.execute(
+        "INSERT INTO guard_subjects (chain_id, subject, enabled) VALUES (42161, ?, 1)",
+        (OTHER,),
+    )
+    await db._db.commit()
+
+    first = await insert(db)
+    await db.update_verdict_onchain(first, "confirmed", registry=REGISTRY)
+    assert [row["subject"] for row in await db.get_guard_subjects(4663)] == [TOKEN]
+    cursor = await db._db.execute(
+        "SELECT enabled FROM guard_subjects WHERE chain_id = 42161 AND subject = ?",
+        (OTHER,),
+    )
+    assert (await cursor.fetchone())[0] == 1
+
+    second = await insert(db, subject=OTHER)
+    await db.update_verdict_onchain(second, "confirmed", registry=REGISTRY)
+    assert [row["subject"] for row in await db.get_guard_subjects(4663)] == [TOKEN]
+
+
+@pytest.mark.asyncio
 async def test_concurrent_confirmations_across_connections_obey_cap(db, monkeypatch):
     monkeypatch.setattr("core.database.GUARD_WATCH_MAX_SUBJECTS", 1)
     first = await insert(db)
@@ -162,6 +185,37 @@ async def test_reduced_cap_is_enforced_on_restart_and_zero_disables(db, monkeypa
     await db.initialize()
     assert await db.get_guard_subjects(4663) == []
     assert not await db.register_guard_subject(4663, TOKEN, REGISTRY)
+
+
+@pytest.mark.asyncio
+async def test_restart_trim_keeps_each_chains_oldest_rows(db, monkeypatch):
+    evidence_id = await insert(db)
+    await db.update_verdict_onchain(evidence_id, "confirmed", registry=REGISTRY)
+    await db._db.execute(
+        "INSERT INTO guard_subjects (chain_id, subject, enabled) VALUES (42161, ?, 1)",
+        (OTHER,),
+    )
+    await db._db.execute(
+        "INSERT INTO guard_subjects (chain_id, subject, enabled) VALUES (42161, ?, 1)",
+        ("second-42161",),
+    )
+    await db._db.commit()
+
+    monkeypatch.setattr("core.database.GUARD_WATCH_MAX_SUBJECTS", 1)
+    await db.close()
+    await db.initialize()
+    assert len(await db.get_guard_subjects(4663)) == 1
+    assert [row["subject"] for row in await db.get_guard_subjects(42161)] == [OTHER]
+    cursor = await db._db.execute(
+        "SELECT chain_id, COUNT(*) FROM guard_subjects WHERE enabled = 1 GROUP BY chain_id"
+    )
+    assert dict(await cursor.fetchall()) == {4663: 1, 42161: 1}
+
+    monkeypatch.setattr("core.database.GUARD_WATCH_MAX_SUBJECTS", 0)
+    await db.close()
+    await db.initialize()
+    cursor = await db._db.execute("SELECT COUNT(*) FROM guard_subjects WHERE enabled = 1")
+    assert (await cursor.fetchone())[0] == 0
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,7 @@ import time
 import traceback
 
 from core.database import GUARD_WATCH_MAX_SUBJECTS
+from services.explorer_service import BACKGROUND
 from services.launch_discovery import CHAIN_ID, LaunchDiscoveryError, WrongChainError
 from services.rpc_guard import BREAKER_BASE_COOLDOWN_SECONDS, BREAKER_MAX_COOLDOWN_SECONDS, BreakerOpenError
 
@@ -121,6 +122,7 @@ class LaunchWatch:
             self._rechecks.setdefault(pair["pair_address"], pair)
 
     async def _loop(self):
+        BACKGROUND.set(True)
         while True:
             started = self._clock()
             failure = None

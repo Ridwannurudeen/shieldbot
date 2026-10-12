@@ -1,7 +1,6 @@
 """Reputation API router — trust scoring endpoints for AI agents."""
 
 import logging
-from typing import List
 
 from fastapi import APIRouter, Request, HTTPException
 

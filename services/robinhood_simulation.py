@@ -55,8 +55,6 @@ USDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
 USDG_BALANCE_SLOT = 1
 # With traceTransfers, eth_simulateV1 reports native ETH movements as Transfer logs from this address.
 NATIVE_TRANSFER_LOG_ADDRESS = "0x" + "e" * 40
-LIQUIDITY_LAUNCHER_FEE = 2500
-LIQUIDITY_LAUNCHER_TICK_SPACING = 25
 HOOKLESS_V4_FEE_TICK_SPACINGS = (
     (100, 1),
     (500, 10),
@@ -422,7 +420,7 @@ def _error_string(data: bytes) -> Optional[str]:
         return None
     try:
         return decode(["string"], data[4:])[0]
-    except DecodingError:
+    except (DecodingError, UnicodeDecodeError):
         return None
 
 
@@ -551,7 +549,16 @@ def _traces_native_transfers(call: dict) -> bool:
     )
 
 
-def _outcome(pool: Pool, reason: str, block: Optional[int] = None, simulation_failed: bool = False) -> dict:
+def _outcome(
+    pool: Pool,
+    reason: str,
+    block: Optional[int] = None,
+    simulation_failed: bool = False,
+    rpc_failed: bool = False,
+) -> dict:
+    """simulation_failed: the simulation ran and the token's trade came back uninterpretable, which leaves
+    the sell unknown and scores nothing. rpc_failed: the RPC gave no usable answer, which says nothing
+    about the token."""
     return {
         "retry_sell_amount": None,
         "route": pool.route,
@@ -563,6 +570,7 @@ def _outcome(pool: Pool, reason: str, block: Optional[int] = None, simulation_fa
         "buy_tax": None,
         "sell_tax": None,
         "simulation_failed": simulation_failed,
+        "rpc_failed": rpc_failed,
         "reason": reason,
     }
 
@@ -582,7 +590,7 @@ def evaluate_simulation(
         or not all(isinstance(call, dict) for call in calls)
         or number is None
     ):
-        return _outcome(pool, "Malformed eth_simulateV1 result", simulation_failed=True)
+        return _outcome(pool, "Malformed eth_simulateV1 result", rpc_failed=True)
     call = dict(zip(labels, calls))
     outcome = _outcome(pool, "", number)
     for label in ("fund", "fund_approve", "fund_permit"):
@@ -659,8 +667,9 @@ def evaluate_simulation(
         return outcome
     if not _pays_token(pool) and not _traces_native_transfers(call["buy"]):
         # The sell output of a native pool is only visible as a traceTransfers log, so without that
-        # evidence a sell returning nothing is indistinguishable from an untraced transfer.
-        outcome["simulation_failed"] = True
+        # evidence a sell returning nothing is indistinguishable from an untraced transfer. The RPC ignored
+        # traceTransfers, which says nothing about the token.
+        outcome["rpc_failed"] = True
         outcome["reason"] = "native transfer tracing unavailable; the sell output cannot be measured"
         return outcome
     output = _sell_output(pool, call["sell"].get("logs"), buyer)
@@ -710,21 +719,28 @@ def evaluate_simulation(
             + ("" if sell_tax is not None else "; sell tax unmeasurable")
         ),
     )
-    if sell_tax is None:
-        outcome["simulation_failed"] = True
     return outcome
 
 
 def aggregate_outcomes(outcomes: list, notes: list) -> dict:
-    """Combine per-pool outcomes worst-case: a proven trap is never masked by a sellable pool."""
+    """Combine per-pool outcomes worst-case: a proven trap is never masked by a sellable pool, and a pool
+    the RPC could not simulate may be the one that traps, so beside it only a trap is decided."""
 
     simulation_failed = any(outcome.get("simulation_failed") is True for outcome in outcomes)
+    rpc_failed = any(outcome.get("rpc_failed") is True for outcome in outcomes)
 
     def worst(field):
         values = [outcome[field] for outcome in outcomes if outcome[field] is not None]
         value = max(values) if values else None
+        # A pool left without the field, by a failure or a sell whose tax could not be measured, may
+        # hold more than another pool's zero.
         incomplete = any(
-            outcome.get("simulation_failed") is True and outcome[field] is None
+            outcome[field] is None
+            and (
+                outcome.get("simulation_failed") is True
+                or outcome.get("rpc_failed") is True
+                or (field == "sell_tax" and outcome["can_sell"] is True)
+            )
             for outcome in outcomes
         )
         return None if incomplete and value == 0 else value
@@ -737,6 +753,9 @@ def aggregate_outcomes(outcomes: list, notes: list) -> dict:
 
     can_sell = verdict("can_sell", False)
     is_honeypot = verdict("is_honeypot", True)
+    if rpc_failed:
+        can_sell = None if can_sell is True else can_sell
+        is_honeypot = None if is_honeypot is False else is_honeypot
     parts = list(notes)
     for outcome in outcomes:
         where = f" at block {outcome['block']}" if outcome["block"] is not None else ""
@@ -749,6 +768,7 @@ def aggregate_outcomes(outcomes: list, notes: list) -> dict:
         "buy_tax": worst("buy_tax"),
         "sell_tax": worst("sell_tax"),
         **({"simulation_failed": True} if simulation_failed else {}),
+        **({"rpc_failed": True} if rpc_failed else {}),
         "simulation_block": max(blocks) if blocks else None,
         "reason": "; ".join(parts) or "No simulation result",
     }
@@ -826,9 +846,14 @@ class RobinhoodSimulator:
             result["rpc_failed"] = True
             unknown_ledger.record(SIMULATION_PROVIDER, 4663, "failed")
         else:
-            # It ran; a pool that could not be simulated, or no supported pool, leaves the sell unknown.
+            # It ran. Undecided, it failed when the RPC could not simulate a pool, and is unknown when a
+            # pool could not be decided or no supported pool was found.
             decided = result["is_honeypot"] is not None and not result.get("simulation_failed")
-            unknown_ledger.record(SIMULATION_PROVIDER, 4663, "answered" if decided else "unknown")
+            unknown_ledger.record(
+                SIMULATION_PROVIDER,
+                4663,
+                "answered" if decided else "failed" if result.get("rpc_failed") else "unknown",
+            )
         finally:
             self._inflight.pop(flight_key, None)
         result["observed_at"] = observed_at
@@ -852,8 +877,9 @@ class RobinhoodSimulator:
                     # A follow-up that could not run leaves the first attempt's buy verdict standing.
                     if sized["can_buy"] is not None:
                         outcome = sized
-                    elif sized["simulation_failed"]:
-                        outcome["simulation_failed"] = True
+                    elif sized["simulation_failed"] or sized["rpc_failed"]:
+                        outcome["simulation_failed"] = sized["simulation_failed"]
+                        outcome["rpc_failed"] = sized["rpc_failed"]
                         outcome["reason"] += f"; sized follow-up: {sized['reason']}"
                 outcomes.append(outcome)
         return aggregate_outcomes(outcomes, notes)
@@ -890,9 +916,18 @@ class RobinhoodSimulator:
                         raise SimulationUnavailable(f"eth_simulateV1 failed (JSON-RPC error {code})")
                     if "result" not in row or row.get("result") is None:
                         raise SimulationUnavailable("Malformed RPC response")
-                    outcome = evaluate_simulation(
-                        pool, token, amount, buyer, row.get("result"), sell_amount
-                    )
+                    try:
+                        outcome = evaluate_simulation(
+                            pool, token, amount, buyer, row.get("result"), sell_amount
+                        )
+                    except Exception as e:
+                        logger.error("Robinhood simulation result could not be evaluated: %s", type(e).__name__)
+                        return _outcome(
+                            pool,
+                            f"Simulation result could not be evaluated ({type(e).__name__})",
+                            block=source_block,
+                            simulation_failed=True,
+                        )
                     # eth_simulateV1 returns synthetic blocks after the real source header.
                     outcome["block"] = source_block
                     return outcome
@@ -911,19 +946,26 @@ class RobinhoodSimulator:
                 if code == -32601 or "does not exist" in str(error).lower():
                     raise SimulationUnavailable("eth_simulateV1 unsupported by the RPC")
                 raise SimulationUnavailable(f"eth_simulateV1 failed (JSON-RPC error {code})")
-            outcome = evaluate_simulation(
-                pool, token, amount, buyer, rows[0].get("result"), sell_amount
-            )
+            try:
+                outcome = evaluate_simulation(
+                    pool, token, amount, buyer, rows[0].get("result"), sell_amount
+                )
+            except Exception as e:
+                logger.error("Robinhood simulation result could not be evaluated: %s", type(e).__name__)
+                return _outcome(
+                    pool,
+                    f"Simulation result could not be evaluated ({type(e).__name__})",
+                    block=source_block,
+                    simulation_failed=True,
+                )
             # eth_simulateV1 returns synthetic blocks after the real source header.
             outcome["block"] = source_block
             return outcome
         except SimulationUnavailable as e:
-            return _outcome(pool, e.reason, simulation_failed=True)
+            return _outcome(pool, e.reason, rpc_failed=True)
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.warning("Robinhood simulation request failed: %s", type(e).__name__)
-            return _outcome(
-                pool, f"Simulation RPC request failed ({type(e).__name__})", simulation_failed=True
-            )
+            return _outcome(pool, f"Simulation RPC request failed ({type(e).__name__})", rpc_failed=True)
 
     async def _request(self, session, calls: list) -> list:
         """POST one JSON-RPC request or batch. A row the node answered with an error of its own (a timeout
@@ -931,8 +973,15 @@ class RobinhoodSimulator:
         one transient error does not leave the scan unknown and every row still comes from one answer. A
         revert is the call's own answer and is not asked again."""
         rows = await self._post(session, calls)
-        if any(row.get("error") is not None and not _reverted(row["error"]) for row in rows):
-            logger.warning("Robinhood simulation RPC answered an error; asking once more")
+        errors = [
+            _node_error(row) for row in rows if row.get("error") is not None and not _reverted(row["error"])
+        ]
+        if errors:
+            # The code only: a node's error message can carry the RPC URL, and with it an API key.
+            logger.warning(
+                "Robinhood simulation RPC answered an error (%s); asking once more",
+                ", ".join(dict.fromkeys(errors)),
+            )
             await asyncio.sleep(RPC_BACKOFF_SECONDS)
             rows = await self._post(session, calls)
         return rows
@@ -969,6 +1018,7 @@ class RobinhoodSimulator:
                 if (
                     len(rows) != len(body)
                     or not all(isinstance(row, dict) for row in rows)
+                    or not all(type(row.get("id")) is int for row in rows)
                     or {row.get("id") for row in rows} != set(range(len(body)))
                 ):
                     raise SimulationUnavailable("Malformed RPC response")
@@ -995,14 +1045,18 @@ class RobinhoodSimulator:
 
     async def _discover(self, session, token: str) -> tuple:
         """Find at most MAX_POOLS supported pools; notes explain everything skipped."""
-        launcher_key = (
-            NATIVE,
-            token,
-            LIQUIDITY_LAUNCHER_FEE,
-            LIQUIDITY_LAUNCHER_TICK_SPACING,
-            NATIVE,
+        native_keys = [
+            (NATIVE, token, fee, tick_spacing, NATIVE)
+            for fee, tick_spacing in HOOKLESS_V4_FEE_TICK_SPACINGS
+        ]
+        weth_keys = (
+            [
+                (*sorted((token, WETH)), fee, tick_spacing, NATIVE)
+                for fee, tick_spacing in HOOKLESS_V4_FEE_TICK_SPACINGS
+            ]
+            if token != WETH
+            else []
         )
-        slot = _pool_state_slot(launcher_key)
         usdg_keys = (
             [
                 (*sorted((token, USDG)), fee, tick_spacing, NATIVE)
@@ -1011,10 +1065,20 @@ class RobinhoodSimulator:
             if token != USDG
             else []
         )
-        usdg_slots = [
-            (_pool_field_slot(key, 0), _pool_field_slot(key, 3)) for key in usdg_keys
+        hookless_pools = [
+            (route, numeraire, key)
+            for route, numeraire, keys in (
+                ("v4-native", NATIVE, native_keys),
+                ("v4-weth", WETH, weth_keys),
+                ("v4-usdg", USDG, usdg_keys),
+            )
+            for key in keys
         ]
-        usdg_calls = [
+        hookless_slots = [
+            (_pool_field_slot(key, 0), _pool_field_slot(key, 3))
+            for _, _, key in hookless_pools
+        ]
+        hookless_calls = [
             (
                 "eth_call",
                 [
@@ -1026,7 +1090,7 @@ class RobinhoodSimulator:
                     "latest",
                 ],
             )
-            for fields in usdg_slots
+            for fields in hookless_slots
             for field_slot in fields
         ]
         rows = await self._request(
@@ -1062,26 +1126,15 @@ class RobinhoodSimulator:
                         "latest",
                     ],
                 ),
-                (
-                    "eth_call",
-                    [
-                        {
-                            "to": POOL_MANAGER,
-                            "data": "0x"
-                            + _calldata("extsload(bytes32)", ["bytes32"], [slot]).hex(),
-                        },
-                        "latest",
-                    ],
-                ),
-                *usdg_calls,
+                *hookless_calls,
             ],
         )
         lookup_rows = rows
         # totalSupply() reverts, legitimately, on a contract that is not a token; the getters do not.
         supply = _call_result(rows[0], "totalSupply()", may_revert=True)
-        pair, state, slot0 = (
+        pair, state = (
             _call_result(row, lookup)
-            for row, lookup in zip(rows[1:], ("V2 pair", "Doppler pool", "LiquidityLauncher pool"))
+            for row, lookup in zip(rows[1:3], ("V2 pair", "Doppler pool"))
         )
         if supply is None or len(supply) != 32:
             return 0, [], ["totalSupply() unavailable; cannot size a buy"]
@@ -1133,38 +1186,73 @@ class RobinhoodSimulator:
                     "cannot be funded in one simulation"
                 )
 
-        if len(slot0) != 32:
-            notes.append("LiquidityLauncher pool lookup failed")
-        elif int.from_bytes(slot0, "big") & MAX_UINT160:
-            pools.append(Pool("v4-native", NATIVE, key=launcher_key))
-
-        for index, key in enumerate(usdg_keys):
+        empty_pool_ids = {route: [] for route in ("v4-native", "v4-weth", "v4-usdg")}
+        empty_pool_keys = set()
+        empty_pools = []
+        lookup_failed_routes = set()
+        for index, (route, numeraire, key) in enumerate(hookless_pools):
             state = _call_result(
-                lookup_rows[4 + index * 2], f"hookless USDG pool {key} slot0"
+                lookup_rows[3 + index * 2], f"hookless {route} pool {key} slot0"
             )
             liquidity = _call_result(
-                lookup_rows[5 + index * 2], f"hookless USDG pool {key} liquidity"
+                lookup_rows[4 + index * 2], f"hookless {route} pool {key} liquidity"
             )
-            if state is None or len(state) != 32:
-                notes.append("hookless USDG pool lookup failed")
-            elif int.from_bytes(state, "big"):
-                pools.append(Pool("v4-usdg", USDG, key=key))
-                pool_depths[key] = (
-                    int.from_bytes(liquidity, "big") if liquidity is not None and len(liquidity) == 32 else 0
+            if state is None or len(state) != 32 or liquidity is None or len(liquidity) != 32:
+                if route not in lookup_failed_routes:
+                    notes.append(f"hookless {route} pool lookup failed")
+                    lookup_failed_routes.add(route)
+                continue
+            if int.from_bytes(state, "big") & MAX_UINT160:
+                depth = int.from_bytes(liquidity, "big")
+                if depth:
+                    pools.append(Pool(route, numeraire, key=key))
+                    pool_depths[key] = depth
+                else:
+                    empty_pool_ids[route].append(_pool_id(key).hex())
+                    empty_pool_keys.add(key)
+                    empty_pools.append((route, numeraire, key))
+
+        for route, pool_ids in empty_pool_ids.items():
+            if pool_ids:
+                labels = [f"0x{pool_id}" for pool_id in pool_ids[:MAX_NOTED_SHAPES]]
+                more = len(pool_ids) - len(labels)
+                notes.append(
+                    f"hookless {route} pool{'s' if len(pool_ids) != 1 else ''} "
+                    f"{', '.join(labels)}"
+                    f"{f' and {more} more' if more > 0 else ''} initialized but empty"
                 )
 
         if not pools:
             pools = await self._scan_initialize_logs(session, token, notes)
+            pools = [pool for pool in pools if pool.key not in empty_pool_keys]
+        if not pools and empty_pools:
+            route, numeraire, key = min(
+                empty_pools,
+                key=lambda pool: (ROUTES.index(pool[0]), hookless_pools.index(pool)),
+            )
+            pools = [Pool(route, numeraire, key=key)]
         if not pools:
             notes.append("No supported pool found")
         pools.sort(key=lambda pool: (ROUTES.index(pool.route), -pool_depths.get(pool.key, 0)))
-        skipped = len(pools) - MAX_POOLS
+        selected = []
+        for route in ROUTES:
+            if len(selected) == MAX_POOLS:
+                break
+            pool = next((pool for pool in pools if pool.route == route), None)
+            if pool is not None:
+                selected.append(pool)
+        for pool in pools:
+            if len(selected) == MAX_POOLS:
+                break
+            if pool not in selected:
+                selected.append(pool)
+        skipped = len(pools) - len(selected)
         if skipped > 0:
             notes.append(
                 f"{skipped} more {'pool' if skipped == 1 else 'pools'} not simulated "
                 f"(cap of {MAX_POOLS} pools)"
             )
-        return amount, pools[:MAX_POOLS], notes
+        return amount, selected, notes
 
     async def _scan_initialize_logs(self, session, token: str, notes: list) -> list:
         rows = await self._request(session, [("eth_blockNumber", [])])

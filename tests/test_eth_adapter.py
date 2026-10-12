@@ -1,6 +1,6 @@
 """Tests for Ethereum adapter."""
 
-from adapters.eth import EthAdapter, WHITELISTED_ROUTERS, UNISWAP_V2_FACTORY
+from adapters.eth import EthAdapter, UNISWAP_V2_FACTORY
 
 
 def test_eth_adapter_chain_id():

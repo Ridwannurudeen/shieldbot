@@ -3,7 +3,6 @@
 import hmac
 import logging
 from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 

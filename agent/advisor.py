@@ -9,7 +9,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from utils.chain_info import get_chain_name
 from utils.web3_client import UnsupportedChainError

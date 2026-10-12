@@ -4,10 +4,9 @@ Combines ERC-8004 registry, BAP-578 agent NFT, ShieldBot firewall verdicts,
 and SentinelNet cross-chain reputation into a single weighted trust score.
 """
 
-import json
 import time
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 

@@ -429,7 +429,7 @@ Return the explanation JSON now."""
         # Decoded calldata
         decoded = tx_data.get("decoded_calldata", {})
         if decoded:
-            lines.append(f"\n=== CALLDATA ANALYSIS ===")
+            lines.append("\n=== CALLDATA ANALYSIS ===")
             lines.append(f"Function: {_untrusted(decoded.get('function_name', 'unknown'))}")
             lines.append(f"Signature: {_untrusted(decoded.get('signature', 'N/A'))}")
             lines.append(f"Category: {decoded.get('category', 'unknown')}")

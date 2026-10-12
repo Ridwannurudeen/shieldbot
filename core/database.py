@@ -39,6 +39,31 @@ _LAUNCH_ALERT_SEND_TIMEOUT_SECONDS = 300
 USAGE_RETENTION_DAYS = 90
 # Days an /api/firewall or /api/scan evidence document (core/scan_evidence.py) stays retrievable.
 SCAN_EVIDENCE_RETENTION_DAYS = 90
+# Days eligible verdict evidence stays retrievable unless it is the newest row for its chain and subject.
+VERDICT_EVIDENCE_RETENTION_DAYS = 30
+# Days a launch can remain unscanned before it is removed from discovery history.
+LAUNCH_RETENTION_DAYS = 30
+_PRUNE_VERDICT_EVIDENCE_SQL = """
+    DELETE FROM verdict_evidence
+    WHERE created_at < ?
+      AND tx_hash IS NULL
+      AND (onchain_status IN ('off', 'deduplicated')
+           OR (onchain_status = 'dropped' AND tx_hash IS NULL))
+      AND id < (
+          SELECT MAX(id) FROM verdict_evidence AS newer
+          WHERE newer.chain_id = verdict_evidence.chain_id
+            AND newer.subject = verdict_evidence.subject
+      )
+"""
+_PRUNE_LAUNCHES_SQL = """
+    DELETE FROM discovered_launches
+    WHERE scanned_at IS NULL
+      AND block_timestamp < ?
+      AND block_number < (
+          SELECT MAX(block_number) FROM discovered_launches AS newer
+          WHERE newer.chain_id = discovered_launches.chain_id
+      )
+"""
 
 # One row per discovered launch with its latest outcome. A recheck records blocked or cleared on
 # the launch's tracked pair (keyed by the token), and a newer one supersedes the launch scan. A
@@ -1494,24 +1519,39 @@ class Database:
 
     async def prune_retention(self) -> Dict[str, int]:
         """Delete usage records older than USAGE_RETENTION_DAYS, scan evidence documents older than
-        SCAN_EVIDENCE_RETENTION_DAYS and expired free key link requests.
+        SCAN_EVIDENCE_RETENTION_DAYS, expired free key link requests, eligible verdict evidence and
+        never-scanned launches past their retention periods. Keep verdict rows with a transaction hash,
+        every status other than off, deduplicated or dropped without a transaction hash, and each subject's
+        newest row for its chain and subject. Scanned launches are never pruned.
 
         Returns the rows deleted per table.
         """
         now = time.time()
         oldest_day = int(now // 86400) - USAGE_RETENTION_DAYS
+        verdict_cutoff = now - VERDICT_EVIDENCE_RETENTION_DAYS * 86400
+        launch_cutoff = int(now - LAUNCH_RETENTION_DAYS * 86400)
         deleted = {}
-        for table, sql, cutoff in (
-            ("api_usage", "DELETE FROM api_usage WHERE created_at < ?", now - USAGE_RETENTION_DAYS * 86400),
-            ("api_daily_usage", "DELETE FROM api_daily_usage WHERE utc_day < ?", oldest_day),
-            ("ai_token_usage", "DELETE FROM ai_token_usage WHERE utc_day < ?", oldest_day),
-            ("free_key_requests", "DELETE FROM free_key_requests WHERE expires_at <= ?", now),
+        for table, sql, parameters in (
+            ("api_usage", "DELETE FROM api_usage WHERE created_at < ?", (now - USAGE_RETENTION_DAYS * 86400,)),
+            ("api_daily_usage", "DELETE FROM api_daily_usage WHERE utc_day < ?", (oldest_day,)),
+            ("ai_token_usage", "DELETE FROM ai_token_usage WHERE utc_day < ?", (oldest_day,)),
+            ("free_key_requests", "DELETE FROM free_key_requests WHERE expires_at <= ?", (now,)),
             (
                 "scan_evidence", "DELETE FROM scan_evidence WHERE created_at < ?",
-                now - SCAN_EVIDENCE_RETENTION_DAYS * 86400,
+                (now - SCAN_EVIDENCE_RETENTION_DAYS * 86400,),
+            ),
+            (
+                "verdict_evidence",
+                _PRUNE_VERDICT_EVIDENCE_SQL,
+                (verdict_cutoff,),
+            ),
+            (
+                "discovered_launches",
+                _PRUNE_LAUNCHES_SQL,
+                (launch_cutoff,),
             ),
         ):
-            cursor = await self._db.execute(sql, (cutoff,))
+            cursor = await self._db.execute(sql, parameters)
             deleted[table] = cursor.rowcount
         await self._db.commit()
         return deleted
@@ -2500,6 +2540,9 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_discovered_launches_unscanned
                 ON discovered_launches(chain_id, scanned_at, block_number);
+
+            CREATE INDEX IF NOT EXISTS idx_discovered_launches_retention
+                ON discovered_launches(scanned_at, block_timestamp);
         """)
         await self._db.commit()
         await self._migrate_launch_impostor_check()
@@ -3029,6 +3072,9 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_verdict_evidence_outbox
                 ON verdict_evidence(chain_id, onchain_status, id);
 
+            CREATE INDEX IF NOT EXISTS idx_verdict_evidence_created_at
+                ON verdict_evidence(created_at);
+
             CREATE TABLE IF NOT EXISTS verdict_transactions (
                 evidence_id INTEGER NOT NULL,
                 tx_hash TEXT NOT NULL,
@@ -3056,12 +3102,14 @@ class Database:
                 renewed_at REAL NOT NULL
             );
         """)
-        # Lowering the configured cap retires excess registrations deterministically.
+        # Lowering the configured cap retires excess registrations deterministically per chain.
         await self._db.execute("""
             UPDATE guard_subjects SET enabled = 0
-            WHERE enabled = 1 AND rowid NOT IN (
-                SELECT rowid FROM guard_subjects WHERE enabled = 1
-                ORDER BY rowid LIMIT ?
+            WHERE rowid IN (
+                SELECT rowid FROM (
+                    SELECT rowid, ROW_NUMBER() OVER (PARTITION BY chain_id ORDER BY rowid) AS n
+                    FROM guard_subjects WHERE enabled = 1
+                ) WHERE n > ?
             )
         """, (GUARD_WATCH_MAX_SUBJECTS,))
         await self._db.commit()
@@ -3149,7 +3197,7 @@ class Database:
         cursor = await connection.execute("""
             INSERT INTO guard_subjects (chain_id, subject, last_observed_at)
             SELECT ?, ?, ? WHERE ? > 0 AND (
-                (SELECT COUNT(*) FROM guard_subjects WHERE enabled = 1) < ?
+                (SELECT COUNT(*) FROM guard_subjects WHERE chain_id = ? AND enabled = 1) < ?
                 OR EXISTS (
                     SELECT 1 FROM guard_subjects WHERE chain_id = ? AND subject = ? AND enabled = 1
                 )
@@ -3163,13 +3211,13 @@ class Database:
                 END
             WHERE guard_subjects.enabled = 1 OR ?
         """, (
-            chain_id, subject.lower(), measured_at, GUARD_WATCH_MAX_SUBJECTS,
+            chain_id, subject.lower(), measured_at, GUARD_WATCH_MAX_SUBJECTS, chain_id,
             GUARD_WATCH_MAX_SUBJECTS, chain_id, subject.lower(), reenable,
         ))
         return cursor.rowcount == 1
 
     async def register_guard_subject(self, chain_id: int, subject: str, registry: Optional[str]) -> bool:
-        """Explicitly watch a subject confirmed on `registry`, or reenable one, within the shared cap."""
+        """Explicitly watch a subject confirmed on `registry`, or reenable one, within its chain's cap."""
         cursor = await self._db.execute("""
             SELECT chain_id, subject, canonical FROM verdict_evidence
             WHERE chain_id = ? AND chain_id = 4663 AND subject = ?
