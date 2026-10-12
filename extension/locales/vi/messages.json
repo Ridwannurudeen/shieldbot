@@ -100,6 +100,8 @@
   "overlayTitle": "ShieldBot Tường lửa",
   "overlayAnalyzing": "Đang phân tích giao dịch...",
   "overlaySubtext": "Kiểm tra hợp đồng, giải mã calldata, quét mối đe dọa",
+  "overlayMethod": "Phương thức",
+  "overlayElapsed": "Đã trôi qua",
   "overlayBtnBlock": "Chặn giao dịch",
   "overlayBtnProceed": "Tiếp tục",
   "overlayBtnReject": "Từ chối",

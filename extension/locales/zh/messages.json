@@ -100,6 +100,8 @@
   "overlayTitle": "ShieldBot 防火墙",
   "overlayAnalyzing": "正在分析交易...",
   "overlaySubtext": "检查合约、解码调用数据、扫描威胁",
+  "overlayMethod": "方法",
+  "overlayElapsed": "已用时",
   "overlayBtnBlock": "拦截交易",
   "overlayBtnProceed": "仍然继续",
   "overlayBtnReject": "拒绝",

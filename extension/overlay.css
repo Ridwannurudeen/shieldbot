@@ -1,13 +1,21 @@
-/* ShieldAI Firewall Overlay Styles */
+/* ShieldBot signing overlay.
 
-/* White dialog, one hairline, 4 px corners. Verdicts keep their own hues (Block #C21F30, Safe
-   #1D8A5A, Unknown #8B8B86 with a dashed edge); the accent #A3168F marks focus and the explain
-   link only, never a verdict. Text/ground pairs, WCAG contrast (4.5:1 floor):
+   The dialog is a paper record under a carbon masthead: white #FFFFFF with carbon #141414 text,
+   whatever the page behind it. Most dApps are dark, so a white record under the dark scrim is the
+   one surface a page cannot blend into, and it is the record the website stages in its hero
+   (THEME-SPEC 3). The masthead carries the product's dark ground (#0B0B0A) and the ShieldBot name.
+   Verdicts keep their own hues and shapes (Block #C21F30 solid, High a heavy red edge with "!",
+   Caution a grey hairline with "!", Safe a green hairline, Unknown a grey fill with a dashed edge
+   and "?"); the accent #A3168F marks focus and the explain link only, never a verdict.
+   Families: "ShieldBot Geist" (400, 500) and "ShieldBot Plex Mono" (400), registered on the
+   document by content.js, because a font declared inside a shadow root is not loaded.
+   Text/ground pairs, WCAG contrast (4.5:1 floor; 3:1 for control edges):
    #141414 on #FFFFFF 18.42, on #F7F6F2 17.04, on #8B8B86 5.38, on the hold fill #F0C7CC 12.06
-   #6B6B66 on #FFFFFF 5.36, on #F7F6F2 4.95
+   #6B6B66 on #FFFFFF 5.36, on #F7F6F2 4.95 · #F7F6F2 on #0B0B0A 18.21 · #A3A39E on #0B0B0A 7.77
    #FFFFFF on #C21F30 5.94, on #141414 18.42, on #3A3A38 11.40
-   #A81A29 on #FFFFFF 7.38, on #F7F6F2 6.83; #176E48 on #FFFFFF 6.25
-   #A3168F on #FFFFFF 6.84, on #F7F6F2 6.33; #8A1279 on #FFFFFF 8.60 */
+   #A81A29 on #FFFFFF 7.38, on #F7F6F2 6.83 · #176E48 on #FFFFFF 6.25, on #F7F6F2 5.78
+   #A3168F on #FFFFFF 6.84, on #F7F6F2 6.33 · #8A1279 on #FFFFFF 8.60
+   edges: #8B8B86 on #FFFFFF 3.42, on #F7F6F2 3.17 · #1D8A5A on #FFFFFF 4.34 · #C21F30 on #FFFFFF 5.94 */
 
 /* The overlay and banner render in closed shadow roots. Reset the host with
    enough cascade weight that inherited page styles cannot leak through it. */
@@ -15,20 +23,28 @@
   all: initial !important;
 }
 
+.shieldai-overlay,
+.shieldai-notice,
+.shieldai-phishing-banner {
+  --sb-sans: "ShieldBot Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --sb-mono: "ShieldBot Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
 .shieldai-overlay {
   all: initial;
   direction: ltr;
   unicode-bidi: isolate;
-  line-height: 1.4;
+  line-height: 1.45;
   position: fixed !important;
   inset: 0 !important;
   z-index: 2147483647 !important;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(0, 0, 0, 0.78);
   display: flex !important;
   align-items: center;
   justify-content: center;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--sb-sans);
   font-size: 16px;
+  font-synthesis-weight: none;
   color: #141414;
   animation: shieldai-fadein 0.2s ease-out;
 }
@@ -71,11 +87,12 @@
   z-index: 2147483647 !important;
   background: #ffffff !important;
   color: #141414 !important;
-  border: 1px solid #d6d5d0 !important;
-  border-radius: 4px !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
+  border: 1px solid #141414 !important;
+  border-left: 4px solid #0b0b0a !important;
+  border-radius: 2px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28) !important;
   padding: 10px 14px !important;
-  font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+  font: 13px/1.5 var(--sb-sans) !important;
   pointer-events: none !important;
   animation: shieldai-notice-fade 10s forwards;
 }
@@ -88,27 +105,35 @@
 /* Only box-shadow moves on the dialog: opacity, filter or transform on it or
    an ancestor would hold Proceed back (see .shieldai-overlay::before). */
 @keyframes shieldai-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(194, 31, 48, 0.45), 0 1px 3px rgba(0, 0, 0, 0.12); }
-  50% { box-shadow: 0 0 0 10px rgba(194, 31, 48, 0), 0 1px 3px rgba(0, 0, 0, 0.12); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(194, 31, 48, 0.5), 0 24px 64px rgba(0, 0, 0, 0.45); }
+  50% { box-shadow: 0 0 0 10px rgba(194, 31, 48, 0), 0 24px 64px rgba(0, 0, 0, 0.45); }
 }
 
-@keyframes shieldai-spin {
-  to { transform: rotate(360deg); }
+@keyframes shieldai-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(400%); }
 }
 
-/* Modal */
+/* Modal: the paper record */
 .shieldai-modal {
+  box-sizing: border-box;
   background: #ffffff;
-  border: 1px solid #e6e5e1;
-  border-radius: 4px;
-  width: 440px;
+  border: 1px solid #141414;
+  border-radius: 2px;
+  width: 460px;
   max-width: 95vw;
   max-height: 90vh;
   overflow-y: auto;
   padding: 24px;
   color: #141414;
   color-scheme: light;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.shieldai-modal *,
+.shieldai-modal *::before,
+.shieldai-modal *::after {
+  box-sizing: border-box;
 }
 
 .shieldai-modal-danger {
@@ -116,14 +141,25 @@
   animation: shieldai-pulse 2s 0.2s infinite;
 }
 
-/* Header: the wordmark set in type. The logo slot stays empty until the mark lands. */
+/* Masthead: the product's carbon ground across the top of the record. Its lower rule carries the
+   dialog's state: a Block red bar on a Block Recommended dialog, Unknown's dashed grey on a
+   dialog that could not be checked. */
 .shieldai-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-bottom: 14px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid #e6e5e1;
+  gap: 10px;
+  margin: -24px -24px 20px;
+  padding: 14px 24px;
+  background: #0b0b0a;
+  border-bottom: 3px solid #0b0b0a;
+}
+
+.shieldai-modal-danger .shieldai-header {
+  border-bottom-color: #c21f30;
+}
+
+.shieldai-modal-unknown .shieldai-header {
+  border-bottom: 3px dashed #8b8b86;
 }
 
 .shieldai-logo {
@@ -137,32 +173,36 @@
 }
 
 .shieldai-header h2 {
-  font-size: 14px;
-  font-weight: 600;
-  color: #141414;
-  letter-spacing: 0;
+  font-family: var(--sb-sans);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: #f7f6f2;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
-/* Classification chip: five verdicts on three hues, told apart by shape as
-   well as colour. BLOCK a solid red fill; HIGH RISK a heavy red edge with "!";
-   CAUTION a grey hairline with "!"; SAFE a green hairline; UNKNOWN a solid grey
-   fill with a dashed edge and "?". */
+/* Verdict band: the classification across the record's full width. Five verdicts on three hues,
+   told apart by shape as well as colour: BLOCK a solid red fill; HIGH RISK a heavy red edge with
+   "!"; CAUTION a grey hairline with "!"; SAFE a green hairline; UNKNOWN a solid grey fill with a
+   dashed edge and "?". */
 .shieldai-badge {
-  display: inline-block;
-  padding: 6px 12px;
+  display: block;
+  padding: 11px 14px;
   border: 1px solid transparent;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 600;
+  border-radius: 2px;
+  font-family: var(--sb-sans);
+  font-size: 15px;
+  font-weight: 500;
   line-height: 1.3;
   color: #141414;
-  letter-spacing: .04em;
+  letter-spacing: .05em;
+  font-variant-numeric: tabular-nums;
   margin-bottom: 16px;
 }
 
 .shieldai-badge-block { background: #c21f30; border-color: #c21f30; color: #ffffff; }
-.shieldai-badge-high { border: 2px solid #c21f30; padding: 5px 11px; color: #a81a29; }
+.shieldai-badge-high { border: 2px solid #c21f30; padding: 10px 13px; color: #a81a29; }
 .shieldai-badge-caution { border-color: #8b8b86; color: #141414; }
 .shieldai-badge-safe { border-color: #1d8a5a; color: #176e48; }
 .shieldai-badge-high::before,
@@ -170,19 +210,19 @@
 
 /* Unknown: a check that did not run is not a measured result. A request that
    was not checked at all (unknown structure, on a dialog marked Unknown) takes
-   the same chip. */
+   the same band. */
 .shieldai-badge-unknown,
 .shieldai-modal-unknown .shieldai-badge-high {
   background: #8b8b86;
   color: #141414;
   border: 1px dashed #141414;
-  padding: 6px 12px;
+  padding: 11px 14px;
 }
 
 .shieldai-badge-unknown::before,
 .shieldai-modal-unknown .shieldai-badge-high::before { content: "? "; }
 
-.shieldai-modal-unknown { border: 1px dashed #8b8b86; }
+.shieldai-modal-unknown { border: 1px dashed #141414; }
 
 .shieldai-modal-unknown .shieldai-verdict {
   border-left: 3px dashed #8b8b86;
@@ -191,33 +231,38 @@
 /* A result some sources did not return: the Unknown register, not a verdict. */
 .shieldai-section.shieldai-partial {
   background: #f7f6f2;
-  border-left: 2px dashed #8b8b86;
-  border-radius: 0 4px 4px 0;
+  border-left: 3px dashed #8b8b86;
+  border-radius: 0;
   padding: 8px 12px;
-  margin-bottom: 8px;
+  margin-bottom: 14px;
 }
 
 .shieldai-section.shieldai-partial p { font-size: 13px; }
+
+.shieldai-section.shieldai-partial strong { font-weight: 500; }
 
 .shieldai-unknown-why {
   font-size: 13px;
   color: #141414;
   margin: -6px 0 16px;
   padding-left: 10px;
-  border-left: 2px dashed #8b8b86;
+  border-left: 3px dashed #8b8b86;
   line-height: 1.5;
 }
 
-/* Sections */
+/* Sections: a mono label over its content, as on a statement. */
 .shieldai-section {
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .shieldai-section h3 {
-  font-size: 12px;
-  font-weight: 600;
+  font-family: var(--sb-mono);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
   color: #6b6b66;
-  letter-spacing: 0;
+  letter-spacing: .08em;
+  text-transform: uppercase;
   margin: 0 0 6px;
 }
 
@@ -228,26 +273,32 @@
   margin: 0;
 }
 
+.shieldai-section p + p {
+  margin-top: 6px;
+}
+
 /* Danger Signals: a filled Block-red square. Notes: a hollow grey one. */
 .shieldai-signals {
   list-style: none;
   padding: 0;
   margin: 0;
+  border-top: 1px solid #e6e5e1;
 }
 
 .shieldai-signals li {
   font-size: 13px;
   line-height: 1.45;
   color: #141414;
-  padding: 4px 0 4px 18px;
+  padding: 6px 0 6px 18px;
   position: relative;
+  border-bottom: 1px solid #e6e5e1;
 }
 
 .shieldai-signals li::before {
   content: "";
   position: absolute;
   left: 1px;
-  top: 9px;
+  top: 11px;
   width: 8px;
   height: 8px;
   background: #c21f30;
@@ -274,52 +325,57 @@
   position: absolute;
   left: 1px;
   top: 9px;
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border: 1px solid #6b6b66;
 }
 
-/* Impact Table */
+/* Impact Table: a ledger, labels in mono, values in the text face. */
 .shieldai-impact {
   width: 100%;
   border-collapse: collapse;
+  border-top: 1px solid #e6e5e1;
 }
 
 .shieldai-impact td {
-  padding: 6px 8px 6px 0;
+  padding: 7px 8px 7px 0;
   font-size: 13px;
+  line-height: 1.45;
   border-bottom: 1px solid #e6e5e1;
   vertical-align: top;
 }
 
-.shieldai-impact tr:last-child td {
-  border-bottom: 0;
-}
-
 .shieldai-impact td:first-child {
+  font-family: var(--sb-mono);
+  font-size: 11px;
   color: #6b6b66;
-  font-weight: 500;
-  width: 120px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  width: 124px;
+  padding-top: 9px;
   white-space: nowrap;
 }
 
 .shieldai-impact td:last-child {
   color: #141414;
   word-break: break-all;
+  padding-right: 0;
 }
 
 .shieldai-mono {
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 13px !important;
+  font-family: var(--sb-mono);
+  font-size: 12.5px !important;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Verdict */
 .shieldai-verdict {
   background: #f7f6f2;
-  border-radius: 4px;
+  border-left: 3px solid #141414;
+  border-radius: 0;
   padding: 10px 14px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   color: #141414;
   margin-bottom: 16px;
   text-align: left;
@@ -335,7 +391,7 @@
   margin: 0 -24px -24px;
   padding: 14px 24px 24px;
   background: #ffffff;
-  border-top: 1px solid #e6e5e1;
+  border-top: 1px solid #141414;
 }
 
 /* A label never wraps: a dialog too narrow for both buttons on one row puts
@@ -345,9 +401,9 @@
   min-height: 44px;
   padding: 0 14px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 2px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.2;
   font-family: inherit;
   white-space: nowrap;
@@ -391,7 +447,7 @@
   /* Above the sticky action row, whose negative bottom margin overlaps this line. */
   position: relative;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.5;
   color: #a81a29;
   margin: 10px 0 0;
@@ -446,58 +502,102 @@
 .shieldai-lookalike,
 .shieldai-delegation {
   border: 1px solid #c21f30;
-  border-radius: 4px;
-  padding: 8px 12px;
+  border-left-width: 4px;
+  border-radius: 0;
+  padding: 10px 12px;
 }
 .shieldai-lookalike .shieldai-mono,
 .shieldai-delegation .shieldai-mono {
   word-break: break-all;
 }
+.shieldai-lookalike h3,
+.shieldai-delegation h3 {
+  color: #a81a29;
+}
 .shieldai-diff {
   background: #c21f30;
   color: #ffffff;
-  border-radius: 2px;
-  font-weight: 700;
+  border-radius: 0;
+  font-weight: 500;
   text-decoration: underline;
 }
 
-/* Loading */
+/* Loading: what is being checked, and for how long. Nothing here claims progress: the elapsed
+   time counts up from the request, and the sweep says only that the check is still running. */
 .shieldai-loading {
-  text-align: center;
-  padding: 24px 0;
+  padding: 2px 0 0;
 }
 
-.shieldai-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid #e6e5e1;
-  border-top-color: #a3168f;
-  border-radius: 50%;
-  margin: 0 auto 16px;
-  animation: shieldai-spin 0.8s linear infinite;
+.shieldai-loading-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-.shieldai-loading p {
-  font-size: 15px;
+.shieldai-loading-head > p {
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.3;
   color: #141414;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
-.shieldai-subtext {
-  font-size: 12px !important;
-  color: #6b6b66 !important;
-  margin-top: 6px !important;
+.shieldai-elapsed {
+  flex: none;
+  font-family: var(--sb-mono);
+  font-size: 11px;
+  color: #6b6b66;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.shieldai-elapsed-value {
+  font-size: 20px;
+  color: #141414;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  margin-left: 6px;
+}
+
+.shieldai-sweep {
+  position: relative;
+  height: 2px;
+  margin: 14px 0 12px;
+  background: #e6e5e1;
+  overflow: hidden;
+}
+
+.shieldai-sweep span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 25%;
+  background: #141414;
+  animation: shieldai-sweep 1.4s cubic-bezier(.45, 0, .55, 1) infinite;
+}
+
+.shieldai-loading p.shieldai-subtext {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #6b6b66;
+  margin: 0 0 16px;
+}
+
+.shieldai-request {
+  margin-bottom: 4px;
 }
 
 /* Error */
 .shieldai-error {
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-family: var(--sb-mono);
   font-size: 12px !important;
   color: #141414 !important;
   background: #f7f6f2;
-  border-left: 2px solid #d6d5d0;
+  border-left: 3px solid #8b8b86;
   padding: 8px 10px;
-  border-radius: 0 4px 4px 0;
+  border-radius: 0;
   margin: 8px 0 !important;
   word-break: break-all;
 }
@@ -511,7 +611,7 @@
 }
 .shieldai-modal::-webkit-scrollbar-thumb {
   background: #d6d5d0;
-  border-radius: 3px;
+  border-radius: 0;
 }
 
 /* Phishing Warning Banner: a white strip with the Block red as its lower edge
@@ -527,14 +627,14 @@
   right: 0 !important;
   z-index: 2147483647 !important;
   background: #ffffff !important;
-  border-bottom: 2px solid #c21f30 !important;
+  border-bottom: 3px solid #c21f30 !important;
   padding: 10px 16px !important;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+  font-family: var(--sb-sans) !important;
   font-size: 14px !important;
   color: #141414 !important;
   color-scheme: light !important;
   animation: shieldai-fadein 0.3s ease-out;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28) !important;
 }
 
 .shieldai-phishing-content {
@@ -550,7 +650,7 @@
   flex-shrink: 0 !important;
   background: #c21f30 !important;
   color: #ffffff !important;
-  border-radius: 4px !important;
+  border-radius: 2px !important;
   padding: 4px 10px !important;
   font-size: 16px !important;
   line-height: 1.2 !important;
@@ -566,6 +666,7 @@
 
 .shieldai-phishing-text strong {
   color: #a81a29 !important;
+  font-weight: 500 !important;
 }
 
 .shieldai-phishing-actions {
@@ -580,9 +681,9 @@
   border: 1px solid #141414 !important;
   padding: 8px 16px !important;
   min-height: 44px !important;
-  border-radius: 4px !important;
+  border-radius: 2px !important;
   font-size: 13px !important;
-  font-weight: 600 !important;
+  font-weight: 500 !important;
   font-family: inherit !important;
   cursor: pointer !important;
   transition: background-color 0.15s ease !important;
@@ -598,7 +699,7 @@
   border: 1px solid #8b8b86 !important;
   padding: 8px 12px !important;
   min-height: 44px !important;
-  border-radius: 4px !important;
+  border-radius: 2px !important;
   font-size: 13px !important;
   font-family: inherit !important;
   cursor: pointer !important;
@@ -618,18 +719,20 @@
 /* Transaction Type label */
 .shieldai-action-label {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   color: #141414;
   background: #f7f6f2;
-  border-radius: 4px;
+  border-left: 3px solid #141414;
+  border-radius: 0;
   padding: 8px 12px;
-  display: inline-block;
+  display: block;
 }
 
 /* Signature Request */
 .shieldai-sig-note {
   background: #f7f6f2;
-  border-radius: 4px;
+  border-left: 3px solid #141414;
+  border-radius: 0;
   padding: 10px 12px !important;
 }
 .shieldai-sig-note h3 {
@@ -641,7 +744,8 @@
 }
 .shieldai-sig-message {
   background: #f7f6f2;
-  border-radius: 4px;
+  border: 1px solid #e6e5e1;
+  border-radius: 0;
   padding: 10px 12px;
   font-size: 13px;
   color: #141414;
@@ -652,7 +756,7 @@
   overflow-y: auto;
 }
 .shieldai-sig-binary {
-  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-family: var(--sb-mono);
   font-size: 12px;
   color: #6b6b66;
 }
@@ -660,7 +764,7 @@
 /* Decoded Calldata */
 .shieldai-calldata-section {
   border: 1px solid #e6e5e1;
-  border-radius: 4px;
+  border-radius: 0;
   background: #ffffff;
   overflow: hidden;
 }
@@ -673,7 +777,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 12px 14px;
-  background: transparent;
+  background: #f7f6f2;
   border: 0;
   cursor: pointer;
   font-family: inherit;
@@ -681,10 +785,12 @@
 }
 
 .shieldai-calldata-toggle-label {
-  font-size: 12px;
-  font-weight: 600;
+  font-family: var(--sb-mono);
+  font-size: 11px;
+  font-weight: 400;
   color: #6b6b66;
-  letter-spacing: 0;
+  letter-spacing: .08em;
+  text-transform: uppercase;
   margin: 0;
 }
 
@@ -699,15 +805,15 @@
 }
 
 .shieldai-calldata-body {
-  padding: 0 14px 14px;
+  padding: 4px 14px 12px;
 }
 
 .shieldai-calldata-fn {
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-family: var(--sb-mono);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 400;
   color: #141414;
-  margin-bottom: 8px;
+  padding: 8px 0;
 }
 
 .shieldai-calldata-param {
@@ -719,14 +825,13 @@
   border-top: 1px solid #e6e5e1;
 }
 
-.shieldai-calldata-param:first-of-type {
-  border-top: 0;
-}
-
 .shieldai-calldata-param-name {
+  font-family: var(--sb-mono);
   color: #6b6b66;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding-top: 2px;
 }
 
 .shieldai-calldata-param-value {
@@ -736,24 +841,32 @@
 }
 
 .shieldai-calldata-address {
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 12px;
+  font-family: var(--sb-mono);
+  font-size: 12.5px;
+  word-break: break-all;
 }
 
 .shieldai-calldata-danger {
   color: #a81a29;
-  font-weight: 700;
+  font-weight: 500;
 }
 
-/* Asset Delta (simulated token in/out) */
-.shieldai-delta-list { list-style: none; padding: 0; margin: 4px 0 0; }
-.shieldai-delta-list li { padding: 4px 0; font-size: 14px; font-weight: 600; }
+/* Asset Delta (simulated token in/out): amounts in tabular mono. */
+.shieldai-delta-list { list-style: none; padding: 0; margin: 0; border-top: 1px solid #e6e5e1; }
+.shieldai-delta-list li {
+  padding: 6px 0;
+  font-family: var(--sb-mono);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid #e6e5e1;
+}
 .shieldai-delta-in  { color: #176e48; }
 .shieldai-delta-out { color: #a81a29; }
 .shieldai-sim-badge {
-  font-size: 11px; font-weight: 500; letter-spacing: .04em;
-  background: #f7f6f2; color: #6b6b66; border: 1px solid #e6e5e1; border-radius: 4px;
-  padding: 1px 5px; margin-left: 6px; vertical-align: middle;
+  font-family: var(--sb-mono);
+  font-size: 10.5px; font-weight: 400; letter-spacing: .08em;
+  background: #ffffff; color: #141414; border: 1px solid #8b8b86; border-radius: 0;
+  padding: 1px 5px; margin-left: 6px; vertical-align: 1px;
 }
 
 /* "Why is this risky?" sits above the decision, so the decision is read last. */
@@ -769,7 +882,7 @@
   min-height: 36px;
   border-radius: 2px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   text-decoration: underline;
   text-underline-offset: 3px;
   cursor: pointer;
@@ -786,8 +899,8 @@
   margin: 0 0 14px;
   padding: 10px 12px;
   background: #f7f6f2;
-  border-radius: 0 4px 4px 0;
-  border-left: 2px solid #a3168f;
+  border-radius: 0;
+  border-left: 3px solid #a3168f;
 }
 .shieldai-explain-loading {
   color: #6b6b66;
@@ -801,13 +914,17 @@
   margin: 0;
 }
 
+@media (max-width: 420px) {
+  .shieldai-impact td:first-child { width: 96px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .shieldai-overlay, .shieldai-phishing-banner { animation: none; }
   .shieldai-modal-danger {
     animation: none;
-    box-shadow: 0 0 0 4px rgba(194, 31, 48, .4), 0 1px 3px rgba(0, 0, 0, .12);
+    box-shadow: 0 0 0 4px rgba(194, 31, 48, .4), 0 24px 64px rgba(0, 0, 0, .45);
   }
-  .shieldai-spinner { animation-duration: 2s; }
+  .shieldai-sweep span { animation: none; width: 100%; background: #8b8b86; }
   .shieldai-btn, .shieldai-calldata-chevron, .shieldai-btn-explain,
   .shieldai-phishing-btn-leave, .shieldai-phishing-btn-dismiss { transition-duration: 0s !important; }
 }

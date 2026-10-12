@@ -222,7 +222,7 @@
     }
 
     // Show loading overlay; it must be on screen before any result replaces it
-    await showLoadingOverlay();
+    await showLoadingOverlay(event.data.method, tx, received);
 
     let response;
     try {
@@ -266,10 +266,28 @@
 
   // --- Overlay Management ---
 
+  // A font declared in a shadow root's stylesheet is not loaded, so the
+  // dialog's two families are registered on the document, once, under names no
+  // page uses, when the first overlay, banner or notice is shown. Where the Font
+  // Loading API is missing the dialog keeps overlay.css's fallback stack.
+  let _fontsAdded = false;
+  function addFonts() {
+    if (_fontsAdded || typeof FontFace !== "function" || !document.fonts) return;
+    _fontsAdded = true;
+    for (const [family, file, weight] of [
+      ["ShieldBot Geist", "geist-latin-400-normal.woff2", "400"],
+      ["ShieldBot Geist", "geist-latin-500-normal.woff2", "500"],
+      ["ShieldBot Plex Mono", "ibm-plex-mono-latin-400-normal.woff2", "400"],
+    ]) {
+      document.fonts.add(new FontFace(family, `url("${chrome.runtime.getURL(`fonts/${file}`)}")`, { weight }));
+    }
+  }
+
   // The overlay and the phishing banner live in closed shadow roots. The page
   // sees the host element in its DOM but cannot reach, click or restyle
   // anything inside, and the stylesheet link stays out of the page's head.
   function createShadow() {
+    addFonts();
     const host = document.createElement("div");
     const root = host.attachShadow({ mode: "closed" });
     const style = document.createElement("link");
@@ -308,6 +326,10 @@
   const OUT_OF_VIEW_LIMIT_MS = 10000;
   let _outOfViewTimer = null;
 
+  // The loading overlay's clock: it counts the seconds since the request
+  // arrived, and stops with the overlay.
+  let _elapsedTimer = null;
+
   // The request whose overlay is waiting for the user. inject.js stops its
   // no-verdict timeout once it knows the overlay is on screen, so a request
   // whose overlay goes away without a decision is rejected here.
@@ -333,6 +355,10 @@
     if (_outOfViewTimer !== null) {
       clearTimeout(_outOfViewTimer);
       _outOfViewTimer = null;
+    }
+    if (_elapsedTimer !== null) {
+      clearTimeout(_elapsedTimer);
+      _elapsedTimer = null;
     }
     if (_awaitingRequestId !== null) {
       const requestId = _awaitingRequestId;
@@ -649,10 +675,25 @@
   // covering or altering it. Empty (and not shown) until then.
   const COVERED_NOTE = `<p class="shieldai-covered-note" id="shieldai-covered" role="alert"></p>`;
 
-  async function showLoadingOverlay() {
+  // Seconds as mm:ss.
+  function formatElapsed(ms) {
+    const seconds = Math.floor(ms / 1000);
+    return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+
+  // What is being checked, from the request itself (its method, the address
+  // it goes to and the wallet's chain), and the time since it arrived. The
+  // check reports no progress, so none is shown.
+  async function showLoadingOverlay(method, tx, received) {
     await _loadContentLang();
     removeOverlay();
 
+    const call = tx.callCount ? ` · ${tx.callIndex}/${tx.callCount}` : "";
+    const rows = [
+      typeof method === "string" ? `<tr><td>${_t("overlayMethod")}</td><td class="shieldai-mono">${escapeHtml(method + call)}</td></tr>` : "",
+      typeof tx.to === "string" && tx.to ? `<tr><td>${_t("overlayRecipient")}</td><td class="shieldai-mono">${escapeHtml(tx.to)}</td></tr>` : "",
+      Number.isSafeInteger(tx.chainId) ? `<tr><td>${_t("overlayChainId")}</td><td class="shieldai-mono">${tx.chainId}</td></tr>` : "",
+    ].join("");
     const overlay = document.createElement("div");
     overlay.id = "shieldai-overlay";
     overlay.className = "shieldai-overlay";
@@ -662,14 +703,27 @@
           <span class="shieldai-logo" aria-hidden="true"></span>
           <h2 id="shieldai-title">${_t("overlayTitle")}</h2>
         </div>
-        <div class="shieldai-loading">
-          <div class="shieldai-spinner"></div>
-          <p>${_t("overlayAnalyzing")}</p>
+        <div class="shieldai-loading" role="status">
+          <div class="shieldai-loading-head">
+            <p>${_t("overlayAnalyzing")}</p>
+            <span class="shieldai-elapsed" aria-hidden="true">${_t("overlayElapsed")}<span class="shieldai-elapsed-value" id="shieldai-elapsed">${formatElapsed(Date.now() - received)}</span></span>
+          </div>
+          <div class="shieldai-sweep" aria-hidden="true"><span></span></div>
           <p class="shieldai-subtext">${_t("overlaySubtext")}</p>
+          ${rows ? `<table class="shieldai-impact shieldai-request">${rows}</table>` : ""}
         </div>
       </div>
     `;
-    mountOverlay(overlay);
+    const root = mountOverlay(overlay);
+    const host = _overlayHost;
+    const elapsed = root.getElementById("shieldai-elapsed");
+    const tick = () => {
+      if (_overlayHost !== host) return;
+      const ms = Date.now() - received;
+      elapsed.textContent = formatElapsed(ms);
+      _elapsedTimer = setTimeout(tick, 1000 - (ms % 1000));
+    };
+    tick();
   }
 
   // --- Helpers ---

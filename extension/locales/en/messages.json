@@ -100,6 +100,8 @@
   "overlayTitle": "ShieldBot Firewall",
   "overlayAnalyzing": "Analyzing transaction...",
   "overlaySubtext": "Checking contract, decoding calldata, scanning for threats",
+  "overlayMethod": "Method",
+  "overlayElapsed": "Elapsed",
   "overlayBtnBlock": "Block Transaction",
   "overlayBtnProceed": "Proceed Anyway",
   "overlayBtnReject": "Reject",
