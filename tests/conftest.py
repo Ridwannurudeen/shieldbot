@@ -21,6 +21,7 @@ def mock_web3_client():
     client.is_contract = AsyncMock(return_value=True)
     client.get_bytecode = AsyncMock(return_value="0x6080604052")
     client.is_verified_contract = AsyncMock(return_value=(True, None))
+    client.is_sourcify_verified = AsyncMock(return_value=(True, None))
     client.get_contract_creation_info = AsyncMock(return_value={"age_days": 90})
     client.get_token_info = AsyncMock(return_value={
         "name": "TestToken",

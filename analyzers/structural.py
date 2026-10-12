@@ -57,6 +57,12 @@ class StructuralAnalyzer(Analyzer):
                 f'Structural data unknown: {missing}' if missing else 'Structural provider data incomplete'
             )
         notes = []
+        # A pool's creation dates the token only from below: never shown as an exact age.
+        if data.get('field_providers', {}).get('contract_age_days') == 'launch_table_lower_bound':
+            notes.append(
+                f"Contract age: at least {data['contract_age_days']} days "
+                "(a pool for it was created then; ShieldBot's launch table)"
+            )
         if exemptions:
             named = {'is_verified': 'verification', 'contract_age_days': 'contract age'}
             notes.append(

@@ -134,6 +134,10 @@ class Web3Client:
     ) -> Tuple[Optional[bool], Optional[str]]:
         return await self._get_adapter(chain_id).is_verified_contract(address, code=code)
 
+    async def is_sourcify_verified(self, address: str, chain_id: int = 56) -> Tuple[Optional[bool], Optional[str]]:
+        """Sourcify's verification alone, without the chain's explorer."""
+        return await self._get_adapter(chain_id)._sourcify_verification(address)
+
     async def router_v2_pool(self, router: str, token_a: str, token_b: str, chain_id: int = 56) -> Optional[str]:
         return await self._get_adapter(chain_id).router_v2_pool(router, token_a, token_b)
 

@@ -2663,6 +2663,16 @@ class Database:
                 for launch in launches
             ])
 
+    async def get_launch(self, chain_id: int, token_address: str) -> Optional[Dict]:
+        """A discovered launch's source and earliest block timestamp, or None. One primary-key read on
+        the shared connection; the launch writer uses its own, so this waits on no write lock."""
+        cursor = await self._db.execute(
+            "SELECT source, block_timestamp FROM discovered_launches WHERE chain_id = ? AND token_address = ?",
+            (chain_id, token_address.lower()),
+        )
+        row = await cursor.fetchone()
+        return {"source": row[0], "block_timestamp": row[1]} if row else None
+
     async def get_unscanned_launches(self, chain_id: int, limit: int) -> List[Dict]:
         """Return launches that have not been scanned, newest first."""
         cursor = await self._db.execute("""

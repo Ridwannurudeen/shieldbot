@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import time
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -33,6 +34,15 @@ EXPLORER_RESULT_RESERVE_SECONDS = 0.5
 # A cached official Robinhood token list answers within a few event-loop turns. A cold one (a fetch
 # of up to 10 s) does not hold up the explorer lookups, which start beside it.
 OFFICIAL_LIST_WAIT_SECONDS = 0.05
+# Robinhood Chain launches ShieldBot's own discovery recorded (core.database discovered_launches). A
+# launchpad's creation event is the token's creation, so its block dates the token exactly. A pool's
+# creation (Uniswap V2 PairCreated, V4 Initialize) needs the token to exist already, so it bounds the
+# token's age from below; only a bound of at least the risk rules' 7-day line decides it.
+LAUNCH_CREATION_SOURCES = ('long', 'doppler', 'liquidity_launcher')
+LAUNCH_POOL_SOURCES = ('uniswap_v2', 'uniswap_v4')
+LAUNCH_LOWER_BOUND_MIN_DAYS = 7
+# The launch row is one primary-key read; past this the explorer path runs as before.
+LAUNCH_AGE_READ_TIMEOUT_SECONDS = 0.25
 
 # Words the source line reports, each attributed to a function the deployed code dispatches to
 SOURCE_PATTERNS = [
@@ -178,6 +188,29 @@ class ContractService:
     def __init__(self, web3_client, scam_db):
         self.web3_client = web3_client
         self.scam_db = scam_db
+        # The database with ShieldBot's launch table; the container sets it.
+        self.db = None
+
+    async def _launch_age(self, address: str, chain_id: int) -> Optional[tuple]:
+        """(age in days, provider) from the launch table, or None where it does not decide the age:
+        no row, a pool younger than LAUNCH_LOWER_BOUND_MIN_DAYS, or a read that failed or was slow."""
+        try:
+            launch = await asyncio.wait_for(
+                self.db.get_launch(chain_id, address), LAUNCH_AGE_READ_TIMEOUT_SECONDS,
+            )
+        except Exception as e:
+            logger.warning("Launch table read failed for %s: %s", address, type(e).__name__)
+            return None
+        if launch is None:
+            return None
+        created = datetime.fromtimestamp(launch['block_timestamp'], tz=timezone.utc)
+        # The same day count as an explorer creation date (adapters.evm_base _date_creation).
+        age = (datetime.now(timezone.utc) - created).days
+        if launch['source'] in LAUNCH_CREATION_SOURCES:
+            return age, 'launch_table'
+        if launch['source'] in LAUNCH_POOL_SOURCES and age >= LAUNCH_LOWER_BOUND_MIN_DAYS:
+            return age, 'launch_table_lower_bound'
+        return None
 
     async def fetch_contract_data(
         self, address: str, chain_id: int = 56, robinhood_assets=None, deadline: Optional[float] = None,
@@ -245,16 +278,35 @@ class ContractService:
                 await asyncio.sleep(BSCSCAN_DELAY)
                 return await self.web3_client.get_contract_creation_info(address, chain_id=chain_id)
 
+            def start(lookup):
+                task = asyncio.create_task(lookup)
+                task.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
+                return task
+
+            def wait_timeout():
+                if deadline is None:
+                    return None
+                return max(0.0, deadline - EXPLORER_RESULT_RESERVE_SECONDS - time.monotonic())
+
+            # On Robinhood Chain the launch table can date the token without the explorer. Then only
+            # Sourcify is asked first; Blockscout only if neither it nor GoPlus answers verification.
+            launch = None
+            if exemption is None and chain_id == 4663 and self.db is not None:
+                launch = await self._launch_age(address, chain_id)
+            sourcify = None
+            if launch is not None:
+                results['contract_age_days'], provider = launch
+                results['field_providers'] = {'contract_age_days': provider}
+                sourcify = start(self.web3_client.is_sourcify_verified(address, chain_id=chain_id))
+
             # Verification + source code, and contract age. Below this call both lookups are shielded
             # and cached, so one still running at the deadline fills the caches when it ends.
-            lookups = ()
-            if exemption is None:
-                lookups = (
-                    asyncio.create_task(self.web3_client.is_verified_contract(address, chain_id=chain_id)),
-                    asyncio.create_task(creation_lookup()),
-                )
-                for lookup in lookups:
-                    lookup.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
+            lookups = {}
+            if exemption is None and launch is None:
+                lookups = {
+                    'is_verified': start(self.web3_client.is_verified_contract(address, chain_id=chain_id)),
+                    'contract_age_days': start(creation_lookup()),
+                }
 
             # Scam DB (external APIs, not BscScan — no delay needed)
             scam_matches = await self.scam_db.check_address(address, chain_id=chain_id)
@@ -323,17 +375,24 @@ class ContractService:
                 results['coverage'] = {**results.get('coverage', {}), 'bytecode': False}
                 results['reason'] = '; '.join(filter(None, (results.get('reason'), 'Bytecode scan unavailable')))
 
+            if sourcify is not None:
+                await asyncio.wait((sourcify,), timeout=wait_timeout())
+                if sourcify.done() and isinstance(sourcify.exception(), UnsupportedChainError):
+                    raise sourcify.exception()
+                if sourcify.done() and sourcify.exception() is None and sourcify.result()[0] is True:
+                    results['is_verified'] = True
+                elif goplus.get('is_open_source') not in ('0', '1'):
+                    lookups = {
+                        'is_verified': start(self.web3_client.is_verified_contract(address, chain_id=chain_id)),
+                    }
             if lookups:
-                timeout = None
-                if deadline is not None:
-                    timeout = max(0.0, deadline - EXPLORER_RESULT_RESERVE_SECONDS - time.monotonic())
-                await asyncio.wait(lookups, timeout=timeout)
+                await asyncio.wait(lookups.values(), timeout=wait_timeout())
             if exemption is not None:
                 results['coverage_exemptions'] = exemption
             # The official list answered after the lookups started: it exempts only the fields they
             # left unanswered.
             late = official.result() if official is not None and official.done() else None
-            for field, lookup in zip(('is_verified', 'contract_age_days'), lookups):
+            for field, lookup in lookups.items():
                 if lookup.done() and isinstance(lookup.exception(), UnsupportedChainError):
                     raise lookup.exception()
                 if late is not None and not (
@@ -356,7 +415,7 @@ class ContractService:
             # says whether the source is open, which is the same fact.
             if results['is_verified'] is None and 'is_verified' not in results.get('coverage_exemptions', {}) and goplus.get('is_open_source') in ('0', '1'):
                 results['is_verified'] = goplus['is_open_source'] == '1'
-                results['field_providers'] = {'is_verified': 'goplus'}
+                results['field_providers'] = {**results.get('field_providers', {}), 'is_verified': 'goplus'}
                 field_reasons.pop('is_verified', None)
             if field_reasons:
                 results['coverage_reasons'] = field_reasons

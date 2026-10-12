@@ -248,7 +248,8 @@ def format_full_report(
         verified = 'Unknown' if verified_value is None else ('\u2705' if verified_value else '\u274C')
     lines.append(f'  Verified: {verified}')
     age = contract_data.get('contract_age_days')
-    lines.append(f'  Age: {age} days' if age is not None else '  Age: Unknown')
+    at_least = (contract_data.get('field_providers') or {}).get('contract_age_days') == 'launch_table_lower_bound'
+    lines.append(f"  Age: {'at least ' if at_least else ''}{age} days" if age is not None else '  Age: Unknown')
     ownership = contract_data.get('ownership_renounced')
     renounced = 'Unknown' if ownership is None else ('\u2705' if ownership else '\u274C')
     lines.append(f'  Ownership Renounced: {renounced}')
