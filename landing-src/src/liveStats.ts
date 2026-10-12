@@ -12,9 +12,6 @@ export interface Stats {
     scanned_share: { window_hours: number; launches: number; scanned: number };
   } | null;
   registry_records_confirmed: number | null;
-  evidence_documents: Record<string, number> | null;
-  contracts_scanned: number | null;
-  transactions_blocked: number | null;
 }
 
 export interface LiveStats {

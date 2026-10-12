@@ -1,9 +1,10 @@
-import SectionHeader from "./SectionHeader";
 import { CHECK_ORDER, type CheckKey } from "./CheckRow";
 import { useStats } from "../liveStats";
 
-// Figures from GET /api/stats (api.py public_stats, src/liveStats.ts), fetched when the page loads. A source
-// that is not running reports null there, and each figure then reads Unavailable; nothing is filled in.
+// A band under Why Unknown (same section to the eye: no top padding, no top rule): the check-cell legend, the six
+// check keys in a closed <details>, and three figures from GET /api/stats (api.py public_stats, src/liveStats.ts),
+// fetched when the page loads. A source that is not running reports null there, and each figure then reads
+// Unavailable; nothing is filled in.
 const chainNames: Record<number, string> = {
   1: "Ethereum",
   56: "BNB Chain",
@@ -75,23 +76,19 @@ export default function Mechanism() {
       (id) => chainNames[id] ?? `chain ${id}`,
     ),
   );
-  const evidence = stats?.evidence_documents?.["4663"];
 
   return (
     <section
       id="mechanism"
       aria-labelledby="mechanism-title"
-      className="border-b border-hairline py-16 md:py-24"
+      className="border-b border-hairline pb-16 md:pb-24"
     >
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        <SectionHeader
-          id="mechanism-title"
-          eyebrow="How a check ends"
-          title="Each check runs, or it says it did not."
-          lead="Every request goes through the same checks. When one cannot run, ShieldBot names it and the verdict reads Unknown. Robinhood Chain verdicts from Telegram scans, guard rescans, and launches it blocks or the guard watches are published to the on-chain registry."
-        />
+        <h3 id="mechanism-title" className="text-xl font-medium text-ink md:text-2xl">
+          Each check runs, or it says it did not.
+        </h3>
 
-        <div className="mt-12 grid grid-cols-1 items-start gap-12 lg:grid-cols-[minmax(0,6fr)_minmax(0,5fr)] lg:gap-16">
+        <div className="mt-8 grid grid-cols-1 items-start gap-12 lg:grid-cols-[minmax(0,6fr)_minmax(0,5fr)] lg:gap-16">
           <figure className="rounded-lg border border-hairline bg-ground p-5 sm:p-6">
             <figcaption id="check-definition-title" className="font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-secondary">
               The six check keys
@@ -110,25 +107,28 @@ export default function Mechanism() {
                 Outline: Unavailable
               </span>
             </div>
-            <ol className="mt-5 divide-y divide-hairline border-t border-hairline">
-              {CHECK_ORDER.map((key) => (
-                <li key={key} className="grid grid-cols-[minmax(92px,max-content)_minmax(0,1fr)] gap-x-4 py-3 sm:grid-cols-[minmax(110px,max-content)_minmax(0,1fr)]">
-                  <code className="font-mono text-xs leading-5 text-ink">{key}</code>
-                  <p className="text-[13px] leading-5 text-secondary">{CHECK_MEANINGS[key]}</p>
-                </li>
-              ))}
-            </ol>
-            <p className="mt-4 border-t border-hairline pt-3 text-xs leading-[18px] text-secondary">
+            <p className="mt-4 text-xs leading-[18px] text-secondary">
               A dashed cell is not a pass. If a provider does not return a check, its cell reads Unavailable.
             </p>
+            <details className="disclose mt-3 border-t border-hairline pt-1">
+              <summary>What the six checks mean</summary>
+              <ol className="divide-y divide-hairline border-t border-hairline">
+                {CHECK_ORDER.map((key) => (
+                  <li key={key} className="grid grid-cols-[minmax(92px,max-content)_minmax(0,1fr)] gap-x-4 py-3 sm:grid-cols-[minmax(110px,max-content)_minmax(0,1fr)]">
+                    <code className="font-mono text-xs leading-5 text-ink">{key}</code>
+                    <p className="text-[13px] leading-5 text-secondary">{CHECK_MEANINGS[key]}</p>
+                  </li>
+                ))}
+              </ol>
+            </details>
           </figure>
 
           <div>
-            <div className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-3 lg:grid-cols-1">
               <Figure
                 loading={loading}
                 value={count(stats?.transactions_monitored)}
-                label={`Pending transactions seen${since ? ` since ${since}` : ""}${mempoolChains ? ` on ${mempoolChains}` : ""}, the mempools the monitor could read on its last poll.`}
+                label={`Pending transactions seen${since ? ` since ${since}` : ""}${mempoolChains ? ` on ${mempoolChains}` : ""}`}
               />
               <Figure
                 loading={loading}
@@ -137,29 +137,13 @@ export default function Mechanism() {
                     ? `${count(share.scanned)} of ${count(share.launches)}`
                     : null
                 }
-                label={`New Robinhood Chain launches in the last ${share?.window_hours ?? 24} hours that have a scan outcome.`}
+                label={`Robinhood Chain launches in the last ${share?.window_hours ?? 24} hours with a scan outcome`}
               />
               <Figure
                 loading={loading}
                 value={count(stats?.registry_records_confirmed)}
-                label={`Verdict records confirmed in the Robinhood Chain registry, all time${typeof evidence === "number" ? `, from ${evidence.toLocaleString("en-US")} stored evidence documents` : ""}.`}
+                label="Verdict records confirmed in the Robinhood Chain registry, all time"
               />
-              <div className="border-t border-hairline pt-5 text-sm leading-[21px] text-secondary">
-                <p>
-                  <span className="font-medium text-ink tabular-nums">
-                    {count(stats?.contracts_scanned) ?? (loading ? "…" : "—")}
-                  </span>{" "}
-                  contracts scored by the extension and agent firewalls, all
-                  time.
-                </p>
-                <p className="mt-2">
-                  <span className="font-medium text-ink tabular-nums">
-                    {count(stats?.transactions_blocked) ??
-                      (loading ? "…" : "—")}
-                  </span>{" "}
-                  {stats?.transactions_blocked === 1 ? "transaction" : "transactions"} blocked, all time.
-                </p>
-              </div>
             </div>
             <p className="mt-8 text-xs leading-[18px] text-secondary">
               {stats

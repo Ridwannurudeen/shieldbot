@@ -434,6 +434,28 @@
   }
   .acc-panel[data-open="true"] { grid-template-rows: 1fr; }
   .acc-panel > div { overflow: hidden; }
+
+  /* Judge material a visitor does not need (Mechanism, OnChain, Chains): a native <details>, closed, its summary a
+     44 px row with a plus that turns into a minus. */
+  .disclose > summary {
+    display: flex;
+    min-height: 44px;
+    cursor: pointer;
+    list-style: none;
+    align-items: center;
+    gap: 0.625rem;
+    font-size: 14px;
+    font-weight: 500;
+    color: rgb(var(--c-ink));
+  }
+  .disclose > summary::-webkit-details-marker { display: none; }
+  .disclose > summary::before {
+    content: "+";
+    width: 1rem;
+    font-family: theme("fontFamily.mono");
+    color: rgb(var(--c-accent));
+  }
+  .disclose[open] > summary::before { content: "2"; }
 }
 
 /* Feature tabs (FeatureTabs.tsx): the panel that appears rises from 0.6 opacity over 150 ms. */
