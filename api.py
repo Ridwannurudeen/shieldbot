@@ -203,6 +203,9 @@ async def lifespan(app: FastAPI):
             logger.info("Rate limits kept in Redis")
     # The API serves phishing checks itself, so MetaMask's list refreshes here whichever process runs the work.
     container.phishing_service.start()
+    # The official Robinhood token list loads in the background, so startup and readiness never wait on
+    # it and the first 4663 scans after a deploy find it loaded.
+    _fire_and_forget(container.robinhood_assets.listed(), label="robinhood_official_list")
     _background_workers = settings.background_workers
     if _background_workers == "api":
         await container.start_mempool_monitor()

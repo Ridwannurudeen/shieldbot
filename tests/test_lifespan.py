@@ -1,5 +1,6 @@
 """Integration tests for API startup, mounted routers, and shutdown."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
 
@@ -39,6 +40,7 @@ def mock_container(monkeypatch):
     container.launch_watch.stop = AsyncMock()
     container.verdict_publisher.stop = AsyncMock()
     container.phishing_service.stop = AsyncMock()
+    container.robinhood_assets.listed = AsyncMock(return_value=None)
     container.auth_manager.validate_key = AsyncMock(
         return_value={"key_id": "lifespan-key", "tier": "free"},
     )
@@ -150,3 +152,22 @@ class TestLifespan:
             call.verdict_publisher.stop(),
         ]
         assert [made for made in mock_container.mock_calls if made in loops] == loops
+
+
+def test_the_official_token_list_loads_in_the_background_without_holding_startup(mock_container):
+    import threading
+
+    import api
+
+    released = threading.Event()
+
+    async def slow_list():
+        # A first fetch that has not answered (up to 10 s, or a list API that is down).
+        while not released.is_set():
+            await asyncio.sleep(0.01)
+
+    mock_container.robinhood_assets.listed = AsyncMock(side_effect=slow_list)
+    with TestClient(api.app) as client:
+        assert client.get("/api/health").status_code == 200
+        mock_container.robinhood_assets.listed.assert_awaited_once_with()
+        released.set()

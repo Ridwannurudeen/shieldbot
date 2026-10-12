@@ -152,6 +152,7 @@ class ServiceContainer:
         # Database + Auth + Indexer
         self.db = Database(settings.database_path)
         self.scam_db.db = self.db
+        self.contract_service.db = self.db
         self.auth_manager = AuthManager(self.db)
         self.indexer = DeployerIndexer(self.web3_client, self.db, settings=settings)
         # Verdict evidence storage, plus on-chain records in the Robinhood Chain registry when configured

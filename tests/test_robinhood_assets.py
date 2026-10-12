@@ -866,3 +866,55 @@ def test_letters_that_do_not_fold_to_plain_latin_leave_the_check_unknown(symbol,
 )
 def test_letters_that_fold_are_still_decided(symbol, name, status):
     assert check_token(OTHER, symbol, name, LISTED)["status"] == status
+
+
+@pytest.mark.asyncio
+async def test_a_list_still_loading_does_not_hold_up_the_analyzers(served):
+    # Just after a deploy: the first fetch has not answered. The analyzers go on without the list, and
+    # an official stock gets the full scan, as when the list is unavailable.
+    from unittest.mock import AsyncMock, MagicMock
+
+    from analyzers.honeypot import HoneypotAnalyzer
+    from analyzers.market import MarketAnalyzer
+    from core.analyzer import AnalysisContext
+
+    gate = asyncio.Event()
+    fetch = served.service._fetch
+
+    async def slow_fetch():
+        await gate.wait()
+        return await fetch()
+
+    served.service._fetch = slow_fetch
+    market = MagicMock(fetch_token_market_data=AsyncMock(return_value={"status": "unknown"}))
+    honeypot = MagicMock(fetch_honeypot_data=AsyncMock(return_value={"status": "unknown"}))
+    ctx = AnalysisContext(NVDA, 4663)
+
+    assert await asyncio.wait_for(served.service.official(NVDA, 4663), timeout=1) is None
+    await asyncio.wait_for(MarketAnalyzer(market, served.service).analyze(ctx), timeout=1)
+    await asyncio.wait_for(HoneypotAnalyzer(honeypot, served.service).analyze(ctx), timeout=1)
+    market.fetch_token_market_data.assert_awaited_once()
+    honeypot.fetch_honeypot_data.assert_awaited_once()
+    # Canonical tokens are known without the list.
+    assert (await served.service.official(WETH, 4663))["canonical"] is True
+
+    gate.set()
+    await served.service._refreshing
+    assert (await served.service.official(NVDA, 4663))["status"] == "official"
+    assert served.list_requests == 1
+
+
+@pytest.mark.asyncio
+async def test_while_the_list_api_is_down_callers_do_not_wait_between_retries(served):
+    served.list_status = 503
+    assert await served.service.listed() is None
+    assert served.list_requests == 1
+
+    assert await asyncio.wait_for(served.service.official(NVDA, 4663), timeout=1) is None
+    assert await served.service.listed() is None
+    assert served.list_requests == 1
+
+    served.clock += RETRY_SECONDS
+    served.list_status = 200
+    assert await fresh(served.service) == LISTED
+    assert served.list_requests == 2

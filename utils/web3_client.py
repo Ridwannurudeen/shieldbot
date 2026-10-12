@@ -134,6 +134,9 @@ class Web3Client:
     ) -> Tuple[Optional[bool], Optional[str]]:
         return await self._get_adapter(chain_id).is_verified_contract(address, code=code)
 
+    async def get_transaction_receipt(self, tx_hash: str, chain_id: int = 56) -> Optional[Dict]:
+        return await self._get_adapter(chain_id).get_transaction_receipt(tx_hash)
+
     async def router_v2_pool(self, router: str, token_a: str, token_b: str, chain_id: int = 56) -> Optional[str]:
         return await self._get_adapter(chain_id).router_v2_pool(router, token_a, token_b)
 
