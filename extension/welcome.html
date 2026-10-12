@@ -36,7 +36,6 @@
     #closeLink { display: none; margin-top: 10px; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
     #closeLink:hover { color: var(--accent); }
     .scope { margin-top: 40px; padding: 12px 14px; border-left: 2px solid var(--edge); background: var(--ground-alt); color: var(--secondary); font-size: 13px; line-height: 1.55; }
-    .ledger-title { padding-bottom: 10px; border-bottom: 1px solid var(--ink); color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
     .steps { display: flex; flex-direction: column; margin-bottom: 40px; text-align: left; }
     .step { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 0; padding: 18px 0; border-bottom: 1px solid var(--hairline-strong); }
     .step-icon { color: var(--accent); font-family: var(--mono); font-size: 13px; line-height: 1.6; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
@@ -46,7 +45,8 @@
     .chains { width: 100%; border-collapse: collapse; }
     .chains td { padding: 8px 0; border-bottom: 1px solid var(--hairline-strong); font-size: 14px; }
     .chains td:last-child { color: var(--secondary); font-family: var(--mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
-    .chains-head { display: flex; justify-content: space-between; }
+    .chains th { padding-bottom: 10px; border-bottom: 1px solid var(--ink); color: var(--secondary); font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: .1em; text-align: left; text-transform: uppercase; }
+    .chains th:last-child { text-align: right; }
     .footer { display: flex; align-items: center; gap: 24px; max-width: 1200px; margin: 0 auto; padding: 18px 40px 28px; border-top: 1px solid var(--hairline-strong); }
     .version a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
     .version a:hover { color: var(--accent); }
@@ -109,8 +109,8 @@
         </div>
       </div>
 
-      <div class="ledger-title chains-head"><span data-i18n="labelChain">Chain</span><span>ID</span></div>
       <table class="chains">
+        <thead><tr><th scope="col" data-i18n="labelChain">Chain</th><th scope="col">ID</th></tr></thead>
         <tr><td>Ethereum</td><td>1</td></tr>
         <tr><td>BNB Chain</td><td>56</td></tr>
         <tr><td>opBNB</td><td>204</td></tr>

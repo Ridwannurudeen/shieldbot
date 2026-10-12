@@ -189,14 +189,14 @@
     </div>
   </div>
 
-  <div class="tab-bar">
-    <button class="tab-btn active" data-tab="chat">Chat</button>
-    <button class="tab-btn" data-tab="guardian">Guardian</button>
-    <button class="tab-btn" data-tab="scanner">Scanner</button>
+  <div class="tab-bar" role="tablist" aria-label="ShieldBot AI">
+    <button type="button" class="tab-btn active" id="tab-chat" role="tab" aria-selected="true" aria-controls="chatPanel" data-tab="chat">Chat</button>
+    <button type="button" class="tab-btn" id="tab-guardian" role="tab" aria-selected="false" aria-controls="guardianPanel" tabindex="-1" data-tab="guardian">Guardian</button>
+    <button type="button" class="tab-btn" id="tab-scanner" role="tab" aria-selected="false" aria-controls="scannerPanel" tabindex="-1" data-tab="scanner">Scanner</button>
   </div>
 
   <!-- Chat Panel -->
-  <div id="chatPanel" class="panel active">
+  <div id="chatPanel" class="panel active" role="tabpanel" aria-labelledby="tab-chat">
     <div id="messages"></div>
     <div class="input-area">
       <select id="chainSelect" aria-label="Chain">
@@ -215,7 +215,7 @@
   </div>
 
   <!-- Guardian Panel -->
-  <div id="guardianPanel" class="panel">
+  <div id="guardianPanel" class="panel" role="tabpanel" aria-labelledby="tab-guardian">
     <div id="guardianHealth"></div>
     <div id="guardianAlerts"></div>
     <div class="guardian-toolbar">
@@ -224,7 +224,7 @@
   </div>
 
   <!-- Scanner Panel -->
-  <div id="scannerPanel" class="panel">
+  <div id="scannerPanel" class="panel" role="tabpanel" aria-labelledby="tab-scanner">
     <div class="scanner-input-area">
       <textarea id="injectionInput" aria-label="Text to scan" placeholder="Paste agent prompt, message, or tool input to scan for injection attacks..."></textarea>
       <button id="scanInjectionBtn">Scan for Injection</button>

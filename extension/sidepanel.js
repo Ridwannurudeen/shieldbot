@@ -413,18 +413,36 @@ document.addEventListener("DOMContentLoaded", async () => {
   // -------------------------------------------------------------------
   // Tab switching
   // -------------------------------------------------------------------
-  const tabBtns = document.querySelectorAll(".tab-btn");
+  const tabBtns = Array.from(document.querySelectorAll(".tab-btn"));
   const panels = document.querySelectorAll(".panel");
 
   function switchTab(tabName) {
-    tabBtns.forEach(b => b.classList.toggle("active", b.dataset.tab === tabName));
+    tabBtns.forEach(b => {
+      const selected = b.dataset.tab === tabName;
+      b.classList.toggle("active", selected);
+      b.setAttribute("aria-selected", String(selected));
+      b.tabIndex = selected ? 0 : -1;
+    });
     panels.forEach(p => p.classList.toggle("active", p.id === tabName + "Panel"));
     localStorage.setItem("shieldbot_active_tab", tabName);
     if (tabName === "guardian") loadGuardianData();
   }
 
-  tabBtns.forEach(btn => {
+  tabBtns.forEach((btn, index) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+    // Arrow keys, Home and End move between tabs and open the one they reach, as in the popup.
+    btn.addEventListener("keydown", (event) => {
+      const target = {
+        ArrowRight: (index + 1) % tabBtns.length,
+        ArrowLeft: (index - 1 + tabBtns.length) % tabBtns.length,
+        Home: 0,
+        End: tabBtns.length - 1,
+      }[event.key];
+      if (target === undefined) return;
+      event.preventDefault();
+      tabBtns[target].focus();
+      switchTab(tabBtns[target].dataset.tab);
+    });
   });
 
   // Restore last active tab
