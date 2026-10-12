@@ -3,34 +3,91 @@
 @tailwind utilities;
 
 @layer base {
-  /* One white theme. Text/ground pairs, WCAG contrast (4.5:1 floor):
-     ink on ground 18.42, on ground-alt 17.04, on accent-tint 16.51, on unknown 5.38
-     secondary on ground 5.36, on ground-alt 4.95
-     accent on ground 6.84, on ground-alt 6.33; on-accent on accent 6.84, on accent-hover 8.60
-     safe-text on ground 6.25, on ground-alt 5.78; block-text on ground 7.38, on ground-alt 6.83
-     on-accent on block 5.94, on block-text 7.38
-     on-panel on panel 17.04, on-panel-2 5.38, accent-on-panel 6.48, block-on-panel 6.54 */
+  /* Two themes (THEME-SPEC 1.2, 2.2): dark is the default, light is :root[data-theme="light"], restored before
+     first paint by /js/theme.js and switched by ThemeToggle (src/theme.ts). public/css/tokens.css holds the same
+     values as hex for the static pages. Text/ground pairs, WCAG contrast (4.5:1 floor, edges 3:1):
+     DARK  ink on ground 18.21, on ground-alt 16.59; secondary on ground 7.77, on ground-alt 7.08
+           accent on ground 6.93, on ground-alt 6.31; on-accent on accent-fill 6.84; edge on ground 4.31
+           block-text on ground 6.99; safe-text on ground 10.03; on-unknown on unknown 5.38
+     LIGHT ink on ground 18.42, on ground-alt 17.04; secondary on ground 5.36, on ground-alt 4.95
+           accent on ground 6.84, on ground-alt 6.33; on-accent on accent-fill 6.84; edge on ground 3.42
+           block-text on ground 7.38; safe-text on ground 6.25; on-unknown on unknown 5.38
+     on-paper on paper 18.42 and on-paper-2 on paper 5.36 in both (the hero's plates are constant white). */
   :root {
+    --c-ground: 11 11 10;
+    --c-ground-alt: 23 23 22;
+    --c-panel: 31 31 30;
+    --c-ink: 247 246 242;
+    --c-on-ink: 11 11 10;
+    --c-secondary: 163 163 158;
+    --c-hairline: 35 35 34;
+    --c-hairline-strong: 52 52 51;
+    --c-edge: 118 118 113;
+    --c-accent: 234 102 216;
+    --c-accent-fill: 163 22 143;
+    --c-accent-fill-hover: 138 18 121;
+    --c-on-accent: 255 255 255;
+    --c-accent-tint: 43 18 39;
+    --c-on-panel: 247 246 242;
+    --c-on-panel-2: 163 163 158;
+    --c-accent-on-panel: 234 102 216;
+    --c-block-on-panel: 240 117 106;
+    --c-paper: 255 255 255;
+    --c-on-paper: 20 20 20;
+    --c-on-paper-2: 107 107 102;
+    --c-focus: 234 102 216;
+    --c-shadow: 0 0 0;
+    --c-block: 194 31 48;
+    --c-block-edge: 224 69 86;
+    --c-block-text: 240 117 106;
+    --c-safe: 45 180 124;
+    --c-safe-text: 79 207 149;
+    --c-unknown: 139 139 134;
+    --c-on-unknown: 20 20 20;
+    --c-block-on-paper: 168 26 41;
+    --a-sm: 0.4;
+    --a-md1: 0.3;
+    --a-md2: 0.5;
+    --a-lg: 0.6;
+    color-scheme: dark;
+  }
+
+  :root[data-theme="light"] {
     --c-ground: 255 255 255;
     --c-ground-alt: 247 246 242;
+    --c-panel: 20 20 20;
     --c-ink: 20 20 20;
+    --c-on-ink: 255 255 255;
     --c-secondary: 107 107 102;
     --c-hairline: 230 229 225;
     --c-hairline-strong: 214 213 208;
+    --c-edge: 139 139 134;
     --c-accent: 163 22 143;
-    --c-accent-hover: 138 18 121;
-    --c-accent-tint: 251 239 249;
+    --c-accent-fill: 163 22 143;
+    --c-accent-fill-hover: 138 18 121;
     --c-on-accent: 255 255 255;
-    --c-panel: 20 20 20;
+    --c-accent-tint: 251 239 249;
     --c-on-panel: 247 246 242;
     --c-on-panel-2: 139 139 134;
     --c-accent-on-panel: 234 102 216;
+    --c-block-on-panel: 240 117 106;
+    --c-paper: 255 255 255;
+    --c-on-paper: 20 20 20;
+    --c-on-paper-2: 107 107 102;
+    --c-focus: 163 22 143;
+    --c-shadow: 20 20 20;
+    --c-block: 194 31 48;
+    --c-block-edge: 194 31 48;
+    --c-block-text: 168 26 41;
     --c-safe: 29 138 90;
     --c-safe-text: 23 110 72;
-    --c-block: 194 31 48;
-    --c-block-text: 168 26 41;
-    --c-block-on-panel: 240 117 106;
     --c-unknown: 139 139 134;
+    --c-on-unknown: 20 20 20;
+    --c-block-on-paper: 168 26 41;
+    --a-sm: 0.06;
+    --a-md1: 0.04;
+    --a-md2: 0.06;
+    --a-lg: 0.18;
     color-scheme: light;
   }
 
