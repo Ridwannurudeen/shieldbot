@@ -1,15 +1,16 @@
 """Contract age on Robinhood Chain from ShieldBot's own launch table, used only when proven.
 
-A launchpad's creation event (LONG, Doppler, Uniswap LiquidityLauncher) dates the token exactly, once the
-receipt of the row's transaction, in the row's block, holds that event for this token: its emitter, its
-topic and the token where discovery reads it. A pool (Uniswap V2 PairCreated, V4 Initialize) never calls
-the token and can be made for a predicted address before it exists, so it dates nothing. Anything else,
-and any failed or slow read, leaves the explorer (Blockscout) path as it was.
+A doppler or long row dates the token exactly once the receipt of the row's transaction, in the row's
+block, holds Doppler's Create for this token: its emitter, its topic, four topics and the token at
+topics[2] (the audit is in services/contract_service.py). LONG's own LaunchCreated and Uniswap
+LiquidityLauncher's TokenCreated prove nothing, and a pool (Uniswap V2 PairCreated, V4 Initialize) dates
+nothing. Anything else, and any failed or slow read, leaves the explorer (Blockscout) path as it was.
+Verification is looked up exactly as without the table.
 """
 
 import asyncio
 import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -20,6 +21,7 @@ from core.analyzer import AnalysisContext
 from core.database import Database
 from core.risk_engine import RiskEngine
 from services.contract_service import ContractService
+from services.explorer_service import ExplorerService
 from services.launch_discovery import SOURCES
 from utils.scam_db import ScamMatches
 
@@ -133,27 +135,63 @@ def assert_explorer_dated(mock_web3_client, result, age_days):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("logs", [
-    ("long", "long"),
-    ("long", "doppler"),  # a LONG launch goes through Doppler: its Create proves the creation too
-    ("doppler", "doppler"),
-    ("liquidity_launcher", "liquidity_launcher"),
-], ids=lambda pair: "-".join(pair))
+@pytest.mark.parametrize("source", ["doppler", "long"])  # LONG launches through Doppler
 @pytest.mark.parametrize("days", [3, 40])
-async def test_a_proven_creation_gives_the_exact_age_without_blockscout(db, mock_web3_client, logs, days):
-    source, emitted = logs
+async def test_a_doppler_create_gives_the_exact_age_without_the_creation_lookup(db, mock_web3_client, source, days):
     await record(db, source, days)
-    chain(mock_web3_client, days, receipt(pool_log(), creation_log(emitted)))
+    logs = [pool_log(), creation_log("doppler")]
+    if source == "long":
+        logs.insert(0, creation_log("long"))
+    chain(mock_web3_client, days, receipt(*logs))
 
     result = await scan(service_for(mock_web3_client, db))
 
     mock_web3_client.get_transaction_receipt.assert_awaited_once_with(CREATION_TX, chain_id=CHAIN)
     mock_web3_client.get_contract_creation_info.assert_not_awaited()
-    mock_web3_client.is_verified_contract.assert_not_awaited()  # Sourcify verified it
+    mock_web3_client.is_verified_contract.assert_awaited_once_with(TOKEN, chain_id=CHAIN)
     assert result.data["contract_age_days"] == days
     assert result.data["field_providers"] == {"contract_age_days": "launch_table"}
     assert result.data["status"] == "ok"
     same_verdict(result, await scan(service_for(mock_web3_client)))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["long", "liquidity_launcher"])
+async def test_an_unaudited_launchpad_event_proves_nothing(db, mock_web3_client, source):
+    # LiquidityLauncher announces whatever address a caller's factory returns, and LONG's own
+    # LaunchCreated comes from an unaudited upgradeable proxy: valid events of theirs date nothing.
+    await record(db, source, 40)
+    chain(mock_web3_client, 2, receipt(pool_log(), creation_log(source)))
+
+    result = await scan(service_for(mock_web3_client, db))
+
+    assert_explorer_dated(mock_web3_client, result, 2)
+    assert "Contract age: 2 days" in result.flags
+
+
+@pytest.mark.asyncio
+async def test_a_liquidity_launcher_row_is_not_proven_even_by_a_doppler_create(db, mock_web3_client):
+    await record(db, "liquidity_launcher", 40)
+    chain(mock_web3_client, 2, receipt(creation_log("liquidity_launcher"), creation_log("doppler")))
+
+    result = await scan(service_for(mock_web3_client, db))
+
+    mock_web3_client.get_transaction_receipt.assert_not_awaited()
+    assert_explorer_dated(mock_web3_client, result, 2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timestamp", [time.time() + 3 * 86400, 10**15], ids=["future", "unreadable"])
+async def test_a_timestamp_that_lies_ahead_or_cannot_be_read_gives_no_age(db, mock_web3_client, timestamp):
+    await db.upsert_discovered_launches(CHAIN, [{
+        "token_address": TOKEN, "source": "doppler", "launchpad": "doppler", "source_rank": RANKS["doppler"],
+        "pool_id": None, "block_number": BLOCK, "tx_hash": CREATION_TX, "block_timestamp": int(timestamp),
+    }])
+    chain(mock_web3_client, 3, receipt(creation_log("doppler")))
+
+    result = await scan(service_for(mock_web3_client, db))
+
+    assert_explorer_dated(mock_web3_client, result, 3)
 
 
 @pytest.mark.asyncio
@@ -283,33 +321,72 @@ async def test_an_unproven_creation_is_asked_again(db, mock_web3_client):
 
 
 @pytest.mark.asyncio
-async def test_verification_goes_to_the_explorer_when_neither_sourcify_nor_goplus_answers(db, mock_web3_client):
+async def test_goplus_does_not_overrule_an_explorer_that_says_unverified(db, mock_web3_client):
+    # Sourcify unverified, Blockscout unverified, GoPlus "open source": unverified, as without the table.
     await record(db, "doppler", 40)
     chain(mock_web3_client, 40, receipt(creation_log("doppler")), verified=False)
-    mock_web3_client.is_sourcify_verified = AsyncMock(return_value=(False, None))
-
-    result = await scan(service_for(mock_web3_client, db))
-
-    mock_web3_client.is_verified_contract.assert_awaited_once_with(TOKEN, chain_id=CHAIN)
-    mock_web3_client.get_contract_creation_info.assert_not_awaited()
-    assert (result.data["is_verified"], result.data["contract_age_days"]) == (False, 40)
-    same_verdict(result, await scan(service_for(mock_web3_client)))
-
-
-@pytest.mark.asyncio
-async def test_goplus_answers_verification_without_the_explorer(db, mock_web3_client):
-    await record(db, "doppler", 40)
-    chain(mock_web3_client, 40, receipt(creation_log("doppler")))
-    mock_web3_client.is_sourcify_verified = AsyncMock(return_value=(False, None))
-    service = ContractService(mock_web3_client, scam_db({"is_open_source": "1"}))
+    goplus = {"is_open_source": "1"}
+    service = ContractService(mock_web3_client, scam_db(goplus))
     service.db = db
 
     result = await scan(service)
 
-    mock_web3_client.is_verified_contract.assert_not_awaited()
+    mock_web3_client.is_verified_contract.assert_awaited_once_with(TOKEN, chain_id=CHAIN)
     mock_web3_client.get_contract_creation_info.assert_not_awaited()
-    assert result.data["is_verified"] is True
-    assert result.data["field_providers"] == {"contract_age_days": "launch_table", "is_verified": "goplus"}
+    assert (result.data["is_verified"], result.data["contract_age_days"]) == (False, 40)
+    assert "Contract not verified" in result.flags
+    same_verdict(result, await scan(ContractService(mock_web3_client, scam_db(goplus))))
+
+
+@pytest.mark.asyncio
+async def test_a_clone_of_a_verified_implementation_stays_verified(db, monkeypatch, mock_web3_client):
+    # The full verification lookup runs as without the table: Sourcify and Blockscout say the clone is
+    # unverified, and the EIP-1167 check finds its implementation verified on Sourcify. GoPlus's
+    # "closed source" for the clone itself answers only when that lookup has no answer.
+    monkeypatch.setenv("BLOCKSCOUT_API_KEY", "test-key")
+    implementation = "0x" + "44" * 20
+
+    def sourcify_body(address, verified):
+        match = "match" if verified else None
+        return {"match": match, "creationMatch": match, "runtimeMatch": match,
+                "chainId": str(CHAIN), "address": address}
+
+    def get(url, params=None, **kwargs):
+        if "sourcify" in url:
+            verified = implementation[2:] in url
+            answer = (200 if verified else 404, sourcify_body(implementation if verified else TOKEN, verified))
+        else:
+            answer = (200, {"hash": TOKEN, "is_contract": True, "is_verified": False})
+        response = MagicMock(status=answer[0])
+        response.json = AsyncMock(return_value=answer[1])
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=response)
+        context.__aexit__ = AsyncMock(return_value=False)
+        return context
+
+    session = MagicMock()
+    session.get.side_effect = get
+    adapter = RobinhoodAdapter("https://rpc.invalid")
+    adapter._explorer_service = ExplorerService()
+    adapter.get_bytecode = AsyncMock(
+        return_value="0x363d3d373d3d3d363d73" + implementation[2:] + "5af43d82803e903d91602b57fd5bf3",
+    )
+    await record(db, "doppler", 40)
+    chain(mock_web3_client, 40, receipt(creation_log("doppler")))
+    async def verification(address, chain_id):
+        return await adapter.is_verified_contract(address)
+
+    mock_web3_client.is_verified_contract = AsyncMock(side_effect=verification)
+
+    service = ContractService(mock_web3_client, scam_db({"is_open_source": "0"}))
+    service.db = db
+    with patch("aiohttp.ClientSession") as client:
+        client.return_value.__aenter__.return_value = session
+        result = await scan(service)
+
+    assert (result.data["is_verified"], result.data["contract_age_days"]) == (True, 40)
+    assert "Contract not verified" not in result.flags
+    mock_web3_client.get_contract_creation_info.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -33,15 +33,29 @@ BSCSCAN_DELAY = 0.25
 # analyzers' deadline, so the analyzer returns before the registry cancels it, with only the fields
 # still unanswered named as gaps. Its work after that wait is local.
 EXPLORER_RESULT_RESERVE_SECONDS = 0.5
-# Robinhood Chain launches ShieldBot's own discovery recorded (core.database discovered_launches). A
-# launchpad's creation event (LONG, Doppler, Uniswap LiquidityLauncher) is the token's creation, so its
-# block dates the token exactly. A pool's creation (Uniswap V2 PairCreated, V4 Initialize) never calls
-# the token, so a pool can be made for a predicted address before the token exists: it dates nothing.
-# A row is dated from its earliest event across sources, so its creation event is proven from the
-# transaction's receipt before its age is used.
-LAUNCH_CREATION_SOURCES = {source.name: source for source in SOURCES if source.name in (
-    'long', 'doppler', 'liquidity_launcher',
-)}
+# Robinhood Chain launches ShieldBot's own discovery recorded (core.database discovered_launches). Only
+# Doppler's Create event dates a token, and only once the receipt of the row's transaction proves it: a
+# row is dated from its earliest event across sources, so it can carry another event's block.
+#
+# Audit of the launchpads' verified source on chain, 2026-10-12:
+# - Doppler is sound. DopplerHookInitializer (0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544) emits
+#   Create(address(poolManager), asset, numeraire) only inside initialize(), which requires
+#   msg.sender == airlock (an immutable, ImmutableAirlock) and an Uninitialized pool. Airlock.create()
+#   checks the token factory against its owner's whitelist (_validateModuleState(tokenFactory,
+#   ModuleState.TokenFactory)), deploys the asset with asset = tokenFactory.create(...), and only then
+#   calls poolInitializer.initialize(asset, ...). So a Doppler Create in transaction T means the asset
+#   was deployed in T by a whitelisted factory. This rests on that whitelist: a change to Doppler's
+#   airlock or initializer needs a new audit before this proof is trusted.
+# - Uniswap LiquidityLauncher is not sound: createToken(factory, ...) takes any caller's factory and
+#   emits TokenCreated for whatever address it returns, so it can announce a predicted address days
+#   before a token is deployed there. It proves nothing.
+# - LONG's LaunchCreated comes from an upgradeable proxy (implementation
+#   0x7B7b87fd1Fb05864cD572C7306038552286c73d9) whose create path was not audited, so it proves nothing
+#   by itself. LONG launches through Doppler, so a long row is proven by Doppler's Create in its receipt.
+# - A pool (Uniswap V2 PairCreated, V4 Initialize) never calls the token and can be made for a predicted
+#   address before the token exists: it dates nothing.
+LAUNCH_PROVEN_SOURCES = ('doppler', 'long')
+DOPPLER_CREATE = next(source for source in SOURCES if source.name == 'doppler')
 # The launch row is one primary-key read; past this the explorer path runs as before.
 LAUNCH_AGE_READ_TIMEOUT_SECONDS = 0.25
 # The receipt is one read-RPC request; past this the explorer path runs as before.
@@ -197,29 +211,31 @@ class ContractService:
         self._proven_creations = {}
 
     async def _launch_age(self, address: str, chain_id: int) -> Optional[int]:
-        """The token's age in days from a launchpad creation event in the launch table, proven by the
-        receipt of the row's transaction; None otherwise (no row, a pool row, an unproven row, or a
-        read that failed or was slow), and the explorer path runs as before."""
+        """The token's age in days from Doppler's creation event in the launch table, proven by the
+        receipt of the row's transaction; None otherwise (no row, a row of another source, an unproven
+        row, a timestamp that cannot be read or lies ahead, or a read that failed or was slow), and the
+        explorer path runs as before."""
         key = (chain_id, address.lower())
-        created_at = self._proven_creations.get(key)
-        if created_at is None:
-            created_at = await self._proven_creation(address, chain_id)
-            if created_at is None:
+        created = self._proven_creations.get(key)
+        if created is None:
+            created = await self._proven_creation(address, chain_id)
+            if created is None:
                 return None
-            self._proven_creations[key] = created_at
-        created = datetime.fromtimestamp(created_at, tz=timezone.utc)
+            self._proven_creations[key] = created
         # The same day count as an explorer creation date (adapters.evm_base _date_creation).
-        return (datetime.now(timezone.utc) - created).days
+        age = (datetime.now(timezone.utc) - created).days
+        return age if age >= 0 else None
 
-    async def _proven_creation(self, address: str, chain_id: int) -> Optional[int]:
-        """The row's block timestamp when the receipt of its transaction, in its block, holds a
-        launchpad's creation event for this token, read where discovery reads it."""
+    async def _proven_creation(self, address: str, chain_id: int) -> Optional[datetime]:
+        """When the row's block was made, if the receipt of its transaction, in that block, holds
+        Doppler's Create for this token, read where discovery reads it (see the audit above)."""
         try:
             launch = await asyncio.wait_for(
                 self.db.get_launch(chain_id, address), LAUNCH_AGE_READ_TIMEOUT_SECONDS,
             )
-            if launch is None or launch['source'] not in LAUNCH_CREATION_SOURCES:
+            if launch is None or launch['source'] not in LAUNCH_PROVEN_SOURCES:
                 return None
+            created = datetime.fromtimestamp(launch['block_timestamp'], tz=timezone.utc)
             receipt = await asyncio.wait_for(
                 self.web3_client.get_transaction_receipt(launch['tx_hash'], chain_id=chain_id),
                 LAUNCH_RECEIPT_TIMEOUT_SECONDS,
@@ -232,17 +248,15 @@ class ContractService:
             if not isinstance(receipt, dict) or _quantity(receipt.get('blockNumber')) != block:
                 return None
             logs = receipt.get('logs')
-            # Only a launchpad's own creation event counts: its emitter, its topic, and the token where
-            # discovery reads it. Other logs in the transaction (pools, positions) also name the token.
-            # A LONG launch goes through Doppler, so either launchpad's event proves the creation.
+            # Only Doppler's own Create counts: its emitter, its topic, four topics and the token at
+            # topics[2]. Other logs in the transaction (pools, positions, LONG's) also name the token.
             for log in logs if isinstance(logs, list) else ():
-                for source in LAUNCH_CREATION_SOURCES.values():
-                    try:
-                        tokens, _ = _decode_log(source, log, block, block)
-                    except LaunchDiscoveryError:
-                        continue
-                    if address.lower() in tokens:
-                        return launch['block_timestamp']
+                try:
+                    tokens, _ = _decode_log(DOPPLER_CREATE, log, block, block)
+                except LaunchDiscoveryError:
+                    continue
+                if address.lower() in tokens:
+                    return created
         except LaunchDiscoveryError:
             return None
         logger.warning("Launch creation of %s not in its transaction's receipt", address)
@@ -307,7 +321,7 @@ class ContractService:
                     official.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
                     await asyncio.wait((official,), timeout=OFFICIAL_LIST_WAIT_SECONDS)
                     if official.done():
-                        exemption = official.result()
+                        exemption = official.result() if official.exception() is None else None
                         official = None
 
             async def creation_lookup():
@@ -324,25 +338,22 @@ class ContractService:
                     return None
                 return max(0.0, deadline - EXPLORER_RESULT_RESERVE_SECONDS - time.monotonic())
 
-            # On Robinhood Chain the launch table can date the token without the explorer. Then only
-            # Sourcify is asked first; Blockscout only if neither it nor GoPlus answers verification.
+            # On Robinhood Chain the launch table can date the token without the explorer's creation
+            # lookup. Verification is looked up as everywhere else.
             launch = None
             if exemption is None and chain_id == 4663 and self.db is not None:
                 launch = await self._launch_age(address, chain_id)
-            sourcify = None
             if launch is not None:
                 results['contract_age_days'] = launch
                 results['field_providers'] = {'contract_age_days': 'launch_table'}
-                sourcify = start(self.web3_client.is_sourcify_verified(address, chain_id=chain_id))
 
             # Verification + source code, and contract age. Below this call both lookups are shielded
             # and cached, so one still running at the deadline fills the caches when it ends.
             lookups = {}
-            if exemption is None and launch is None:
-                lookups = {
-                    'is_verified': start(self.web3_client.is_verified_contract(address, chain_id=chain_id)),
-                    'contract_age_days': start(creation_lookup()),
-                }
+            if exemption is None:
+                lookups['is_verified'] = start(self.web3_client.is_verified_contract(address, chain_id=chain_id))
+                if launch is None:
+                    lookups['contract_age_days'] = start(creation_lookup())
 
             # Scam DB (external APIs, not BscScan — no delay needed)
             scam_matches = await self.scam_db.check_address(address, chain_id=chain_id)
@@ -411,23 +422,16 @@ class ContractService:
                 results['coverage'] = {**results.get('coverage', {}), 'bytecode': False}
                 results['reason'] = '; '.join(filter(None, (results.get('reason'), 'Bytecode scan unavailable')))
 
-            if sourcify is not None:
-                await asyncio.wait((sourcify,), timeout=wait_timeout())
-                if sourcify.done() and isinstance(sourcify.exception(), UnsupportedChainError):
-                    raise sourcify.exception()
-                if sourcify.done() and sourcify.exception() is None and sourcify.result()[0] is True:
-                    results['is_verified'] = True
-                elif goplus.get('is_open_source') not in ('0', '1'):
-                    lookups = {
-                        'is_verified': start(self.web3_client.is_verified_contract(address, chain_id=chain_id)),
-                    }
             if lookups:
                 await asyncio.wait(lookups.values(), timeout=wait_timeout())
             if exemption is not None:
                 results['coverage_exemptions'] = exemption
             # The official list answered after the lookups started: it exempts only the fields they
             # left unanswered.
-            late = official.result() if official is not None and official.done() else None
+            late = (
+                official.result() if official is not None and official.done() and official.exception() is None
+                else None
+            )
             for field, lookup in lookups.items():
                 if lookup.done() and isinstance(lookup.exception(), UnsupportedChainError):
                     raise lookup.exception()

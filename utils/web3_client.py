@@ -137,10 +137,6 @@ class Web3Client:
     async def get_transaction_receipt(self, tx_hash: str, chain_id: int = 56) -> Optional[Dict]:
         return await self._get_adapter(chain_id).get_transaction_receipt(tx_hash)
 
-    async def is_sourcify_verified(self, address: str, chain_id: int = 56) -> Tuple[Optional[bool], Optional[str]]:
-        """Sourcify's verification alone, without the chain's explorer."""
-        return await self._get_adapter(chain_id)._sourcify_verification(address)
-
     async def router_v2_pool(self, router: str, token_a: str, token_b: str, chain_id: int = 56) -> Optional[str]:
         return await self._get_adapter(chain_id).router_v2_pool(router, token_a, token_b)
 
