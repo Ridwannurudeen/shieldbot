@@ -119,7 +119,7 @@ function Commit() {
           </svg>
           {record
             ? confirmed
-              ? "Recorded on Robinhood Chain"
+              ? "Confirmed on Robinhood Chain"
               : `Status ${record.onchain_status}`
             : record === undefined
               ? "Loading the registry record"
@@ -157,7 +157,10 @@ export default function HeroRecord() {
     if (!on) return;
     const element = ref.current!;
     const fade = setTimeout(() => (element.dataset.out = ""), 13_600);
-    const again = setTimeout(() => setRun(run + 1), 14_000);
+    const again = setTimeout(() => {
+      delete element.dataset.out;
+      setRun(run + 1);
+    }, 14_000);
     return () => {
       clearTimeout(fade);
       clearTimeout(again);

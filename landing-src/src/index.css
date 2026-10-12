@@ -235,7 +235,8 @@
    The final frame is the base style: the signing card receded behind the overlay's verdict dialog, the record read,
    the commit card at the stage's foot. Depth is 2D only: scale and shadow, no tilt, nothing dims the page.
      0     1. the signing card rises into the stage (from 0.6, 28 px, scale .97), the request line wipes in
-     1100  2. the loading dialog slides up over it (48 px, scale .94); the card recedes (scale .96, -8 px)
+     1100  2. the loading dialog slides up over it (48 px, scale .94); the card recedes (scale .96, -8 px). The two
+              captures carry text, so they are revealed by a clip, never faded in
      1700  3. a 4 px needle with a trail reads each large cell, 520 ms each, 400 ms apart; a cell that ran fills and
               presses (scale .9); on one that did not, the needle stalls part way and fades, the dashed edge draws
               and its served reason settles beside the row
@@ -251,6 +252,7 @@
 .vr-hero .vr-slot { width: 100%; max-width: 88px; height: auto; aspect-ratio: 1; }
 .vr-hero .vr-slot + span { font-size: 13px; line-height: 18px; }
 .vr-hero .vr-cell { border-width: 2px; }
+.vr-hero > article { overflow-x: clip; }
 
 @media (prefers-reduced-motion: no-preference) {
   :root { --e-stamp: cubic-bezier(0.2, 0.9, 0.1, 1); }
@@ -320,15 +322,23 @@
 @keyframes vr-settle-legible { from { opacity: 0.6; transform: translateX(-6px); } }
 @keyframes story-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes hero-loading {
-  0%, 22% { opacity: 0; transform: translateY(48px) scale(0.94); animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
-  34%, 93% { opacity: 1; transform: none; }
-  to { opacity: 0; transform: none; }
+  0%, 22% {
+    opacity: 1;
+    clip-path: inset(calc(100% + 48px) -48px -48px);
+    transform: translateY(48px) scale(0.94);
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  34%, 99% { opacity: 1; clip-path: inset(-48px); transform: none; }
+  to { opacity: 0; clip-path: inset(-48px); transform: none; }
 }
 @keyframes hero-card {
   from { opacity: 0.6; transform: translateY(28px) scale(0.97); }
   35%, 61% { opacity: 1; transform: none; }
 }
-@keyframes hero-verdict { from { opacity: 0; transform: scale(0.97); } }
+@keyframes hero-verdict {
+  from { clip-path: inset(0 -48px 100%); transform: scale(0.97); }
+  to { clip-path: inset(-48px); }
+}
 @keyframes hero-commit { from { transform: translateY(calc(100% + 16px)); } }
 @keyframes hero-seal { from { stroke-dashoffset: 1; } }
 @keyframes vr-press { 40% { transform: scale(0.9); } }
