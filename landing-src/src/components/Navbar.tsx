@@ -7,6 +7,8 @@ const links = [
   { label: "How it works", href: "#how-it-works" },
   { label: "Coverage", href: "#chains" },
   { label: "On-chain registry", href: "#on-chain" },
+  { label: "Telegram", href: "#telegram" },
+  { label: "Safety guide", href: "/safety.html" },
   { label: "For builders", href: "#agent-security" },
   { label: "Dashboard", href: "/dashboard" },
 ];

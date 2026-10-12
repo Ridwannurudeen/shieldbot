@@ -39,8 +39,8 @@ const faqs = [
     a: "The extension shows a safety score out of 100, where higher is safer. It is 100 minus ShieldBot's risk score. 70 or above is SAFE, 51 to 69 is CAUTION, 30 to 50 is HIGH RISK, and 29 or below is BLOCK RECOMMENDED. If a check could not run, the score shows as Unknown instead of a number.",
   },
   {
-    q: "Does ShieldBot work with MetaMask?",
-    a: "It hooks window.ethereum and listens for EIP-6963 wallet announcements, so it is designed for MetaMask and other injected wallets. Testing across every wallet is still in progress.",
+    q: "I think I signed something bad. What now?",
+    a: "Revoke the approval first, in your wallet's approval settings or at revoke.cash, then move what is left to a fresh wallet and do not sign any refund or recovery offer. In Telegram, /rescue <wallet> counts your ERC-20 allowances on a chain and lists the risky ones, and /report <address> <reason> flags the address. The full steps are in the Safety guide at shieldbotsecurity.online/safety.html.",
   },
 ];
 

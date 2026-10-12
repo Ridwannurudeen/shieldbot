@@ -140,6 +140,7 @@ export default function Footer() {
               <h2 className={headingClass}>Product</h2>
               <div className="mt-4 flex flex-col gap-1">
                 <a href="#how-it-works" className={linkClass}>How it works</a>
+                <a href="/safety.html" className={linkClass}>Safety guide</a>
                 <a href="#chains" className={linkClass}>Coverage</a>
                 <a href="#on-chain" className={linkClass}>On-chain registry</a>
                 <a href="#agent-security" className={linkClass}>For builders</a>

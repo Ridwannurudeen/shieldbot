@@ -1,5 +1,6 @@
 import Navbar from "./components/Navbar";
 import Hero from "./components/Hero";
+import WhyShieldBot from "./components/WhyShieldBot";
 import TryIt from "./components/TryIt";
 import WhyUnknown from "./components/WhyUnknown";
 import Mechanism from "./components/Mechanism";
@@ -9,6 +10,8 @@ import FeatureTabs from "./components/FeatureTabs";
 import WorkedExample from "./components/WorkedExample";
 import OnChain from "./components/OnChain";
 import AgentSecurity from "./components/AgentSecurity";
+import Telegram from "./components/Telegram";
+import StaySafe from "./components/StaySafe";
 import FAQ from "./components/FAQ";
 import CtaCard from "./components/CtaCard";
 import Footer from "./components/Footer";
@@ -25,6 +28,7 @@ export default function App() {
       <Navbar />
       <main id="main" tabIndex={-1} className="focus:outline-none">
         <Hero />
+        <WhyShieldBot />
         <TryIt />
         <WhyUnknown />
         <Mechanism />
@@ -34,6 +38,8 @@ export default function App() {
         <HowItWorks />
         <FeatureTabs />
         <AgentSecurity />
+        <Telegram />
+        <StaySafe />
         <FAQ />
         <CtaCard />
       </main>
