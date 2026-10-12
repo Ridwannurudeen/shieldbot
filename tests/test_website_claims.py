@@ -192,7 +192,7 @@ def test_the_site_says_the_robinhood_contracts_are_deployed():
     for name, text in pages.items():
         stale = re.search(r"deployment[^.]*in progress", " ".join(text.split()), re.IGNORECASE)
         assert not stale, f"{name}: {stale.group(0)!r}"
-    for component in ("FAQ.tsx", "HowItWorks.tsx"):
+    for component in ("FAQ.tsx", "FeatureTabs.tsx"):
         prose = " ".join(read(COMPONENTS / component).split())
         assert "deployed on Robinhood Chain on 27 September 2026" in prose, component
 
