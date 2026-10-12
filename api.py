@@ -1457,16 +1457,15 @@ async def _firewall_verdict(
             # Verification takes up to 8 s on Robinhood Chain (Sourcify and Blockscout) and 16 s
             # on an Etherscan chain, so it runs beside the analyzers. When the intent analyzer will
             # read it, it is settled first, as before, so that wait is not spent inside the
-            # analyzers' deadline. Otherwise nothing waits on it: the structural analyzer reads
-            # verification itself, sharing these lookups.
+            # analyzers' deadline.
             if is_contract is not False:
                 verification = asyncio.create_task(_target_verification(to_addr, req.chainId, code))
+                if progress is not None:
+                    progress.deadline_pending.add("verification")
                 verification.add_done_callback(
                     lambda task: task.exception() if not task.cancelled() else None
                 )
                 if reads_verification(req.data, req.value):
-                    if progress is not None:
-                        progress.deadline_pending.add("verification")
                     await verification
                     if progress is not None:
                         progress.deadline_pending.discard("verification")
@@ -1519,6 +1518,11 @@ async def _firewall_verdict(
                 )
                 analyzer_results = None
                 simulation_result = None
+            if verification is not None:
+                await verification
+                if progress is not None:
+                    progress.deadline_pending.discard("verification")
+
             # Compute risk from analyzer results
             if analyzer_results is not None:
                 risk_output = risk_engine.compute_from_results(analyzer_results, is_token=is_token)
