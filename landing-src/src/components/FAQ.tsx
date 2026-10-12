@@ -32,7 +32,7 @@ const faqs = [
   },
   {
     q: "What happens when ShieldBot detects a threat?",
-    a: "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation. On a known phishing site a red banner appears. For a warning you choose to cancel or sign; Strict mode takes that choice away for Block Recommended and Unknown results and when the check could not run. The extension also refuses a request on its own when the check times out after 60 seconds, when your wallet's chain is unknown, unsupported or changes during the check (including a wallet_sendCalls batch with a call on another chain), when the request comes from a frame or popup the page can script, or when the site uses the older send or sendAsync methods.",
+    a: "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation. On a known phishing site a warning banner appears. For a warning you choose to cancel or sign; Strict mode takes that choice away for Block Recommended and Unknown results and when the check could not run. The extension also refuses a request on its own when the check times out after 60 seconds, when your wallet's chain is unknown, unsupported or changes during the check (including a wallet_sendCalls batch with a call on another chain), when the request comes from a frame or popup the page can script, or when the site uses the older send or sendAsync methods.",
   },
   {
     q: "What is the safety score?",

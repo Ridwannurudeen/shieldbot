@@ -69,7 +69,7 @@
       min-height: 64px;
       margin: 0 auto;
     }
-    .nav-links { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 24px; }
+    .nav-links { display: flex; flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: 4px 24px; }
     .nav-links a { display: inline-flex; align-items: center; min-height: 44px; color: var(--ink); font-size: 15px; text-decoration: none; }
     .theme-toggle {
       display: inline-flex;
@@ -94,7 +94,12 @@
       margin: 0 auto;
       padding: 48px 0 88px;
     }
-    main p { margin: 0; font-size: 18px; }
+    main h1 { margin: 0; font-size: 32px; font-weight: 500; line-height: 1.15; letter-spacing: -0.03em; }
+    .footer { border-top: 1px solid var(--hairline-strong); background: var(--ground-alt); }
+    .footer-inner { width: calc(100% - 32px); max-width: 1152px; margin: 0 auto; padding: 24px 0; }
+    .footer-links { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+    .footer-links a { display: inline-flex; align-items: center; min-height: 40px; color: var(--ink); font-size: 14px; text-decoration: none; }
+    .footer-links a:hover { color: var(--accent); }
     @media (max-width: 600px) {
       main { padding: 36px 0 64px; }
       .nav-inner { gap: 12px; }
@@ -112,8 +117,6 @@
     <div class="nav-inner">
       <div class="nav-links">
         <a href="/">Home</a>
-        <a href="/#telegram">Telegram</a>
-        <a href="/safety.html">Safety guide</a>
         <a href="/dashboard">Dashboard</a>
       </div>
       <button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Light theme" title="Light theme">
@@ -129,8 +132,17 @@
   </nav>
 
   <main>
-    <p>That address does not resolve.</p>
+    <h1>That address does not resolve.</h1>
   </main>
 
+  <footer class="footer">
+    <div class="footer-inner">
+      <nav class="footer-links" aria-label="Legal">
+        <a href="/privacy.html">Privacy Policy</a>
+        <a href="/terms.html">Terms of Service</a>
+        <a href="/security.html">Security</a>
+      </nav>
+    </div>
+  </footer>
 </body>
 </html>
