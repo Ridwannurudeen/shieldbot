@@ -1025,13 +1025,13 @@ context.renderHealthData({
   high_risk: 0, medium_risk: 0, approvals: [{risk_level: 'unknown', token_symbol: 'TKN', spender: '0xabc'}],
 }, ctx);
 assert.notEqual(ctx.scoreNumEl.textContent, 100);
-assert.notEqual(ctx.scoreNumEl.style.color, '#176E48');
+assert.notEqual(ctx.scoreNumEl.style.color, 'var(--safe-text)');
 assert(!ctx.approvalsEl.innerHTML.includes('risk-low'));
 context.renderHealthData({
   high_risk: 0, medium_risk: 0, approvals: [{risk_level: 'LOW', token_symbol: 'TKN', spender: '0xabc'}],
 }, ctx);
 assert.equal(ctx.scoreNumEl.textContent, 100);
-assert.equal(ctx.scoreNumEl.style.color, '#176E48');
+assert.equal(ctx.scoreNumEl.style.color, 'var(--safe-text)');
 assert(ctx.approvalsEl.innerHTML.includes('risk-low'));
 '''
     result = subprocess.run(
@@ -1148,7 +1148,7 @@ if (surface === 'sidepanel-guardian') {
   let html = context.guardianHealthEl.innerHTML;
   assert(!html.includes('$0'));
   assert(html.includes('Unknown'));
-  assert(!html.includes('#176E48'));
+  assert(!html.includes('var(--safe-text)'));
   context.renderGuardianHealth({
     health_score: 50, level: 'unknown', status: 'unknown', total_value_at_risk_usd: null,
     coverage_reasons: {dangerous_approvals: 'dangerous_approvals data incomplete'},
@@ -1162,7 +1162,7 @@ if (surface === 'sidepanel-guardian') {
   });
   html = context.guardianHealthEl.innerHTML;
   assert(html.includes('$0.00'));
-  assert(html.includes('#176E48'));
+  assert(html.includes('var(--safe-text)'));
 } else {
   vm.runInContext(fs.readFileSync('extension/popup.js', 'utf8'), context);
   context.escapeHtml = String;
