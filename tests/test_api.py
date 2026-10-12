@@ -770,7 +770,7 @@ async def test_the_target_code_is_read_once_and_a_wallet_is_not_verified(
         api.web3_client.is_verified_contract.assert_awaited_once_with(target, chain_id=56, code=code)
     else:
         api.web3_client.is_verified_contract.assert_not_awaited()
-        assert ctx.extra["is_verified"] is None
+        assert ctx.extra["verification"] is None
 
 
 APPROVE = {
@@ -880,18 +880,20 @@ async def test_resolve_token_preserves_routing_error(routing_error_api):
 
 @pytest.mark.asyncio
 async def test_router_analysis_preserves_routing_error(routing_error_api):
+    # A swap token's verification is read by the structural analyzer, whose routing error the
+    # registry raises; the router path has no verification lookup of its own.
     from utils.web3_client import UnsupportedChainError
 
     api, services, _, _ = routing_error_api
     error = UnsupportedChainError("removed chain")
-    api.web3_client.is_verified_contract.side_effect = error
+    services.registry.run_all.side_effect = error
     req = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40)
     with pytest.raises(UnsupportedChainError) as exc:
         await api._analyze_router_swap(
             req, req.to, req.sender, {"params": {"path": ["0x" + "c" * 40]}}, "Router", 0,
         )
     assert exc.value is error
-    services.registry.run_all.assert_not_awaited()
+    api.web3_client.is_verified_contract.assert_not_awaited()
 
 
 @pytest.mark.asyncio

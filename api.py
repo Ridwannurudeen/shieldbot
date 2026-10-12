@@ -32,6 +32,7 @@ from utils.scam_db import BLACKLIST_RELOAD_SECONDS
 from core.risk_engine import HONEYPOT_FLOOR, apply_local_match, database_matches, medium_matches, scam_match_floor
 from services import rpc_guard
 from services.counterparty_service import code_kind
+from analyzers.intent import reads_verification
 from services.mempool_service import supports_pending_transactions
 from core import verdicts
 from core.auth import TIER_LIMITS, hash_key
@@ -67,6 +68,10 @@ MAX_FIREWALL_DATA_CHARS = 200_000
 MAX_TYPED_DATA_CHARS = 100_000
 MAX_INJECTION_CONTENT_CHARS = 50_000
 MAX_PHISHING_URL_CHARS = 2_048
+FIREWALL_REQUEST_DEADLINE_SECONDS = 7.5
+FIREWALL_RESPONSE_RESERVE_SECONDS = 0.5
+ROUTER_TOKEN_ANALYSIS_CONCURRENCY = 2
+ROUTER_RESULT_RESERVE_SECONDS = 0.1
 
 
 # --- Rate Limiter ---
@@ -1083,17 +1088,103 @@ async def firewall(req: FirewallRequest, request: Request):
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
-    return await _firewall_response(req, request)
+    return await _firewall_response(req, request, deadline=_firewall_deadline(req, time.monotonic()))
+
+
+def _firewall_deadline(req: FirewallRequest, started: float) -> Optional[float]:
+    """When a firewall request must answer: FIREWALL_REQUEST_DEADLINE_SECONDS after it started on
+    Robinhood Chain, where it was measured; no request-wide deadline on other chains."""
+    return started + FIREWALL_REQUEST_DEADLINE_SECONDS if req.chainId == 4663 else None
+
+
+def _firewall_deadline_response(
+    req: FirewallRequest, progress: FirstVerdictProgress, elapsed_ms: int,
+) -> Dict:
+    transaction = progress.describe() if progress.describe else {
+        "decoded_action": "Transaction analysis",
+        "calldata_details": {},
+        "transaction_impact": {
+            "sending": "Unknown",
+            "granting_access": "Unknown",
+            "recipient": req.to,
+            "post_tx_state": "Analysis incomplete (provider deadline reached)",
+        },
+        "chain_id": req.chainId,
+        "network": _chain_id_to_name(req.chainId),
+    }
+    response = build_first_verdict(progress, transaction, elapsed_ms)
+    pending = sorted(progress.pending | progress.deadline_pending) or ["firewall_response"]
+    reason = "Provider timed out at the firewall request deadline"
+    response["coverage"] = {
+        **response.get("coverage", {}),
+        **{source: 0 for source in pending},
+    }
+    response["coverage_reasons"] = {source: reason for source in pending}
+    response["risk_display"] = "Unknown (provider deadline reached)"
+    response["verdict"] = f"{response['classification']} — {response['risk_display']}"
+    response["partial"] = True
+    response["final"] = True
+    response["pending_sources"] = pending
+    response["elapsed_ms"] = elapsed_ms
+    if response.get("transaction_impact"):
+        response["transaction_impact"]["post_tx_state"] = (
+            "Analysis incomplete (provider deadline reached)"
+        )
+
+    registry = container.registry if container else None
+    analyzers = registry.get_all() if registry and hasattr(registry, "get_all") else []
+    analyzer_names = {analyzer.name for analyzer in analyzers}
+    failed = [
+        source for source in pending
+        if source in analyzer_names or source.rsplit(":", 1)[-1] in analyzer_names
+    ]
+    if progress.policy_mode == PolicyMode.STRICT.value and failed:
+        response["classification"] = verdicts.BLOCK_RECOMMENDED
+        response["risk_score"] = max(response["risk_score"], verdicts.STRICT_BLOCK_SCORE)
+        response["risk_level"] = verdicts.HIGH
+        response["policy_override"] = verdicts.BLOCK_RECOMMENDED
+        response["failed_sources"] = failed
+        response["danger_signals"].insert(
+            0, f"Policy override: {len(failed)} analyzer(s) unavailable ({', '.join(failed)})"
+        )
+        response["verdict"] = f"{response['classification']} — {response['risk_display']}"
+    return response
 
 
 async def _firewall_response(
     req: FirewallRequest, request: Request, progress: Optional[FirstVerdictProgress] = None,
+    deadline: Optional[float] = None,
 ) -> Dict:
     """The firewall's verdict with its stored evidence: the plain response, and the stream's final."""
     trail = {}
-    response = await _firewall_verdict(req, request, trail, progress)
+    if progress is None:
+        registry = container.registry if container else None
+        analyzers = registry.get_all() if registry and hasattr(registry, "get_all") else []
+        progress = FirstVerdictProgress(
+            [analyzer.name for analyzer in analyzers], _policy_mode(request),
+        )
+    work_deadline = (
+        deadline - FIREWALL_RESPONSE_RESERVE_SECONDS if deadline is not None else None
+    )
+    try:
+        if work_deadline is None:
+            response = await _firewall_verdict(req, request, trail, progress)
+        else:
+            async with asyncio.timeout_at(work_deadline):
+                response = await _firewall_verdict(
+                    req, request, trail, progress, deadline=work_deadline,
+                )
+    except TimeoutError:
+        # Only the request's own deadline; a provider's TimeoutError is not relabelled as it.
+        if work_deadline is None or time.monotonic() < work_deadline:
+            raise
+        started = deadline - FIREWALL_REQUEST_DEADLINE_SECONDS
+        response = _firewall_deadline_response(
+            req, progress, round((time.monotonic() - started) * 1000),
+        )
     return await _with_evidence(
-        response, "/api/firewall", req.chainId, caller=_checksum_if_possible(req.sender), **trail,
+        response, "/api/firewall", req.chainId, deadline=deadline,
+        caller=_checksum_if_possible(req.sender), **trail,
     )
 
 
@@ -1145,7 +1236,10 @@ async def _firewall_events(req: FirewallRequest, request: Request, started: floa
         [analyzer.name for analyzer in container.registry.get_all()] if container and container.registry else [],
         policy_mode,
     )
-    scan = _fire_and_forget(_firewall_response(req, request, progress), label="firewall_stream_scan")
+    scan = _fire_and_forget(
+        _firewall_response(req, request, progress, deadline=_firewall_deadline(req, started)),
+        label="firewall_stream_scan",
+    )
     block_known = asyncio.ensure_future(progress.block_known.wait())
     timings = {
         "chain_id": req.chainId, "first_at_ms": None, "first_kind": "none", "pending_at_first": None,
@@ -1183,8 +1277,20 @@ async def _firewall_events(req: FirewallRequest, request: Request, started: floa
         logger.info("Firewall stream %s", json.dumps(timings, sort_keys=True))
 
 
+async def _target_verification(address: str, chain_id: int, code: Optional[str]) -> Optional[bool]:
+    """Whether the target's source is verified; None when it could not be read."""
+    try:
+        result = await web3_client.is_verified_contract(address, chain_id=chain_id, code=code)
+    except UnsupportedChainError:
+        raise
+    except Exception:
+        return None
+    return result[0] if isinstance(result, tuple) else result
+
+
 async def _firewall_verdict(
     req: FirewallRequest, request: Request, trail: Dict, progress: Optional[FirstVerdictProgress] = None,
+    deadline: Optional[float] = None,
 ) -> Dict:
     """The firewall's verdict. Each path records in `trail` what its evidence document needs:
     target, target_token, transaction (transaction-specific verdicts only), analyzers,
@@ -1241,7 +1347,11 @@ async def _firewall_verdict(
             run_options = {"on_result": progress.add_result}
 
         # Enrich decoded calldata with token names and formatted amounts
+        if progress is not None:
+            progress.deadline_pending.add("token_metadata")
         await _enrich_decoded(decoded, to_addr, chain_id=req.chainId)
+        if progress is not None:
+            progress.deadline_pending.discard("token_metadata")
         if decoded.get('token_symbol'):
             trail['target_token'] = {'name': decoded.get('token_name'), 'symbol': decoded['token_symbol']}
 
@@ -1286,6 +1396,7 @@ async def _firewall_verdict(
                 policy_mode=policy_mode,
                 trail=trail,
                 progress=progress,
+                deadline=deadline,
             )
             if router_response:
                 return router_response
@@ -1294,7 +1405,11 @@ async def _firewall_verdict(
         # so a target with a local blacklist entry (admin or community: both set a floor) is scanned
         # afresh: an entry added since the row was written must not be answered with the row.
         if container and container.db and not tx_specific and local_match is None:
+            if progress is not None:
+                progress.deadline_pending.add("contract_score_cache")
             cached = await container.db.get_contract_score(to_addr, req.chainId, max_age_seconds=300)
+            if progress is not None:
+                progress.deadline_pending.discard("contract_score_cache")
             if cached and cached.get('category_scores', {}).get('_scan_metadata', {}).get('coverage'):
                 # A full rescan costs provider calls, so only a caller with a valid API key can force one
                 # with STRICT. Anyone else is answered from the cached facts in STRICT mode.
@@ -1307,7 +1422,11 @@ async def _firewall_verdict(
         # 2c. Fast deployer history lookup (uses already-indexed data — non-blocking DB query)
         _deployer_ctx = None
         if container and container.db:
+            if progress is not None:
+                progress.deadline_pending.add("deployer_history")
             _deployer_ctx = await _get_deployer_campaign_context(to_addr, req.chainId, container)
+            if progress is not None:
+                progress.deadline_pending.discard("deployer_history")
 
         # 3. Try composite intelligence pipeline (registry-based)
         try:
@@ -1317,11 +1436,15 @@ async def _firewall_verdict(
             # bridges, governance) should not be penalized by token-specific
             # checks (honeypot simulation, DEX liquidity, etc.)
             is_token = None
-            is_verified = None
+            verification = None
             # The target's code, read once. A wallet (no code, or an EIP-7702 delegation) has no
             # source to verify and takes payments with no contract to judge; for a contract, the
             # verification's clone check reads this code instead of fetching it again.
+            if progress is not None:
+                progress.deadline_pending.add("target_bytecode")
             code = await web3_client.get_bytecode(to_addr, chain_id=req.chainId)
+            if progress is not None:
+                progress.deadline_pending.discard("target_bytecode")
             has_code, delegated = code_kind(code)
             is_contract = None if has_code is None else has_code and not delegated
             # An address with no code has no symbol() to answer, so it is not a token and the
@@ -1330,20 +1453,31 @@ async def _firewall_verdict(
             if has_code is False:
                 is_token = False
             else:
+                if progress is not None:
+                    progress.deadline_pending.add("token_identification")
                 try:
                     is_token = await web3_client.is_token_contract(to_addr, chain_id=req.chainId)
                 except UnsupportedChainError:
                     raise
                 except Exception:
                     pass
+                if progress is not None:
+                    progress.deadline_pending.discard("token_identification")
+            # Verification takes up to 8 s on Robinhood Chain (Sourcify and Blockscout) and 16 s
+            # on an Etherscan chain, so it runs beside the analyzers. When the intent analyzer will
+            # read it, it is settled first, as before, so that wait is not spent inside the
+            # analyzers' deadline.
             if is_contract is not False:
-                try:
-                    verified_result = await web3_client.is_verified_contract(to_addr, chain_id=req.chainId, code=code)
-                    is_verified = verified_result[0] if isinstance(verified_result, tuple) else verified_result
-                except UnsupportedChainError:
-                    raise
-                except Exception:
-                    pass
+                verification = asyncio.create_task(_target_verification(to_addr, req.chainId, code))
+                if progress is not None:
+                    progress.deadline_pending.add("verification")
+                verification.add_done_callback(
+                    lambda task: task.exception() if not task.cancelled() else None
+                )
+                if reads_verification(req.data, req.value):
+                    await verification
+                    if progress is not None:
+                        progress.deadline_pending.discard("verification")
 
             ctx = AnalysisContext(
                 address=to_addr, chain_id=req.chainId, from_address=from_addr,
@@ -1353,15 +1487,18 @@ async def _firewall_verdict(
                     'value': req.value,
                     'typed_data': req.typedData,
                     'sign_method': req.signMethod,
-                    'is_verified': is_verified,
+                    'verification': verification,
                     'is_contract': is_contract,
                     'authorization_list': req.authorizationList,
+                    'deadline': deadline,
                 },
             )
 
             # Run analyzers + optional Tenderly simulation in parallel
             run_simulation = tenderly_simulator and tenderly_simulator.is_enabled()
             if run_simulation and container and container.registry:
+                if progress is not None:
+                    progress.deadline_pending.add("transaction_simulation")
                 sim_task = tenderly_simulator.simulate_transaction(
                     to_address=to_addr, from_address=from_addr,
                     value=req.value, data=req.data, chain_id=req.chainId,
@@ -1369,6 +1506,8 @@ async def _firewall_verdict(
                 analyzer_results, simulation_result = await asyncio.gather(
                     container.registry.run_all(ctx, **run_options), sim_task,
                 )
+                if progress is not None:
+                    progress.deadline_pending.discard("transaction_simulation")
             elif container and container.registry:
                 analyzer_results = await container.registry.run_all(ctx, **run_options)
                 simulation_result = None
@@ -1388,6 +1527,10 @@ async def _firewall_verdict(
                 )
                 analyzer_results = None
                 simulation_result = None
+            if verification is not None:
+                await verification
+                if progress is not None:
+                    progress.deadline_pending.discard("verification")
 
             # Compute risk from analyzer results
             if analyzer_results is not None:
@@ -1671,7 +1814,9 @@ async def _firewall_verdict(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-async def _with_evidence(response: Dict, endpoint: str, chain_id: int, **trail) -> Dict:
+async def _with_evidence(
+    response: Dict, endpoint: str, chain_id: int, deadline: Optional[float] = None, **trail,
+) -> Dict:
     """`response` with evidence_hash, the hash of its evidence document (core/scan_evidence.py), and
     evidence_url, where GET /evidence/{hash} shows it.
 
@@ -1688,7 +1833,23 @@ async def _with_evidence(response: Dict, endpoint: str, chain_id: int, **trail) 
         logger.error("Scan evidence could not be serialised: %s", type(e).__name__)
     if digest and container and container.db:
         try:
-            await container.db.insert_scan_evidence(digest, canonical)
+            if deadline is None:
+                await container.db.insert_scan_evidence(digest, canonical)
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                insert_task = asyncio.create_task(
+                    container.db.insert_scan_evidence(digest, canonical)
+                )
+                insert_task.add_done_callback(
+                    lambda task: task.exception() if not task.cancelled() else None
+                )
+                done, _ = await asyncio.wait((insert_task,), timeout=remaining)
+                if not done:
+                    insert_task.cancel()
+                    raise asyncio.TimeoutError
+                await insert_task
             url = f"{container.settings.public_api_url.rstrip('/')}/evidence/{digest}"
         except Exception as e:
             logger.error("Scan evidence store failed: %s", type(e).__name__)
@@ -3480,6 +3641,7 @@ async def _analyze_router_swap(
     trail: Optional[Dict] = None,
     progress: Optional[FirstVerdictProgress] = None,
     policy_mode: str = PolicyMode.BALANCED.value,
+    deadline: Optional[float] = None,
 ) -> Optional[Dict]:
     """Analyze swap path tokens when interacting with a trusted router. `policy_mode` is the
     effective mode `policy_override` selects, which a response for unanalysed tokens reports.
@@ -3497,13 +3659,20 @@ async def _analyze_router_swap(
     path, refusal, pools = _extract_swap_path(decoded, req.data, from_addr, to_addr, whitelisted)
     # A mixed route pays the next hop's pool, which only the router's V2 factory can vouch for.
     for pool, token_a, token_b in [] if refusal else pools:
+        pool_source = f"router_pool:{pool}"
+        if progress is not None:
+            progress.deadline_pending.add(pool_source)
         try:
             confirmed = await web3_client.router_v2_pool(to_addr, token_a, token_b, chain_id=req.chainId)
         except UnsupportedChainError:
             raise
         except Exception as e:
+            if progress is not None:
+                progress.deadline_pending.discard(pool_source)
             refusal = f"Could not confirm that {pool} is the pool of its next swap ({type(e).__name__})"
             break
+        if progress is not None:
+            progress.deadline_pending.discard(pool_source)
         if confirmed != pool:
             refusal = f"Its funds go to {pool}, not the sender"
             break
@@ -3518,13 +3687,126 @@ async def _analyze_router_swap(
     if not candidates:
         return None
 
-    # Optional simulation (still useful for asset deltas)
+    valid_candidates = [
+        web3_client.to_checksum_address(token)
+        for token in candidates if web3_client.is_valid_address(token)
+    ]
+    if not valid_candidates:
+        return None
+
+    from core.analyzer import AnalysisContext, AnalyzerResult
+
+    analyzers = (
+        container.registry.get_all()
+        if hasattr(container.registry, "get_all") else []
+    )
+    analyzer_names = [analyzer.name for analyzer in analyzers]
+    if progress is not None:
+        for token_addr in valid_candidates:
+            progress.expect(token_addr, analyzer_names)
+
     sim_result = None
+    simulation_timed_out = False
+    simulation_task = None
     if tenderly_simulator and tenderly_simulator.is_enabled():
-        sim_result = await tenderly_simulator.simulate_transaction(
+        if progress is not None:
+            progress.deadline_pending.add("transaction_simulation")
+        simulation_task = asyncio.create_task(tenderly_simulator.simulate_transaction(
             to_address=to_addr, from_address=from_addr,
             value=req.value, data=req.data, chain_id=req.chainId,
-        )
+        ))
+
+        def simulation_done(task):
+            if progress is not None:
+                progress.deadline_pending.discard("transaction_simulation")
+            if not task.cancelled():
+                task.exception()
+
+        simulation_task.add_done_callback(simulation_done)
+
+    slots = asyncio.Semaphore(ROUTER_TOKEN_ANALYSIS_CONCURRENCY)
+    analysis_deadline = (
+        deadline - ROUTER_RESULT_RESERVE_SECONDS if deadline is not None else None
+    )
+
+    async def analyze_token(token_addr):
+        async with slots:
+            ctx = AnalysisContext(
+                address=token_addr,
+                chain_id=req.chainId,
+                from_address=from_addr,
+                is_token=True,
+                extra={
+                    "calldata": req.data,
+                    "value": req.value,
+                    "typed_data": req.typedData,
+                    "sign_method": req.signMethod,
+                    "router": to_addr,
+                    "whitelisted_router": whitelisted,
+                    "deadline": analysis_deadline,
+                },
+            )
+
+            run_options = {}
+            if progress is not None:
+                run_options = {"on_result": partial(progress.add_result, token=token_addr)}
+            if analysis_deadline is not None:
+                run_options["deadline"] = max(0.0, analysis_deadline - time.monotonic())
+            analyzer_results = await container.registry.run_all(ctx, **run_options)
+            if progress is not None:
+                for result in analyzer_results:
+                    progress.pending.discard(f"{token_addr}:{result.name}")
+            return token_addr, analyzer_results
+
+    # The registry stamps each result with when its run started; one rebuilt below gets the same stamp.
+    analysis_started = time.time()
+    token_tasks = [
+        (token_addr, asyncio.create_task(analyze_token(token_addr)))
+        for token_addr in valid_candidates
+    ]
+    token_results = {}
+    try:
+        if deadline is None:
+            for token_addr, results in await asyncio.gather(
+                *(task for _, task in token_tasks)
+            ):
+                token_results[token_addr] = results
+            if simulation_task is not None:
+                sim_result = await simulation_task
+        else:
+            waitables = [task for _, task in token_tasks]
+            if simulation_task is not None:
+                waitables.append(simulation_task)
+            done, _ = await asyncio.wait(
+                waitables,
+                timeout=max(0.0, analysis_deadline - time.monotonic()),
+                return_when=asyncio.ALL_COMPLETED,
+            )
+            for token_addr, task in token_tasks:
+                if task in done and not task.cancelled():
+                    token_results[token_addr] = task.result()[1]
+                else:
+                    task.cancel()
+            if simulation_task is not None:
+                if simulation_task in done and not simulation_task.cancelled():
+                    sim_result = simulation_task.result()
+                else:
+                    simulation_timed_out = True
+                    simulation_task.cancel()
+            await asyncio.gather(
+                *(task for _, task in token_tasks if task.cancelled()),
+                *([simulation_task] if simulation_task is not None and simulation_task.cancelled() else []),
+                return_exceptions=True,
+            )
+    except BaseException:
+        pending_tasks = [task for _, task in token_tasks]
+        if simulation_task is not None:
+            pending_tasks.append(simulation_task)
+        for task in pending_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*pending_tasks, return_exceptions=True)
+        raise
 
     best = None
     token_summaries = []
@@ -3532,46 +3814,40 @@ async def _analyze_router_swap(
     all_results = []
     notes = []
 
-    for token in candidates:
-        if not web3_client.is_valid_address(token):
-            continue
-        token_addr = web3_client.to_checksum_address(token)
-
-        is_verified = None
-        try:
-            verified_result = await web3_client.is_verified_contract(token_addr, chain_id=req.chainId)
-            is_verified = verified_result[0] if isinstance(verified_result, tuple) else verified_result
-        except UnsupportedChainError:
-            raise
-        except Exception:
-            pass
-
-        from core.analyzer import AnalysisContext
-
-        ctx = AnalysisContext(
-            address=token_addr,
-            chain_id=req.chainId,
-            from_address=from_addr,
-            is_token=True,
-            extra={
-                'calldata': req.data,
-                'value': req.value,
-                'typed_data': req.typedData,
-                'sign_method': req.signMethod,
-                'is_verified': is_verified,
-                'router': to_addr,
-                'whitelisted_router': whitelisted,
-            },
-        )
-
-        run_options = {}
+    for token_addr in valid_candidates:
+        analyzer_results = token_results.get(token_addr)
+        if analyzer_results is None:
+            analyzer_results = [
+                result for token, result in (progress.results if progress is not None else [])
+                if token == token_addr
+            ]
+            for result in analyzer_results:
+                if result.data and not result.data.get('skipped'):
+                    result.data = {
+                        **result.data,
+                        'observed_at': min(analysis_started, result.data.get('observed_at', analysis_started)),
+                    }
+            names_returned = {result.name for result in analyzer_results}
+            analyzer_results.extend(
+                AnalyzerResult(
+                    name=analyzer.name,
+                    weight=analyzer.weight,
+                    score=50,
+                    flags=[f"{analyzer.name} analysis unavailable"],
+                    error=f"{analyzer.name} analysis unavailable (TimeoutError)",
+                )
+                for analyzer in analyzers if analyzer.name not in names_returned
+            )
+            total_weight = sum(result.weight for result in analyzer_results)
+            if total_weight > 0 and abs(total_weight - 1.0) > 1e-9:
+                for result in analyzer_results:
+                    result.weight /= total_weight
         if progress is not None:
-            progress.expect(token_addr, [analyzer.name for analyzer in container.registry.get_all()])
-            run_options = {"on_result": partial(progress.add_result, token=token_addr)}
-        analyzer_results = await container.registry.run_all(ctx, **run_options)
+            for result in analyzer_results:
+                progress.pending.discard(f"{token_addr}:{result.name}")
+
         risk_output = risk_engine.compute_from_results(analyzer_results, is_token=True)
 
-        # Apply policy mode (handles partial failures)
         if container.policy_engine:
             risk_output = container.policy_engine.apply(
                 analyzer_results, risk_output, mode_override=policy_override,
@@ -3612,6 +3888,24 @@ async def _analyze_router_swap(
         f"{item['address']}:{source}": fraction
         for item in token_summaries for source, fraction in item['coverage'].items()
     }
+    unfinished = progress.pending | progress.deadline_pending if progress is not None else set()
+    if unfinished:
+        risk_output['status'] = 'unknown'
+        risk_output['coverage'].update({source: 0 for source in unfinished})
+        risk_output['coverage_reasons'] = {
+            **risk_output.get('coverage_reasons', {}),
+            **{
+                source: 'Provider timed out at the firewall request deadline'
+                for source in unfinished
+            },
+        }
+    if simulation_timed_out:
+        risk_output['status'] = 'unknown'
+        risk_output['coverage']['transaction_simulation'] = 0
+        risk_output['coverage_reasons'] = {
+            **risk_output.get('coverage_reasons', {}),
+            'transaction_simulation': 'Tenderly timed out at the firewall request deadline',
+        }
     if sim_result is not None and sim_result.get('success') is False:
         risk_output['status'] = 'unknown'
         risk_output['coverage']['transaction_simulation'] = 0

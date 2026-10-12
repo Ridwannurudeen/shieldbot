@@ -24,9 +24,10 @@ class StructuralAnalyzer(Analyzer):
     replace the flat unverified penalty with a data-driven score.
     """
 
-    def __init__(self, contract_service, token_sniffer=None):
+    def __init__(self, contract_service, token_sniffer=None, robinhood_assets=None):
         self._service = contract_service
         self._sniffer = token_sniffer
+        self._assets = robinhood_assets
 
     @property
     def name(self) -> str:
@@ -37,19 +38,30 @@ class StructuralAnalyzer(Analyzer):
         return 0.40
 
     async def analyze(self, ctx: AnalysisContext) -> AnalyzerResult:
-        data = await self._service.fetch_contract_data(ctx.address, chain_id=ctx.chain_id)
+        data = await self._service.fetch_contract_data(
+            ctx.address, chain_id=ctx.chain_id, robinhood_assets=self._assets,
+            deadline=ctx.extra.get('deadline'),
+        )
 
         data = dict(data)
         data['coverage'] = dict(data.get('coverage', {}))
+        exemptions = data.get('coverage_exemptions', {})
         # A confirmed EOA has no verification or age to observe.
         if data.get('is_contract') is not False:
-            data['coverage']['is_verified'] = data.get('is_verified') is not None
-            data['coverage']['contract_age_days'] = data.get('contract_age_days') is not None
+            for field in ('is_verified', 'contract_age_days'):
+                data['coverage'][field] = data.get(field) is not None or field in exemptions
         data['status'] = 'unknown' if data.get('status') == 'unknown' or not all(data['coverage'].values()) else 'ok'
         if data['status'] == 'unknown':
             missing = ', '.join(field for field, covered in data['coverage'].items() if not covered)
             data['reason'] = data.get('reason') or (
                 f'Structural data unknown: {missing}' if missing else 'Structural provider data incomplete'
+            )
+        notes = []
+        if exemptions:
+            named = {'is_verified': 'verification', 'contract_age_days': 'contract age'}
+            notes.append(
+                f"Explorer {' and '.join(named[field] for field in exemptions)} not needed: "
+                f"{next(iter(exemptions.values()))}"
             )
 
         sniffer_data = {}
@@ -67,12 +79,14 @@ class StructuralAnalyzer(Analyzer):
         if ctx.is_token is not False and data.get('is_contract') is not False:
             share = data.get('top10_holder_percent')
             if share is None:
-                data['notes'] = [HOLDERS_UNKNOWN]
+                notes.append(HOLDERS_UNKNOWN)
             elif share >= HOLDER_SHARE_ELEVATED:
                 score = min(score + (20 if share >= HOLDER_SHARE_HIGH else 10), 100)
                 flags.append(
                     f"Top 10 holders own {share}% of supply (burn, locked, pool and locker addresses excluded)"
                 )
+        if notes:
+            data['notes'] = notes
         return AnalyzerResult(
             name=self.name,
             weight=self.weight,

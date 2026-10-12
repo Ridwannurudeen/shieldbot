@@ -27,8 +27,8 @@ BACKGROUND_SCAN_DEADLINE_SECONDS = 45
 # A streamed firewall request (POST /api/firewall with Accept: text/event-stream) gets its interim
 # verdict this many seconds after the handler starts, or sooner when a Block-level floor is known. The
 # clock starts with the handler, not with run_all: the handler's pre-steps (token info, selector
-# lookup, cache read, bytecode, is_token and the verification lookup, which can take 16 s) run before
-# the analyzers do. Every required check is an external call that rarely finishes this fast from
+# lookup, cache read, bytecode, is_token, and the verification lookup when the intent analyzer reads
+# it, which can take 16 s) run before the analyzers do. Every required check is an external call that rarely finishes this fast from
 # cold, so the interim is usually Unknown; it is a tenth of the extension's 30 s abort, which leaves
 # the final verdict the rest of that time.
 FIRST_VERDICT_SECONDS = 3

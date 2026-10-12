@@ -1,7 +1,9 @@
 """Regression tests for core routing and incomplete provider coverage."""
 
 import ast
+import asyncio
 import logging
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -45,6 +47,79 @@ async def test_contract_service_unavailable_verification_is_none(mock_web3_clien
         ).fetch_contract_data('0xABC')
     assert result['is_verified'] is None
     assert result['contract_age_days'] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("slow_field", ["is_verified", "contract_age_days"])
+async def test_slow_explorer_lookup_degrades_only_its_field(mock_web3_client, slow_field):
+    from analyzers.structural import StructuralAnalyzer
+    from core.analyzer import AnalysisContext
+    from services.contract_service import ContractService
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def slow_lookup(*args, **kwargs):
+        started.set()
+        await release.wait()
+        finished.set()
+        return (True, None) if slow_field == "is_verified" else {"age_days": 400}
+
+    if slow_field == "is_verified":
+        mock_web3_client.is_verified_contract.side_effect = slow_lookup
+    else:
+        mock_web3_client.get_contract_creation_info.side_effect = slow_lookup
+
+    service = ContractService(
+        mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])),
+    )
+    with (
+        patch("services.contract_service.BSCSCAN_DELAY", 0),
+        patch("services.contract_service.EXPLORER_RESULT_RESERVE_SECONDS", 0),
+    ):
+        result = await StructuralAnalyzer(service).analyze(
+            AnalysisContext("0xABC", extra={"deadline": time.monotonic() + 0.05}),
+        )
+
+    assert started.is_set()
+    assert result.error is None
+    assert result.data["status"] == "unknown"
+    assert result.data["coverage"] == {
+        "is_verified": slow_field != "is_verified",
+        "contract_age_days": slow_field != "contract_age_days",
+    }
+    assert result.data["coverage_reasons"] == {
+        slow_field: "Explorer lookup still running at the request deadline; it continues for the next scan",
+    }
+    assert result.data["ownership_renounced"] is True
+    assert result.data["has_proxy"] is False
+    assert result.data["has_mint"] is False
+    # The answered field is used: an old, verified contract.
+    assert result.data["is_verified"] is (None if slow_field == "is_verified" else True)
+    assert result.data["contract_age_days"] == (None if slow_field == "contract_age_days" else 90)
+
+    # The lookup is not cancelled: it runs on (and fills the explorer caches below it).
+    release.set()
+    await finished.wait()
+
+
+@pytest.mark.asyncio
+async def test_without_a_deadline_the_explorer_lookups_are_awaited(mock_web3_client):
+    # Background scans (the hunter, the launch watch) pass no deadline and wait as before.
+    from services.contract_service import ContractService
+
+    async def slow_creation(*args, **kwargs):
+        await asyncio.sleep(0.05)
+        return {"age_days": 3}
+
+    mock_web3_client.get_contract_creation_info.side_effect = slow_creation
+    service = ContractService(mock_web3_client, MagicMock(check_address=AsyncMock(return_value=[])))
+    with patch("services.contract_service.BSCSCAN_DELAY", 0):
+        result = await service.fetch_contract_data("0xABC")
+
+    assert result["contract_age_days"] == 3
+    assert "coverage_reasons" not in result
 
 
 @pytest.mark.asyncio

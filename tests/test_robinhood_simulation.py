@@ -2132,6 +2132,44 @@ async def test_one_simulation_per_token_across_both_adapter_methods(concurrent):
     assert taxes["buy_tax"] == taxes["sell_tax"] == 0.0 and taxes["status"] == "ok"
 
 
+@pytest.mark.asyncio
+async def test_distinct_token_simulations_are_serialized():
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    first_token = "0x" + "1" * 40
+    second_token = "0x" + "2" * 40
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+    release_first = asyncio.Event()
+    active = 0
+    maximum_active = 0
+
+    async def run(token):
+        nonlocal active, maximum_active
+        active += 1
+        maximum_active = max(maximum_active, active)
+        if token == first_token:
+            first_started.set()
+            await release_first.wait()
+        else:
+            second_started.set()
+        active -= 1
+        return aggregate_outcomes([], [])
+
+    simulator._run = run
+    first = asyncio.create_task(simulator.simulate(first_token))
+    await first_started.wait()
+    second = asyncio.create_task(simulator.simulate(second_token))
+    await asyncio.sleep(0)
+
+    assert not second_started.is_set()
+    assert maximum_active == 1
+
+    release_first.set()
+    await asyncio.gather(first, second)
+    assert second_started.is_set()
+    assert maximum_active == 1
+
+
 # --- adapter shapes and integration -------------------------------------------------------------
 
 

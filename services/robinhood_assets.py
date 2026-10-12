@@ -58,6 +58,14 @@ import aiohttp
 from eth_abi import decode
 from eth_abi.exceptions import DecodingError
 
+from adapters.robinhood import (
+    KNOWN_SPENDERS,
+    PANCAKESWAP_V2_FACTORY,
+    PERMIT2_ADDRESS,
+    POOL_MANAGER_ADDRESS,
+    UNISWAP_V2_FACTORY,
+    WHITELISTED_ROUTERS,
+)
 from core.telegram_formatter import describe_impostor_check
 from services.launch_discovery import CHAIN_ID
 from services.robinhood_simulation import USDG, WETH
@@ -83,6 +91,16 @@ MIN_LIST_FRACTION = 0.8
 SHRUNK_LIST_CONFIRMATIONS = 3
 # Symbol and name as each contract returned them on 2026-09-24.
 CANONICAL_TOKENS = {WETH: ("WETH", "WETH"), USDG: ("USDG", "Global Dollar")}
+# Contracts on this chain the service already names by exact address: the trusted routers, Permit2,
+# the V4 PoolManager and PositionManager, and the V2 factories the routers swap through.
+INFRASTRUCTURE = {
+    *WHITELISTED_ROUTERS,
+    *KNOWN_SPENDERS,
+    PERMIT2_ADDRESS.lower(),
+    POOL_MANAGER_ADDRESS.lower(),
+    UNISWAP_V2_FACTORY.lower(),
+    PANCAKESWAP_V2_FACTORY.lower(),
+}
 AFFIXES = "xwt"
 MIN_TICKER_LENGTH = 3
 CORPORATE_SUFFIXES = (
@@ -527,6 +545,11 @@ async def _read_capped(response, limit: int) -> bytes:
     raise ValueError("Response too large")
 
 
+def _log_refresh_error(task: asyncio.Task):
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("Robinhood official token list refresh failed: %s", type(task.exception()).__name__)
+
+
 class RobinhoodAssets:
     """Holds the official token list and checks 4663 tokens against it.
 
@@ -544,12 +567,29 @@ class RobinhoodAssets:
         # The size of the last shrunken list fetched, and how many fetches have returned it since another size.
         self._shrunk = (0, 0)
         self._lock = asyncio.Lock()
+        self._refreshing = None
 
     async def listed(self) -> Optional[Dict[str, Tuple[str, str]]]:
-        """The official tokens by address, or None while no fetch has succeeded."""
+        """The official tokens by address, or None while no fetch has succeeded.
+
+        Only a first load is waited on. Once a list is held, a due refresh (a fetch of up to
+        TIMEOUT_SECONDS) runs in the background and the held list is served meanwhile, so the scans
+        that read it do not wait on it.
+        """
+        if self._listed is None:
+            await self._refresh()
+        elif self._due() and (self._refreshing is None or self._refreshing.done()):
+            self._refreshing = asyncio.create_task(self._refresh())
+            self._refreshing.add_done_callback(_log_refresh_error)
+        return self._listed
+
+    def _due(self) -> bool:
+        now = time.time()
+        return now - self._fetched_at >= CACHE_TTL_SECONDS and now >= self._retry_at
+
+    async def _refresh(self):
         async with self._lock:
-            now = time.time()
-            if now - self._fetched_at >= CACHE_TTL_SECONDS and now >= self._retry_at:
+            if self._due():
                 try:
                     listed = await self._fetch()
                 except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
@@ -559,7 +599,6 @@ class RobinhoodAssets:
                     )
                 else:
                     self._take(listed)
-        return self._listed
 
     def _take(self, listed: Dict[str, Tuple[str, str]]):
         """Keep a fetched list, unless it shrank and has not yet been fetched at that size often enough."""
@@ -598,6 +637,32 @@ class RobinhoodAssets:
     async def check(self, address: str, symbol: Optional[str], name: Optional[str]) -> Dict:
         """Check a token whose symbol and name were already read; None where one could not be."""
         return check_token(address, symbol, name, await self.listed())
+
+    @staticmethod
+    def static_explorer_exemption(address: str, chain_id: int) -> Optional[Dict[str, str]]:
+        """Why a canonical token or an infrastructure contract, each at its exact address, needs no
+        explorer verification or contract age, per field; None for any other address."""
+        if chain_id != CHAIN_ID:
+            return None
+        address = address.lower()
+        if address in CANONICAL_TOKENS:
+            reason = f"canonical Robinhood Chain token {CANONICAL_TOKENS[address][0]} (exact address)"
+        elif address in INFRASTRUCTURE:
+            reason = "known Robinhood Chain infrastructure (exact address)"
+        else:
+            return None
+        return {"is_verified": reason, "contract_age_days": reason}
+
+    async def explorer_exemption(self, address: str, chain_id: int) -> Optional[Dict[str, str]]:
+        """static_explorer_exemption, and an official stock token at its exact address on the list."""
+        exemption = self.static_explorer_exemption(address, chain_id)
+        if exemption is not None or chain_id != CHAIN_ID:
+            return exemption
+        token = (await self.listed() or {}).get(address.lower())
+        if token is None:
+            return None
+        reason = f"official Robinhood token {token[0]} (exact address)"
+        return {"is_verified": reason, "contract_age_days": reason}
 
     async def official(self, address: str, chain_id: int) -> Optional[Dict]:
         """The check of a Robinhood Chain token at an official address, or None for any other token.

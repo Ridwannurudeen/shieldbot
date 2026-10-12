@@ -1,5 +1,6 @@
 """Offline regressions for coverage-aware product consumers."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -87,7 +88,62 @@ async def test_fresh_response_persists_unknowns(consumer_api, incomplete_output)
     metadata = stored['category_scores']['_scan_metadata']
     assert metadata['status'] == 'unknown'
     assert metadata['coverage'] == incomplete_output['coverage']
-    assert services.registry.run_all.call_args.args[0].extra['is_verified'] is None
+    assert await services.registry.run_all.call_args.args[0].extra['verification'] is None
+
+
+@pytest.mark.asyncio
+async def test_the_analyzers_do_not_wait_for_the_verification_lookup(consumer_api, incomplete_output):
+    # Sourcify and Blockscout take up to 8 s on Robinhood Chain; the honeypot simulation's own
+    # round-trips must run beside that wait, not after it, while the signer waits.
+    api, services = consumer_api
+    release = asyncio.Event()
+    seen = {}
+
+    async def verification(*args, **kwargs):
+        await release.wait()
+        return (True, None)
+
+    async def run_all(ctx, **kwargs):
+        seen['started_before_verification'] = not release.is_set()
+        release.set()
+        seen['verified'] = await ctx.extra['verification']
+        return []
+
+    api.web3_client.is_verified_contract = verification
+    services.registry.run_all = run_all
+    api.risk_engine.compute_from_results.return_value = incomplete_output
+    await asyncio.wait_for(api.firewall(
+        api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40),
+        SimpleNamespace(headers={}),
+    ), timeout=5)
+    assert seen == {'started_before_verification': True, 'verified': True}
+    api.risk_engine.compute_from_results.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('data, value', [('0xdeadbeef', '0'), ('0x4e71d92d', hex(10**17))], ids=['unknown-selector', 'payable'])
+async def test_verification_is_settled_first_when_the_intent_analyzer_reads_it(consumer_api, incomplete_output, data, value):
+    # Its wait is then not spent inside the analyzers' deadline, so the intent verdict is the same.
+    api, services = consumer_api
+    order = []
+
+    async def verification(*args, **kwargs):
+        await asyncio.sleep(0.01)
+        order.append('verification')
+        return (False, None)
+
+    async def run_all(ctx, **kwargs):
+        order.append('analyzers')
+        return []
+
+    api.web3_client.is_verified_contract = verification
+    services.registry.run_all = run_all
+    api.risk_engine.compute_from_results.return_value = incomplete_output
+    await api.firewall(
+        api.FirewallRequest(to='0x' + 'a' * 40, sender='0x' + 'b' * 40, data=data, value=value),
+        SimpleNamespace(headers={}),
+    )
+    assert order == ['verification', 'analyzers']
 
 
 @pytest.mark.asyncio
@@ -364,6 +420,124 @@ def test_covered_cache_keeps_safe(consumer_api):
     assert response['classification'] == 'SAFE'
     assert response['risk_display'] == '0%'
     assert response['partial'] is False
+
+
+@pytest.mark.asyncio
+async def test_firewall_robinhood_swap_deadline_returns_unknown_with_each_pending_check_named(
+    consumer_api, monkeypatch,
+):
+    api, services = consumer_api
+    monkeypatch.setattr(api, 'FIREWALL_REQUEST_DEADLINE_SECONDS', 0.2, raising=False)
+    monkeypatch.setattr(api, 'FIREWALL_RESPONSE_RESERVE_SECONDS', 0.04, raising=False)
+    token_a, token_b = '0x' + 'c' * 40, '0x' + 'd' * 40
+    api.risk_engine = RiskEngine()
+    sender = '0x' + 'b' * 40
+    decoded = {
+        'selector': '38ed1739', 'function_name': 'swapExactTokensForTokens',
+        'category': 'swap', 'params': {'path': [token_a, token_b], 'to': sender},
+    }
+    names = ['structural', 'market', 'behavioral', 'honeypot', 'intent', 'signature']
+    services.registry.get_all = lambda: [SimpleNamespace(name=name, weight=1 / len(names)) for name in names]
+    services.web3_client._get_adapter = lambda chain_id: None
+    api.calldata_decoder = SimpleNamespace(
+        decode=lambda _: decoded,
+        is_whitelisted_target=lambda *args, **kwargs: 'Robinhood Router',
+    )
+
+    scans_started = asyncio.Event()
+    simulation_started = asyncio.Event()
+    release = asyncio.Event()
+    scanned_tokens = []
+
+    async def run_all(ctx, **kwargs):
+        scanned_tokens.append(ctx.address.lower())
+        if len(scanned_tokens) == 2:
+            scans_started.set()
+        await release.wait()
+        return []
+
+    async def simulate_transaction(**kwargs):
+        simulation_started.set()
+        await scans_started.wait()
+        await release.wait()
+        return {'success': True}
+
+    api.web3_client.is_verified_contract = AsyncMock(return_value=(True, None))
+    services.registry.run_all = run_all
+    api.tenderly_simulator = SimpleNamespace(
+        is_enabled=lambda: True, simulate_transaction=simulate_transaction,
+    )
+
+    import httpx
+    request_started = asyncio.get_running_loop().time()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=api.app), base_url='http://testserver',
+    ) as client:
+        http_response = await asyncio.wait_for(client.post(
+            '/api/firewall',
+            json={
+                'to': '0x' + 'a' * 40, 'from': sender, 'chainId': 4663,
+                'value': '0', 'data': '0x38ed1739',
+            },
+        ), timeout=2.0)
+    assert http_response.status_code == 200
+    response = http_response.json()
+    assert asyncio.get_running_loop().time() - request_started < 2.0
+
+    assert response['status'] == 'unknown'
+    assert response['classification'] != 'SAFE'
+    assert response['partial'] is True
+    # A trusted router's swap tokens get no verification lookup of their own: the structural
+    # analyzer reads verification itself.
+    api.web3_client.is_verified_contract.assert_not_awaited()
+    assert len(scanned_tokens) == 2
+    assert simulation_started.is_set()
+    assert scans_started.is_set()
+    assert response['coverage_reasons']['transaction_simulation']
+    for token in (token_a, token_b):
+        assert f'{token}:structural' in response['coverage_reasons']
+        assert f'{token}:honeypot' in response['coverage_reasons']
+
+    release.set()
+
+
+@pytest.mark.asyncio
+async def test_firewall_approval_metadata_wait_is_inside_request_deadline(consumer_api, monkeypatch):
+    api, services = consumer_api
+    monkeypatch.setattr(api, 'FIREWALL_REQUEST_DEADLINE_SECONDS', 0.2, raising=False)
+    monkeypatch.setattr(api, 'FIREWALL_RESPONSE_RESERVE_SECONDS', 0.04, raising=False)
+    services.registry.get_all = lambda: [SimpleNamespace(name='structural')]
+    release = asyncio.Event()
+    lookup_started = asyncio.Event()
+
+    async def token_info(address, **kwargs):
+        lookup_started.set()
+        await release.wait()
+        return {}
+
+    api.web3_client.get_token_info = token_info
+    api.calldata_decoder = SimpleNamespace(
+        decode=lambda _: {
+            'selector': '095ea7b3', 'function_name': 'approve', 'category': 'approval',
+            'is_approval': True, 'is_unlimited_approval': True,
+            'params': {'spender': '0x' + 'e' * 40, 'amount': 2**256 - 1},
+        },
+        is_whitelisted_target=lambda *args, **kwargs: None,
+    )
+
+    response = await asyncio.wait_for(api.firewall(
+        api.FirewallRequest(
+            to='0x' + 'f' * 40, sender='0x' + 'b' * 40,
+            chainId=4663, data='0x095ea7b3',
+        ),
+        SimpleNamespace(headers={}),
+    ), timeout=2.0)
+
+    assert lookup_started.is_set()
+    assert response['status'] == 'unknown'
+    assert response['coverage_reasons']['token_metadata']
+
+    release.set()
 
 
 @pytest.mark.asyncio
@@ -993,7 +1167,8 @@ async def test_verification_lookup_failure_stays_unknown(consumer_api, surface):
     else:
         await api._analyze_router_swap(req, req.to, req.sender,
             {'params': {'path': ['0x' + 'c' * 40]}}, 'Router', 0)
-    assert services.registry.run_all.call_args.args[0].extra['is_verified'] is None
+    from analyzers.intent import _verified
+    assert await _verified(services.registry.run_all.call_args.args[0]) is None
 
 
 @pytest.mark.parametrize('compact', [True, False], ids=['compact', 'dashboard'])

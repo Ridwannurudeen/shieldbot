@@ -1,11 +1,19 @@
 """Honeypot analyzer — wraps HoneypotService."""
 
+import asyncio
 import logging
+import time
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
 from services.honeypot_service import SELL_TAX_EXTREME, SELL_TAX_HIGH
 from services.robinhood_assets import official_asset_reason
 
 logger = logging.getLogger(__name__)
+
+# An interactive scan uses the simulation when it answers this long before the analyzers' deadline,
+# so the analyzer returns an Unknown sellability, not an error, before the registry cancels it. The
+# simulation runs on and its cached answer serves the next scan.
+SIMULATION_RESULT_RESERVE_SECONDS = 0.5
+STILL_RUNNING = 'Own simulation still running at the request deadline; it continues for the next scan'
 
 
 class HoneypotAnalyzer(Analyzer):
@@ -44,13 +52,18 @@ class HoneypotAnalyzer(Analyzer):
                 score=0, flags=[], data={'skipped': True, 'reason': reason, 'notes': [reason]},
             )
 
-        data = await self._service.fetch_honeypot_data(ctx.address, chain_id=ctx.chain_id)
-        data = dict(data)
+        lookup = asyncio.ensure_future(self._service.fetch_honeypot_data(ctx.address, chain_id=ctx.chain_id))
+        lookup.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
+        deadline = ctx.extra.get('deadline')
+        timeout = None if deadline is None else max(0.0, deadline - SIMULATION_RESULT_RESERVE_SECONDS - time.monotonic())
+        await asyncio.wait((lookup,), timeout=timeout)
+        still_running = not lookup.done()
+        data = {'status': 'unknown', 'reason': STILL_RUNNING} if still_running else dict(lookup.result())
         if (data.get('simulation_failed') or data.get('rpc_failed') or data.get('undecided')) \
                 and data.get('can_sell') is True:
             data['can_sell'] = None
         # A failed run is missing evidence, so an official stock's sell check remains uncovered.
-        if official is not None and not (data.get('rpc_failed') or data.get('simulation_failed')) and (
+        if official is not None and not (still_running or data.get('rpc_failed') or data.get('simulation_failed')) and (
             data.get('is_honeypot') is None or data.get('can_sell') is None
         ):
             reason = official_asset_reason(official, 'sell simulation does not apply')
