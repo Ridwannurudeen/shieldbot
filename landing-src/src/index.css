@@ -328,8 +328,7 @@
     transform: translateY(48px) scale(0.94);
     animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   }
-  34%, 99% { opacity: 1; clip-path: inset(-48px); transform: none; }
-  to { opacity: 0; clip-path: inset(-48px); transform: none; }
+  34%, to { opacity: 1; clip-path: inset(-48px); transform: none; }
 }
 @keyframes hero-card {
   from { opacity: 0.6; transform: translateY(28px) scale(0.97); }
