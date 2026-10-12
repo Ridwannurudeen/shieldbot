@@ -256,7 +256,7 @@ export default function HeroRecord() {
           />
         </div>
         <figure className="min-w-0 max-lg:order-first">
-          <div className="relative h-[676px] overflow-hidden rounded-lg border border-hairline light:border-edge/40 sm:h-[656px] lg:h-[556px]">
+          <div className="relative h-[684px] overflow-hidden rounded-lg border border-hairline light:border-edge/40 sm:h-[664px] lg:h-[564px]">
             <div
               aria-hidden="true"
               className={`field-${from} absolute inset-0`}
@@ -278,7 +278,7 @@ export default function HeroRecord() {
                   {says.measure}
                 </p>
               </div>
-              <div className="hero-card absolute inset-x-4 top-[152px] rounded-lg bg-paper p-4 text-on-paper shadow-lg">
+              <div className="hero-card absolute inset-x-4 top-[160px] rounded-lg bg-paper p-4 text-on-paper shadow-lg">
                 <p className="flex justify-between font-mono text-[11px] leading-4 text-on-paper-2">
                   <span>app.example</span>
                   <span>Signature request</span>
@@ -308,7 +308,7 @@ export default function HeroRecord() {
                   </span>
                 </p>
               </div>
-              <div className="absolute inset-x-6 top-[200px] h-[330px]">
+              <div className="absolute inset-x-6 top-[208px] h-[330px]">
                 <div className="hero-loading absolute inset-x-0 top-0 overflow-hidden rounded-lg bg-paper shadow-lg">
                   <img
                     src="/hero-overlay-loading.webp"
