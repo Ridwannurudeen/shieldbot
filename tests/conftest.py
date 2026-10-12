@@ -45,16 +45,9 @@ def mock_web3_client():
 
 @pytest.fixture
 def mock_ai_analyzer():
-    """Mock AIAnalyzer that returns a canned AI risk score."""
+    """Mock AIAnalyzer with no forensic report by default."""
     analyzer = MagicMock()
     analyzer.is_available.return_value = True
-    analyzer.compute_ai_risk_score = AsyncMock(return_value={
-        "risk_score": 25,
-        "confidence": 80,
-        "risk_level": "LOW",
-        "key_findings": [],
-        "recommendation": "Generally safe.",
-    })
     analyzer.generate_forensic_report = AsyncMock(return_value=None)
     return analyzer
 

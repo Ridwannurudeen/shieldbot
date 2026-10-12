@@ -6,6 +6,7 @@ show, and a reply Telegram would reject ("Can't find end of the entity") raises 
 """
 
 import re
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -188,14 +189,6 @@ def test_a_trailing_backslash_cannot_escape_the_markup_after_it():
 
 # --- Legacy fallback reports ------------------------------------------------------------------
 
-AI_RISK = {
-    "risk_score": 90,
-    "risk_level": "HIGH",
-    "key_findings": [HOSTILE],
-    "recommendation": HOSTILE,
-}
-
-
 def test_fallback_scan_report_shows_untrusted_values_literally(bot_module):
     result = {
         "address": ADDRESS,
@@ -209,19 +202,16 @@ def test_fallback_scan_report_shows_untrusted_values_literally(bot_module):
         "checks": {"is_verified": False},
         "scam_matches": [{"type": HOSTILE, "reason": HOSTILE}],
         "warnings": [HOSTILE],
-        "ai_risk_score": AI_RISK,
-        "ai_analysis": HOSTILE,
     }
 
     rendered = assert_literal(bot_module.format_scan_result(result, 4663), HOSTILE)
 
     assert f"• {HOSTILE}: {HOSTILE}" in rendered
-    assert (
-        assert_literal(
-            bot_module.format_scan_result({**result, "forensic_report": HOSTILE}, 4663), HOSTILE
-        )
-        == f"Chain: Robinhood Chain (4663)\n\n{HOSTILE}"
+    with_forensic = assert_literal(
+        bot_module.format_scan_result({**result, "forensic_report": HOSTILE}, 4663), HOSTILE
     )
+    assert "Risk Level:" in with_forensic and "Risk Score: 90/100" in with_forensic
+    assert with_forensic.rstrip().endswith(f"🧠 AI Analysis:\n{HOSTILE}")
 
 
 def test_fallback_token_report_shows_untrusted_values_literally(bot_module):
@@ -239,19 +229,20 @@ def test_fallback_token_report_shows_untrusted_values_literally(bot_module):
         "sell_tax": 100,
         "checks": {"can_buy": True, "can_sell": False},
         "risks": [HOSTILE],
-        "ai_risk_score": AI_RISK,
-        "ai_analysis": HOSTILE,
     }
 
     rendered = assert_literal(bot_module.format_token_result(result, 4663), HOSTILE)
 
     assert f"Token: {HOSTILE} ({HOSTILE})" in rendered
-    assert (
-        assert_literal(
-            bot_module.format_token_result({**result, "forensic_report": HOSTILE}, 4663), HOSTILE
-        )
-        == f"Chain: Robinhood Chain (4663)\n\n{HOSTILE}"
+    with_forensic = assert_literal(
+        bot_module.format_token_result({**result, "forensic_report": HOSTILE}, 4663), HOSTILE
     )
+    assert "Safety:" in with_forensic and "Risk Score: 90/100" in with_forensic
+    assert with_forensic.rstrip().endswith(f"🧠 AI Analysis:\n{HOSTILE}")
+
+
+def test_legacy_bot_has_no_ai_risk_score_reader(bot_module):
+    assert "ai_risk_score" not in Path(bot_module.__file__).read_text(encoding="utf-8")
 
 
 # --- Command replies ----------------------------------------------------------------------------

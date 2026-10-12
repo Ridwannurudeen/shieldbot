@@ -186,8 +186,12 @@ def _analyzer(reply):
     analyzer = AIAnalyzer.__new__(AIAnalyzer)
     analyzer.model = "test-model"
     analyzer.client = MagicMock()
+    analyzer.status = "unverified"
+    analyzer._probe_complete = False
     analyzer.client.messages.create = AsyncMock(
-        return_value=SimpleNamespace(content=[SimpleNamespace(text=reply)])
+        return_value=SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=reply)], stop_reason="end_turn"
+        )
     )
     return analyzer
 
@@ -295,24 +299,46 @@ def test_forensic_context_keeps_known_market_values():
         assert line in context.splitlines(), line
 
 
+@pytest.mark.asyncio
+async def test_forensic_prompt_requests_findings_without_repeating_shieldbots_verdict():
+    analyzer = AIAnalyzer.__new__(AIAnalyzer)
+    analyzer.model = "claude-haiku-4-5"
+    analyzer.client = MagicMock()
+    response = MagicMock()
+    response.content = [MagicMock(type="text", text="**Key Findings:**\n- Finding\nRecommendation.")]
+    response.stop_reason = "end_turn"
+    analyzer.client.messages.create = AsyncMock(return_value=response)
+
+    await analyzer.generate_forensic_report(
+        "0xABC", {"risk_level": "HIGH", "risk_score": 75}, "contract",
+    )
+
+    prompt = analyzer.client.messages.create.await_args.kwargs["messages"][0]["content"]
+    assert "**Key Findings:**" in prompt
+    assert "Risk Score" not in prompt
+    assert "Verdict" not in prompt
+    assert "ShieldBot has already decided the risk level and score" in prompt
+    assert "Risk Level: HIGH" in prompt
+    assert "ShieldBot score: 75/100" in prompt
+
+
 def test_firewall_context_reads_a_missing_verification_as_unknown():
     analyzer = AIAnalyzer.__new__(AIAnalyzer)
     assert "Is Verified: Unknown" in analyzer._build_firewall_context({}, {}).splitlines()
 
 
 @pytest.mark.asyncio
-async def test_the_legacy_scan_score_is_not_blended_with_an_ai_score(
+async def test_the_legacy_scan_score_remains_heuristic(
     mock_web3_client, mock_ai_analyzer
 ):
     mock_web3_client.get_contract_creation_info.return_value = {"age_days": 400}
-    mock_ai_analyzer.compute_ai_risk_score.return_value = {"risk_score": 100}
     scanner = TransactionScanner(mock_web3_client, mock_ai_analyzer)
     scanner.scam_db.check_address = AsyncMock(return_value=[])
 
     result = await scanner.scan_address("0x" + "a" * 40)
 
     assert (result["status"], result["risk_score"], result["risk_level"]) == ("ok", 0, "low")
-    mock_ai_analyzer.compute_ai_risk_score.assert_not_awaited()
+    mock_ai_analyzer.generate_forensic_report.assert_awaited_once()
 
 
 @pytest.mark.asyncio

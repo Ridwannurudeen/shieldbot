@@ -2,8 +2,8 @@
 
 import os
 
-HAIKU_MODEL = os.getenv("ANTHROPIC_HAIKU_MODEL", "claude-3-haiku-20240307")
-SONNET_MODEL = os.getenv("ANTHROPIC_SONNET_MODEL", "claude-sonnet-4-20250514")
+HAIKU_MODEL = os.getenv("ANTHROPIC_HAIKU_MODEL", "claude-haiku-4-5")
+SONNET_MODEL = os.getenv("ANTHROPIC_SONNET_MODEL", "claude-sonnet-5-5")
 
 ADVISOR_SYSTEM_PROMPT = (
     "You are ShieldBot's security advisor for EVM blockchains. Use the chain identity supplied in scan data. "
