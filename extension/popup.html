@@ -2,189 +2,251 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <title>ShieldBot</title>
+  <link rel="stylesheet" href="tokens.css">
   <style>
-    :root {
-      color-scheme: light;
-      --paper: #FFFFFF;
-      --panel: #F7F6F2;
-      --ink: #141414;
-      --muted: #6B6B66;
-      --line: #E6E5E1;
-      --accent: #A3168F;
-      --accent-hover: #8A1279;
-      --safe: #176E48;
-      --caution: #141414;
-      --high: #C21F30;
-      --block: #C21F30;
-      --unknown: #141414;
-    }
+    /* Popup (360 px) and its full-page dashboard (popup.html?tab=1). Tokens in tokens.css.
+       Square corners, hairline rules, mono labels and tabular figures; the verdict hues do the
+       signalling and magenta marks the one primary action, Ask ShieldBot AI. */
     * { box-sizing: border-box; }
     body {
       width: 360px;
       margin: 0;
-      padding: 18px;
-      background: var(--paper);
+      padding: 0 0 16px;
+      background: var(--ground);
       color: var(--ink);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: var(--sans);
       font-size: 13px;
       line-height: 1.45;
+      font-synthesis-weight: none;
     }
-    button, input, select { font: inherit; }
-    button { color: inherit; }
-    .header { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; }
-    .header .logo { color: var(--accent); font-size: 17px; font-weight: 600; letter-spacing: -0.04em; }
-    .header h1 { color: var(--ink); font-size: 13px; font-weight: 500; }
-    .header .version { margin-left: auto; color: var(--muted); font-size: 11px; }
-    .expand-btn { width: 26px; height: 26px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--muted); cursor: pointer; }
-    .status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
-    .status-text { order: 0; color: var(--ink); font-size: 12px; }
-    .status-dot { order: 1; width: 6px; height: 6px; flex: 0 0 6px; border-radius: 0; }
-    .status-dot.green { background: var(--safe); box-shadow: none; }
-    .status-dot.red { background: var(--block); box-shadow: none; }
-    .status-dot.yellow { background: var(--unknown); box-shadow: none; }
-    .tabs { display: flex; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
-    .tab { flex: 1; padding: 8px 0; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
-    .tab.active { border-bottom-color: var(--accent); color: var(--accent); }
-    .tab:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button, input, select { font: inherit; color: inherit; }
+    
+    /* Masthead */
+    .header { display: flex; align-items: center; gap: 8px; padding: 14px 16px 12px; border-bottom: 1px solid var(--hairline-strong); }
+    .header .logo { color: var(--ink); font-size: 17px; font-weight: 500; letter-spacing: -0.03em; }
+    .header h1 { margin: 0; color: var(--secondary); font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: .1em; text-transform: uppercase; }
+    .header .version { margin-left: auto; font-size: 11px; }
+    .version { color: #A3A39E; font-family: var(--mono); }
+    .expand-btn { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--edge); border-radius: 0; background: transparent; color: var(--ink); font-size: 14px; cursor: pointer; }
+    .expand-btn:hover { border-color: var(--ink); }
+
+    /* Connection status */
+    .status-row { display: flex; align-items: center; gap: 8px; margin: 0; padding: 9px 16px; border-bottom: 1px solid var(--hairline-strong); background: var(--ground-alt); }
+    .status-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 0; background: var(--unknown); }
+    .status-dot.green { background: var(--safe); }
+    .status-dot.red { background: var(--block-edge); }
+    .status-dot.yellow { background: var(--unknown); }
+    .status-text { color: var(--ink); font-size: 12px; }
+    .status-row::after { content: "API"; margin-left: auto; color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; }
+
+    /* Ask ShieldBot AI: the one primary action */
+    #askBtn { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: calc(100% - 32px); min-height: 44px; margin: 14px 16px 4px; padding: 0 14px; border: 1px solid var(--accent); border-radius: 0; background: var(--accent-fill); color: var(--on-accent); font-size: 14px; font-weight: 500; text-align: left; cursor: pointer; transition: background-color .15s; }
+    #askBtn:hover { background: var(--accent-fill-hover); }
+    #askBtn .ask-arrow { font-family: var(--mono); font-size: 15px; }
+
+    /* Tabs */
+    .tabs { display: flex; margin: 10px 16px 14px; border-bottom: 1px solid var(--hairline-strong); }
+    .tab { flex: 1; padding: 10px 0 8px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .04em; white-space: nowrap; text-transform: uppercase; cursor: pointer; }
+    .tab:hover { color: var(--ink); }
+    .tab.active { border-bottom-color: var(--accent); color: var(--ink); }
+    .tab:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .toggle input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .tab-content { display: none; }
+    .tab-content { display: none; padding: 0 16px; }
     .tab-content.active { display: block; }
-    #askBtn { width: 100%; margin: 0 0 12px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--accent); text-align: left; cursor: pointer; }
+
+    /* Forms */
+    .notice { margin-bottom: 14px; padding: 10px 12px; border-left: 2px solid var(--safe); background: var(--ground-alt); color: var(--secondary); font-size: 12px; line-height: 1.5; }
+    .notice div + div { margin-top: 6px; }
+    .notice div:first-child { color: var(--ink); }
     .field { margin-bottom: 12px; }
-    .field > label, .s-label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 11px; }
+    .field > label, .s-label { display: block; margin-bottom: 6px; color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
     .field input, .field select, .s-input, .wh-input {
-      width: 100%; min-width: 0; padding: 8px 9px; border: 1px solid var(--line); border-radius: 5px;
-      background: var(--paper); color: var(--ink); font-size: 12px; outline: none;
+      width: 100%; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--edge); border-radius: 0;
+      background: var(--ground-alt); color: var(--ink); font-size: 12px; outline: none;
     }
+    #apiUrl, #dash-apiUrl, #healthAddress, #dash-healthAddr { font-family: var(--mono); font-size: 12px; }
     .field input:focus, .field select:focus, .s-input:focus, .wh-input:focus { border-color: var(--accent); }
-    select option { background: var(--paper); color: var(--ink); }
-    .toggle-row, .s-toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
-    .toggle-label, .s-toggle-lbl { color: var(--ink); font-size: 12px; }
-    .toggle { position: relative; width: 38px; height: 22px; }
+    select option { background: var(--ground-alt); color: var(--ink); }
+    ::placeholder { color: var(--secondary); opacity: 1; }
+    .toggle-row, .s-toggle-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 10px 0; border-top: 1px solid var(--hairline-strong); border-bottom: 1px solid var(--hairline-strong); }
+    .toggle-label, .s-toggle-lbl { color: var(--ink); font-size: 13px; }
+    .toggle { position: relative; width: 40px; height: 22px; }
     .toggle input { width: 0; height: 0; opacity: 0; }
-    .toggle .slider { position: absolute; inset: 0; border: 1px solid var(--line); border-radius: 12px; background: #D8D7D1; cursor: pointer; transition: background .2s; }
-    .toggle .slider::before { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--paper); content: ''; transition: transform .2s; }
-    .toggle input:checked + .slider { border-color: var(--accent); background: var(--accent); }
-    .toggle input:checked + .slider::before { transform: translateX(16px); }
-    .policy-option, .s-policy-opt { display: flex; flex: 1; flex-direction: column; align-items: flex-start; gap: 2px; padding: 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); cursor: pointer; }
-    .policy-option:has(input:checked), .s-policy-opt:has(input:checked) { border-color: var(--accent); background: #FCF7FB; }
-    .policy-option input, .s-policy-opt input { display: none; }
-    .policy-label, .s-policy-name { color: var(--ink); font-size: 12px; font-weight: 500; }
-    .policy-desc, .s-policy-desc { color: var(--muted); font-size: 11px; }
-    .btn, .s-save, .wh-btn { width: 100%; padding: 9px 10px; border: 0; border-radius: 5px; background: var(--accent); color: #FFFFFF; font-size: 12px; font-weight: 600; cursor: pointer; }
-    .btn:hover, .s-save:hover, .wh-btn:hover { background: var(--accent-hover); }
-    .saved-msg, .s-saved { margin-top: 6px; color: var(--safe); text-align: center; font-size: 11px; opacity: 0; transition: opacity .2s; }
+    .toggle .slider { position: absolute; inset: 0; border: 1px solid var(--edge); border-radius: 0; background: var(--panel); cursor: pointer; transition: background-color .2s, border-color .2s; }
+    .toggle .slider::before { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; background: var(--secondary); content: ''; transition: transform .2s, background-color .2s; }
+    .toggle input:checked + .slider { border-color: var(--accent); background: var(--accent-fill); }
+    .toggle input:checked + .slider::before { background: var(--on-accent); transform: translateX(18px); }
+    .policy-row, .s-policy-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-bottom: 0; }
+    .policy-option, .s-policy-opt { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 9px 10px; border: 1px solid var(--edge); border-radius: 0; background: transparent; cursor: pointer; }
+    .policy-option + .policy-option, .s-policy-opt + .s-policy-opt { border-left: 0; }
+    .policy-option:has(input:checked), .s-policy-opt:has(input:checked) { border-color: var(--accent); background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent); }
+    .policy-option:has(input:focus-visible), .s-policy-opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .policy-option input, .s-policy-opt input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+    .policy-label, .s-policy-name { color: var(--ink); font-size: 13px; font-weight: 500; }
+    .policy-desc, .s-policy-desc { color: var(--secondary); font-size: 11px; }
+    .btn, .s-save, .wh-btn { width: 100%; height: 38px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 0; background: transparent; color: var(--ink); font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color .15s, border-color .15s; }
+    .btn:hover, .s-save:hover, .wh-btn:hover { border-color: var(--ink); background: var(--panel); }
+    .saved-msg, .s-saved { margin-top: 6px; color: var(--safe-text); font-family: var(--mono); font-size: 11px; text-align: center; opacity: 0; transition: opacity .2s; }
     .saved-msg.show, .s-saved.show { opacity: 1; }
-    .history-list { max-height: 260px; overflow-y: auto; }
-    .history-item, .feed-item { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; padding: 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); }
-    .history-badge, .feed-badge, .health-risk-badge, .wh-appr-badge { flex: 0 0 auto; padding: 3px 6px; border: 1px solid transparent; border-radius: 4px; font-size: 10px; font-weight: 600; white-space: nowrap; }
-    .badge-safe { border-color: #176E48; background: transparent; color: #176E48; }
-    .badge-caution { border-color: #8B8B86; background: transparent; color: #141414; }
-    .badge-high { border: 2px solid #C21F30; background: transparent; color: #C21F30; }
-    .badge-block { border-color: #C21F30; background: #C21F30; color: #FFFFFF; }
-    .badge-unknown { border: 1px dashed #141414; background: #8B8B86; color: #141414; }
+
+    /* Verdict chips: five shapes on three hues (BLOCK solid red; HIGH heavy red edge with "!";
+       CAUTION grey hairline with "!"; SAFE green hairline; UNKNOWN grey fill, dashed edge, "?"). */
+    .history-badge, .feed-badge, .health-risk-badge, .wh-appr-badge { flex: 0 0 auto; padding: 2px 6px; border: 1px solid transparent; border-radius: 0; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; white-space: nowrap; }
+    .badge-safe { border-color: var(--safe); background: transparent; color: var(--safe-text); }
+    .badge-caution { border-color: var(--edge); background: transparent; color: var(--ink); }
+    .badge-high { border: 2px solid var(--block-edge); background: transparent; color: var(--block-text); }
+    .badge-block { border-color: var(--block); background: var(--block); color: #FFFFFF; }
+    .badge-unknown { border: 1px dashed var(--on-unknown); background: var(--unknown); color: var(--on-unknown); }
     .badge-high::before, .badge-caution::before { content: "! "; }
     .badge-unknown::before { content: "? "; }
+
+    /* History and live feed: ledger rows */
+    .history-list { max-height: 300px; overflow-y: auto; border-top: 1px solid var(--hairline-strong); }
+    .history-item, .feed-item { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--hairline-strong); }
+    .feed-item { padding-left: 10px; border-left: 2px solid var(--fc, var(--edge)); }
     .history-info, .feed-info { flex: 1; min-width: 0; }
-    .history-recipient, .feed-addr, .wh-appr-name { overflow: hidden; color: var(--ink); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-    .history-time, .feed-time, .history-why, .feed-why, .history-empty { color: var(--muted); font-size: 11px; }
-    .history-time { color: #6B6B66; }
-    .feed-time { color: #6B6B66; }
-    .history-why, .feed-why { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .history-score, .feed-score { flex: 0 0 auto; color: var(--ink); font-size: 11px; font-weight: 500; }
-    .history-empty, .feed-empty { padding: 22px 8px; color: var(--muted); text-align: center; }
-    .deployer-list { margin-top: 8px; }
+    .history-recipient, .feed-addr, .wh-appr-name { overflow: hidden; color: var(--ink); font-family: var(--mono); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .history-time, .feed-time, .history-why, .feed-why, .history-empty { color: var(--secondary); font-size: 11px; }
+    .history-time { color: #A3A39E; }
+    .feed-time { color: #A3A39E; font-family: var(--mono); }
+        .history-why, .feed-why { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .history-score, .feed-score { flex: 0 0 auto; color: var(--ink); font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .history-empty, .feed-empty, .feed-empty-msg { padding: 24px 8px; color: var(--secondary); text-align: center; }
     .feed-item { animation: feed-in .24s ease both; }
-    @keyframes feed-in { from { opacity: 0; transform: translateY(3px); } }
-    .feed-list { min-height: 70px; }
-    .feed-scanning { display: flex; justify-content: center; gap: 4px; margin-bottom: 8px; }
-    .scan-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: scan-pulse 1.2s ease-in-out infinite; }
+    @keyframes feed-in { from { opacity: 0; } }
+    .feed-list { min-height: 70px; max-height: 340px; overflow-y: auto; border-top: 1px solid var(--hairline-strong); }
+    .feed-scanning { display: flex; justify-content: center; gap: 4px; margin-bottom: 10px; }
+    .scan-dot { width: 5px; height: 5px; background: var(--accent); animation: scan-pulse 1.2s ease-in-out infinite; }
     .scan-dot:nth-child(2) { animation-delay: .15s; }
     .scan-dot:nth-child(3) { animation-delay: .3s; }
-    @keyframes scan-pulse { 50% { opacity: .35; } }
-    .feed-empty-lbl { color: #6B6B66; font-size: 11px; }
-    .health-score-row { padding: 12px 0; text-align: center; }
-    .health-score-num { color: var(--ink); font-size: 42px; line-height: 1; }
-    .health-score-label, .health-stat-label { color: var(--muted); font-size: 11px; }
-    .health-stats, .wh-stats { display: flex; gap: 6px; margin-bottom: 10px; }
-    .health-stat, .wh-stat { flex: 1; padding: 8px 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); text-align: center; }
-    .health-stat-num, .wh-statnum { color: var(--ink); font-size: 16px; }
-    .health-approvals, .wh-approvals { max-height: 160px; overflow-y: auto; }
-    .health-approval-item, .wh-appr { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; padding: 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); }
-    .risk-low { padding: 0; border: 0; background: transparent; color: var(--ink); }
-    .risk-medium { border-color: #8B8B86; background: transparent; color: #141414; }
-    .risk-high { border: 2px solid #C21F30; background: transparent; color: #C21F30; }
-    .risk-unknown { border: 1px dashed #141414; background: #8B8B86; color: #141414; }
+    @keyframes scan-pulse { 50% { opacity: .3; } }
+    .feed-empty-lbl { color: #A3A39E; font-size: 12px; }
+
+    /* Deployer alerts (Feed tab) */
+    .feed-heading { margin-bottom: 10px; color: var(--secondary); font-size: 12px; }
+    .deployer-list { max-height: 340px; overflow-y: auto; border-top: 1px solid var(--hairline-strong); }
+    .deployer-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0 9px 10px; border-bottom: 1px solid var(--hairline-strong); border-left: 2px solid var(--block-edge); }
+    .deployer-item-info { flex: 1; min-width: 0; }
+    .deployer-addr, .deployer-contract { overflow: hidden; color: var(--ink); font-family: var(--mono); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .deployer-contract { margin-top: 2px; color: var(--secondary); }
+    .deployer-reason { margin-top: 3px; color: var(--block-text); font-size: 12px; }
+    .deployer-time { flex: 0 0 auto; color: var(--secondary); font-family: var(--mono); font-size: 11px; }
+
+    /* Wallet health */
+    .health-hint, #healthChainHint { margin-top: 6px; color: var(--secondary); font-family: var(--mono); font-size: 11px; text-align: center; }
+    .wh-error, #healthError, #feedError { display: none; margin-top: 8px; color: var(--block-text); font-size: 12px; }
+    .wh-loading, #healthLoading, #feedLoading { display: none; padding: 16px 0; color: var(--secondary); font-size: 12px; text-align: center; }
+    .wh-result, #healthResult { display: none; margin-top: 12px; }
+    .health-score-row { display: flex; align-items: baseline; justify-content: space-between; padding: 6px 0 12px; border-bottom: 1px solid var(--hairline-strong); }
+    .health-score-num { color: var(--ink); font-family: var(--mono); font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
+    .health-score-label, .health-stat-label { color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .health-stats, .wh-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 12px 0; border: 1px solid var(--hairline-strong); }
+    .health-stat, .wh-stat { min-width: 0; padding: 9px 8px; background: var(--ground-alt); }
+    .health-stat + .health-stat, .wh-stat + .wh-stat { border-left: 1px solid var(--hairline-strong); }
+    .health-stat-num, .wh-statnum { overflow: hidden; color: var(--ink); font-family: var(--mono); font-size: 17px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+    .health-approvals, .wh-approvals { max-height: 200px; overflow-y: auto; border-top: 1px solid var(--hairline-strong); }
+    .health-approval-item, .wh-appr { display: flex; align-items: center; gap: 9px; padding: 8px 0; border-bottom: 1px solid var(--hairline-strong); }
+    .health-token, .wh-appr-tok { flex: 1; min-width: 0; }
+    .health-token-name { overflow: hidden; color: var(--ink); font-size: 12.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .health-token-reason, .wh-appr-spender { overflow: hidden; color: var(--secondary); font-family: var(--mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .health-allowance { flex: 0 0 auto; color: var(--secondary); font-family: var(--mono); font-size: 11px; }
+    .health-usd-risk, .wh-appr-usd { flex: 0 0 auto; color: var(--block-text); font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .health-usd-risk.unknown-value, .wh-appr-usd.unknown-value { color: var(--ink); }
+    .health-risk-badge, .wh-appr-badge { min-width: 76px; text-align: center; }
+    .health-empty, .wh-empty { padding: 14px 0; color: var(--secondary); font-size: 12px; text-align: center; }
+    .risk-low { border-color: var(--hairline-strong); background: transparent; color: var(--secondary); }
+    .risk-medium { border-color: var(--edge); background: transparent; color: var(--ink); }
+    .risk-high { border: 2px solid var(--block-edge); background: transparent; color: var(--block-text); }
+    .risk-unknown { border: 1px dashed var(--on-unknown); background: var(--unknown); color: var(--on-unknown); }
     .risk-medium::before, .risk-high::before { content: "! "; }
     .risk-unknown::before { content: "? "; }
-    .wh-appr-tok { flex: 1; min-width: 0; }
-    .wh-appr-spender, .wh-appr-usd, .wh-empty { color: var(--muted); font-size: 11px; }
-    .wh-appr-name, .wh-appr-spender { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .wh-appr-usd { flex: 0 0 auto; }
-    .wh-hint, .wh-scorelbl, .wh-statlbl, .wh-loading { color: var(--muted); font-size: 11px; }
-    .wh-hint { color: #6B6B66; }
-    .wh-error, #healthError, #feedError { display: none; margin-top: 5px; color: var(--block); font-size: 11px; }
-    .wh-loading, #healthLoading, #feedLoading { display: none; padding: 14px 0; text-align: center; }
-    .wh-result, #healthResult { display: none; margin-top: 10px; }
-    .wh-scorerow { display: flex; align-items: baseline; gap: 8px; }
-    .wh-scorenum { color: var(--ink); font-size: 34px; }
-    .ctr-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
-    .ctr-chip { padding: 10px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); text-align: center; }
-    .ctr-chip-num { color: var(--ink); font-size: 22px; }
-    .ctr-chip-num.c-danger { color: var(--block); }
-    .ctr-chip-num.c-unknown { color: var(--unknown); }
-    .ctr-chip-lbl { color: var(--muted); font-size: 10px; }
-    .ctr-div { height: 1px; margin: 0 0 12px; background: var(--line); }
-    .gauge-wrap { display: none; }
-    .gauge-sub { fill: #6B6B66; }
-    .cls-row { display: flex; justify-content: center; margin: 8px 0; }
-    .cls-badge { padding: 4px 10px; border: 1px solid var(--line); border-radius: 4px; font-size: 11px; }
-    .cls-safe { border-color: #176E48; background: transparent; color: #176E48; }
-    .cls-caution { border-color: #8B8B86; background: transparent; color: #141414; }
-    .cls-high { border: 2px solid #C21F30; background: transparent; color: #C21F30; }
-    .cls-block { border-color: #C21F30; background: #C21F30; color: #FFFFFF; }
-    .cls-unknown { border: 1px dashed #141414; background: #8B8B86; color: #141414; }
-    .cls-high::before, .cls-caution::before { content: "! "; }
-    .cls-unknown::before { content: "? "; }
-    .cls-idle { background: var(--panel); color: var(--muted); }
-    .ctr-meta { margin: 8px 0 10px; color: #6B6B66; font-size: 11px; text-align: center; }
-    .ctr-idle { padding: 2px 0 4px; }
-    .ctr-check { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; }
-    .ctr-check-icon { flex: 0 0 auto; color: var(--safe); font-size: 12px; }
-    .ctr-check-text { color: var(--muted); font-size: 11px; }
-    .ctr-verdict { padding: 10px 12px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--ink); font-size: 12px; line-height: 1.6; }
-    #dash-verdict-wrap { display: none; }
-    .dh { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
-    .dh-logo { color: var(--accent); font-size: 17px; font-weight: 600; letter-spacing: -.04em; }
-    .dh-title { color: var(--ink); font-size: 14px; font-weight: 500; }
-    .dh-pill { display: none; }
-    .dh-sep { flex: 1; }
-    .dh-chains { color: var(--muted); font-size: 11px; white-space: nowrap; }
-    .dh-conn { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 11px; }
-    .dh-conn .status-dot { order: 1; }
-    .dh-version { color: #6B6B66; font-size: 11px; }
-    .db { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .9fr) minmax(0, 1fr); align-items: start; gap: 14px; }
-    .dc { min-width: 0; }
-    .dk { margin-bottom: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
-    .dk-title { margin-bottom: 10px; color: var(--ink); font-size: 12px; font-weight: 600; }
-    .db > .dc:last-child > .dk:first-child { display: none; }
-    .wh-btn { margin-bottom: 5px; }
-    .wh-input { margin-bottom: 6px; }
-    .wh-scorelbl { text-transform: uppercase; }
+    .wh-hint { margin-top: 6px; color: #A3A39E; font-family: var(--mono); font-size: 11px; text-align: center; }
+    .wh-scorerow { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid var(--hairline-strong); }
+    .wh-scorenum { color: var(--ink); font-family: var(--mono); font-size: 40px; line-height: 1; font-variant-numeric: tabular-nums; }
+    .wh-scorelbl { color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-align: right; text-transform: uppercase; }
+    .wh-statlbl { display: block; margin-top: 2px; color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
     .wh-statnum { display: block; }
-    .wh-statlbl { display: block; }
-    .s-field { margin-bottom: 10px; }
-    .s-label { text-transform: uppercase; letter-spacing: .04em; }
-    .s-policy-row { display: flex; gap: 6px; margin-bottom: 10px; }
-    .s-footer-link { color: var(--muted); font-size: 11px; text-decoration: none; }
-    .s-footer-link:hover { color: var(--accent); }
-    .rmd-build { animation: build-pulse 1.6s ease-in-out infinite; }
-    @keyframes build-pulse { 50% { opacity: .35; } }
-    body.expanded { width: auto; min-width: 1080px; padding: 22px 26px; }
+    .wh-input { margin-bottom: 8px; }
+    .wh-btn { margin-bottom: 4px; }
+
+    /* ============ Dashboard (popup.html?tab=1) ============ */
+    body.expanded { width: auto; min-width: 1080px; min-height: 100vh; padding: 0; }
     body.expanded > .header, body.expanded > .status-row, body.expanded > .tabs,
     body.expanded > #askBtn, body.expanded > .tab-content { display: none; }
     #dashboard { display: none; }
     body.expanded #dashboard { display: block; }
+    .dh { display: flex; align-items: center; gap: 14px; padding: 16px 28px; border-bottom: 1px solid var(--hairline-strong); background: var(--ground); }
+    .dh-logo { color: var(--ink); font-size: 20px; font-weight: 500; letter-spacing: -0.03em; }
+    .dh-title { color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+    .dh-pill { padding: 3px 7px; border: 1px solid var(--edge); color: var(--ink); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; }
+    .dh-sep { flex: 1; }
+    .dh-chains { color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+    .dh-chains span { color: var(--ink); }
+    .dh-conn { display: flex; align-items: center; gap: 7px; padding-left: 14px; border-left: 1px solid var(--hairline-strong); color: var(--ink); font-size: 12px; }
+    .dh-version { padding-left: 14px; border-left: 1px solid var(--hairline-strong); color: #A3A39E; font-family: var(--mono); font-size: 11px; }
+    #dash-askBtn { display: inline-flex; align-items: center; gap: 10px; height: 34px; padding: 0 14px; border: 1px solid var(--accent); border-radius: 0; background: var(--accent-fill); color: var(--on-accent); font-size: 13px; font-weight: 500; cursor: pointer; }
+    #dash-askBtn:hover { background: var(--accent-fill-hover); }
+    .db { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr); align-items: start; gap: 0; border-bottom: 1px solid var(--hairline-strong); }
+    .dc { min-width: 0; }
+    .dc + .dc { border-left: 1px solid var(--hairline-strong); }
+    .dk { padding: 20px 24px 22px; border-bottom: 1px solid var(--hairline-strong); }
+    .dc > .dk:last-child { border-bottom: 0; }
+    .dk-title { margin-bottom: 14px; color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+
+    /* Centre: counts, score instrument, verdict */
+    .ctr-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 18px; border: 1px solid var(--hairline-strong); }
+    .ctr-chip { padding: 12px 14px; background: var(--ground-alt); }
+    .ctr-chip + .ctr-chip { border-left: 1px solid var(--hairline-strong); }
+    .ctr-chip-num { color: var(--ink); font-family: var(--mono); font-size: 26px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .ctr-chip-num.c-danger { color: var(--block-text); }
+    .ctr-chip-num.c-unknown { color: var(--ink); }
+    .ctr-chip-lbl { margin-top: 4px; color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .ctr-div { display: none; }
+    .gauge-wrap { display: flex; justify-content: center; margin: 4px 0 10px; }
+    .gauge-svg { overflow: visible; }
+    .gauge-track { fill: none; stroke: var(--hairline-strong); stroke-width: 8; stroke-dasharray: 293.2 146.6; transform: rotate(150deg); transform-origin: 100px 100px; }
+    .gauge-arc { fill: none; stroke: var(--secondary); stroke-width: 8; stroke-dasharray: 0 440; transform: rotate(150deg); transform-origin: 100px 100px; transition: stroke-dasharray .9s cubic-bezier(.2, .7, .2, 1); }
+    .gauge-tick { stroke: var(--edge); stroke-width: 1.5; }
+    .gauge-end { fill: var(--secondary); font-family: var(--mono); font-size: 14px; text-anchor: middle; }
+    .gauge-num { fill: var(--ink); font-family: var(--mono); font-size: 44px; text-anchor: middle; font-variant-numeric: tabular-nums; }
+    .gauge-sub { fill: #A3A39E; font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-anchor: middle; }
+    .cls-row { display: flex; justify-content: center; margin: 4px 0 10px; }
+    .cls-badge { padding: 6px 14px; border: 1px solid var(--hairline-strong); border-radius: 0; font-family: var(--mono); font-size: 12px; letter-spacing: .08em; }
+    .cls-safe { border-color: var(--safe); background: transparent; color: var(--safe-text); }
+    .cls-caution { border-color: var(--edge); background: transparent; color: var(--ink); }
+    .cls-high { border: 2px solid var(--block-edge); background: transparent; color: var(--block-text); }
+    .cls-block { border-color: var(--block); background: var(--block); color: #FFFFFF; }
+    .cls-unknown { border: 1px dashed var(--on-unknown); background: var(--unknown); color: var(--on-unknown); }
+    .cls-high::before, .cls-caution::before { content: "! "; }
+    .cls-unknown::before { content: "? "; }
+    .cls-idle { border-color: var(--edge); background: transparent; color: var(--secondary); }
+    .ctr-meta { margin: 0 0 16px; color: #A3A39E; font-family: var(--mono); font-size: 11px; text-align: center; }
+    .ctr-idle { border-top: 1px solid var(--hairline-strong); }
+    .ctr-check { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--hairline-strong); }
+    .ctr-check-icon { flex: 0 0 14px; color: var(--safe-text); font-family: var(--mono); font-size: 12px; }
+    .ctr-check-text { color: var(--secondary); font-size: 12px; }
+    #dash-verdict-wrap { display: none; }
+    .ctr-verdict { padding: 12px 14px; border-left: 2px solid var(--ink); background: var(--ground-alt); color: var(--ink); font-size: 13px; line-height: 1.6; }
+
+    /* Right: security layers, configuration */
+    .rm-section { margin: 0; }
+    .rm-section-title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; color: var(--ink); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .rm-section-title::before { content: ""; width: 7px; height: 7px; background: var(--safe); }
+    .rm-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--hairline-strong); }
+    .rm-item:last-child { border-bottom: 0; }
+    .rm-dot { display: none; }
+    .rmd-build { animation: build-pulse 1.6s ease-in-out infinite; }
+    @keyframes build-pulse { 50% { opacity: .35; } }
+    .rm-info { flex: 1; min-width: 0; }
+    .rm-name { color: var(--ink); font-size: 13px; font-weight: 500; }
+    .rm-sub { margin-top: 2px; color: var(--secondary); font-size: 12px; }
+    .rm-tag { flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--safe); color: var(--safe-text); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; }
+    .s-field { margin-bottom: 12px; }
+    .s-footer { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline-strong); }
+    .s-footer-link { color: var(--secondary); font-size: 12px; text-decoration: none; }
+    .s-footer-link:hover { color: var(--accent); text-decoration: underline; }
+
     @media (prefers-reduced-motion: reduce) {
       .feed-item { animation: none; }
       .scan-dot { animation: none; }
@@ -199,33 +261,29 @@
        COMPACT POPUP
   =============================================================== -->
   <div class="header">
-    <div class="logo">ShieldAI</div>
+    <div class="logo">ShieldBot</div>
     <h1>Firewall</h1>
     <span class="version"></span>
-    <button class="expand-btn" id="expandBtn" title="Open full page">&#10530;</button>
+    <button class="expand-btn" id="expandBtn" title="Open full page" aria-label="Open full page">&#10530;</button>
   </div>
   <div class="status-row">
     <div class="status-dot yellow" id="statusDot"></div>
     <span class="status-text" id="statusText">Checking connection...</span>
   </div>
+  <button class="btn" id="askBtn">
+    <span data-i18n="askShieldBotAI">Ask ShieldBot AI</span><span class="ask-arrow" aria-hidden="true">&rarr;</span>
+  </button>
   <div class="tabs" role="tablist">
     <button type="button" class="tab active" id="tab-settings-button" role="tab" aria-selected="true" aria-controls="tab-settings" data-tab="settings" data-i18n="tabSettings">Settings</button>
     <button type="button" class="tab" id="tab-history-button" role="tab" aria-selected="false" aria-controls="tab-history" tabindex="-1" data-tab="history" data-i18n="tabHistory">History</button>
     <button type="button" class="tab" id="tab-health-button" role="tab" aria-selected="false" aria-controls="tab-health" tabindex="-1" data-tab="health" data-i18n="tabHealth">Health</button>
     <button type="button" class="tab" id="tab-feed-button" role="tab" aria-selected="false" aria-controls="tab-feed" tabindex="-1" data-tab="feed" data-i18n="tabFeed">Feed</button>
   </div>
-  <button class="btn" id="askBtn">
-    Ask ShieldAI
-  </button>
 
   <div class="tab-content active" id="tab-settings" role="tabpanel" aria-labelledby="tab-settings-button">
-    <div>
-      <div data-i18n="readyBanner">ShieldAI is ready — no setup needed. Pre-configured to our hosted server.</div>
+    <div class="notice">
+      <div data-i18n="readyBanner">ShieldBot is ready — no setup needed. Pre-configured to our hosted server.</div>
       <div data-i18n="coverageNote">Checks requests a page sends through an injected wallet (window.ethereum or EIP-6963). WalletConnect connections and actions started inside the wallet are not checked.</div>
-    </div>
-    <div class="field">
-      <label data-i18n="labelApiEndpoint">API Endpoint</label>
-      <input type="text" id="apiUrl" placeholder="https://api.shieldbotsecurity.online">
     </div>
     <div class="toggle-row">
       <span class="toggle-label" id="enabledLabel" data-i18n="labelEnableFirewall">Enable Firewall</span>
@@ -233,10 +291,14 @@
     </div>
     <div class="field">
       <label data-i18n="labelPolicyMode">Policy Mode</label>
-      <div>
+      <div class="policy-row">
         <label class="policy-option"><input type="radio" name="policyMode" value="BALANCED" checked><span class="policy-label" data-i18n="policyBalanced">Balanced</span><span class="policy-desc" data-i18n="policyBalancedDesc">Warn on partial data</span></label>
         <label class="policy-option"><input type="radio" name="policyMode" value="STRICT"><span class="policy-label" data-i18n="policyStrict">Strict</span><span class="policy-desc" data-i18n="policyStrictDesc">Block on any failure</span></label>
       </div>
+    </div>
+    <div class="field">
+      <label for="apiUrl" data-i18n="labelApiEndpoint">API Endpoint</label>
+      <input type="text" id="apiUrl" placeholder="https://api.shieldbotsecurity.online">
     </div>
     <div class="field">
       <label for="langSelect" data-i18n="labelLanguage">Language</label>
@@ -255,7 +317,7 @@
   </div>
 
   <div class="tab-content" id="tab-health" role="tabpanel" aria-labelledby="tab-health-button">
-    <div class="field"><label data-i18n="labelYourWallet">Your Wallet Address</label><input type="text" id="healthAddress" placeholder="0x..."></div>
+    <div class="field"><label for="healthAddress" data-i18n="labelYourWallet">Your Wallet Address</label><input type="text" id="healthAddress" placeholder="0x..."></div>
     <div class="field">
       <label for="healthChain" data-i18n="labelChain">Chain</label>
       <select id="healthChain"></select>
@@ -265,14 +327,14 @@
     <div id="healthError"></div>
     <div id="healthLoading">Scanning approval history...<br><span>This may take 20–40 seconds</span></div>
     <div id="healthResult">
-      <div class="health-score-row"><div id="healthScoreNum" class="health-score-num">--</div><div class="health-score-label">Wallet Health Score</div></div>
+      <div class="health-score-row"><div class="health-score-label">Wallet Health Score</div><div id="healthScoreNum" class="health-score-num">--</div></div>
       <div id="healthStats" class="health-stats"></div>
       <div id="healthApprovals" class="health-approvals"></div>
     </div>
   </div>
 
   <div class="tab-content" id="tab-feed" role="tabpanel" aria-labelledby="tab-feed-button">
-    <div data-i18n="feedHeading">Deployer alerts · new contracts from watched deployers</div>
+    <div class="feed-heading" data-i18n="feedHeading">Deployer alerts · new contracts from watched deployers</div>
     <div id="feedError"></div>
     <div id="feedLoading" data-i18n="feedLoading">Loading deployer alerts...</div>
     <div id="feedList" class="deployer-list"></div>
@@ -285,9 +347,9 @@
 
     <!-- Header -->
     <div class="dh">
-      <div class="dh-logo">ShieldAI</div>
-      <span class="dh-title">Activity</span>
-      <span class="dh-pill"></span>
+      <div class="dh-logo">ShieldBot</div>
+      <span class="dh-title">Firewall · Activity</span>
+      <span class="dh-pill">FULL PAGE</span>
       <div class="dh-sep"></div>
       <span class="dh-chains"><span>8</span> Chains Supported</span>
       <div class="dh-conn">
@@ -295,6 +357,7 @@
         <span id="dash-statusText">Checking...</span>
       </div>
       <span class="dh-version"></span>
+      <button id="dash-askBtn"><span data-i18n="askShieldBotAI">Ask ShieldBot AI</span><span aria-hidden="true">&rarr;</span></button>
     </div>
 
     <!-- 3-column grid -->
@@ -321,7 +384,7 @@
         <!-- Wallet Health -->
         <div class="dk">
           <div class="dk-title" data-i18n="dashWalletHealth">Wallet Health</div>
-          <input type="text" class="wh-input" id="dash-healthAddr" placeholder="0x... paste wallet address">
+          <input type="text" class="wh-input" id="dash-healthAddr" placeholder="0x... paste wallet address" aria-label="Wallet address">
           <select class="wh-input" id="dash-healthChain" aria-label="Chain"></select>
           <button class="wh-btn" id="dash-healthScanBtn">Scan Approvals</button>
           <div class="wh-hint" id="dash-healthChainHint"></div>
@@ -365,13 +428,19 @@
 
           <div class="ctr-div"></div>
 
-          <!-- Arc gauge -->
+          <!-- Safety score of the latest check: an arc from 0 to 100, ticks where its colour changes (50, 80) -->
           <div class="gauge-wrap">
-            <svg class="gauge-svg" viewBox="0 0 200 200" width="158" height="158">
+            <svg class="gauge-svg" viewBox="0 0 200 200" width="190" height="190" role="img" aria-labelledby="dash-gauge-sub dash-gauge-num">
               <circle class="gauge-track" cx="100" cy="100" r="70"/>
               <circle class="gauge-arc" id="dash-gauge-arc" cx="100" cy="100" r="70"/>
-              <text class="gauge-num" id="dash-gauge-num" x="100" y="107">&ndash;</text>
-              <text class="gauge-sub" x="100" y="126">SHIELD SCORE</text>
+              <line class="gauge-tick" x1="31.6" y1="139.5" x2="25.5" y2="143"/>
+              <line class="gauge-tick" x1="100" y1="21" x2="100" y2="14"/>
+              <line class="gauge-tick" x1="175.1" y1="75.6" x2="181.8" y2="73.4"/>
+              <line class="gauge-tick" x1="168.4" y1="139.5" x2="174.5" y2="143"/>
+              <text class="gauge-end" x="20" y="160">0</text>
+              <text class="gauge-end" x="180" y="160">100</text>
+              <text class="gauge-num" id="dash-gauge-num" x="100" y="110">&ndash;</text>
+              <text class="gauge-sub" id="dash-gauge-sub" x="100" y="131">SHIELD SCORE</text>
             </svg>
           </div>
 
@@ -403,7 +472,7 @@
       <!-- RIGHT -->
       <div class="dc">
 
-        <!-- Security Roadmap -->
+        <!-- Security Layers -->
         <div class="dk">
           <div class="dk-title" data-i18n="dashSecurityLayers">Security Layers</div>
 
@@ -415,7 +484,7 @@
                 <div class="rm-name" data-i18n="dashTxFirewall">Transaction Firewall</div>
                 <div class="rm-sub" data-i18n="dashTxFirewallSub">Pre-sign risk analysis on each checked request</div>
               </div>
-              <span class="rm-tag rmt-live"></span>
+              <span class="rm-tag rmt-live">LIVE</span>
             </div>
             <div class="rm-item">
               <div class="rm-dot rmd-live"></div>
@@ -423,7 +492,7 @@
                 <div class="rm-name" data-i18n="dashPhishingGuard">Phishing Guard</div>
                 <div class="rm-sub" data-i18n="dashPhishingGuardSub">URL reputation · GoPlus intelligence</div>
               </div>
-              <span class="rm-tag rmt-live"></span>
+              <span class="rm-tag rmt-live">LIVE</span>
             </div>
             <div class="rm-item">
               <div class="rm-dot rmd-live"></div>
@@ -431,7 +500,7 @@
                 <div class="rm-name" data-i18n="dashDeployerBlock">Deployer Cluster Block</div>
                 <div class="rm-sub" data-i18n="dashDeployerBlockSub">Raises the risk score of contracts from deployers with high-risk contracts on record</div>
               </div>
-              <span class="rm-tag rmt-live"></span>
+              <span class="rm-tag rmt-live">LIVE</span>
             </div>
             <div class="rm-item">
               <div class="rm-dot rmd-live"></div>
@@ -439,7 +508,7 @@
                 <div class="rm-name" data-i18n="dashThreatFeed">Deployer Alert Feed</div>
                 <div class="rm-sub" data-i18n="dashThreatFeedSub">Live deployer alerts</div>
               </div>
-              <span class="rm-tag rmt-live"></span>
+              <span class="rm-tag rmt-live">LIVE</span>
             </div>
           </div>
         </div>
@@ -447,10 +516,6 @@
         <!-- Configuration -->
         <div class="dk">
           <div class="dk-title" data-i18n="dashConfiguration">Configuration</div>
-          <div class="s-field">
-            <span class="s-label" data-i18n="labelApiEndpoint">API Endpoint</span>
-            <input type="text" class="s-input" id="dash-apiUrl" placeholder="https://api.shieldbotsecurity.online">
-          </div>
           <div class="s-toggle-row">
             <span class="s-toggle-lbl" id="dash-enabledLabel" data-i18n="labelEnableFirewall">Enable Firewall</span>
             <label class="toggle"><input type="checkbox" id="dash-enabled" aria-labelledby="dash-enabledLabel" checked><span class="slider"></span></label>
@@ -471,6 +536,10 @@
             </div>
           </div>
           <div class="s-field">
+            <span class="s-label" id="dash-apiLabel" data-i18n="labelApiEndpoint">API Endpoint</span>
+            <input type="text" class="s-input" id="dash-apiUrl" aria-labelledby="dash-apiLabel" placeholder="https://api.shieldbotsecurity.online">
+          </div>
+          <div class="s-field">
             <span class="s-label" id="dash-langLabel" data-i18n="labelLanguage">Language</span>
             <select id="dash-langSelect" class="s-input" aria-labelledby="dash-langLabel">
               <option value="en">English</option>
@@ -480,13 +549,9 @@
           </div>
           <button class="s-save" id="dash-saveBtn" data-i18n="btnSaveSettings">Save Settings</button>
           <div class="s-saved" id="dash-savedMsg" data-i18n="msgSavedDash">Settings saved!</div>
-          <div>
-            <a href="https://shieldbotsecurity.online/privacy.html" target="_blank" class="s-footer-link" data-i18n="dashPrivacyPolicy">
-              Privacy Policy
-            </a>
-            <a href="mailto:support@shieldbotsecurity.online" class="s-footer-link">
-              <span data-i18n="dashSupport">Support</span>: support@shieldbotsecurity.online
-            </a>
+          <div class="s-footer">
+            <a href="https://shieldbotsecurity.online/privacy.html" target="_blank" rel="noopener noreferrer" class="s-footer-link" data-i18n="dashPrivacyPolicy">Privacy Policy</a>
+            <a href="mailto:support@shieldbotsecurity.online" class="s-footer-link"><span data-i18n="dashSupport">Support</span>: support@shieldbotsecurity.online</a>
           </div>
         </div>
 

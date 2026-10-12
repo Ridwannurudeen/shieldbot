@@ -1811,7 +1811,7 @@ def test_documents_the_page_can_reach_first_get_no_key_and_reject_requests(kind,
   const notices = () => body.children.filter(el => el.shadow && el.shadow.children.some(child => child.className === 'shieldai-notice'));
   const tx = {to: '0x' + 'a'.repeat(40)};
   if (reachable) {
-    const message = 'ShieldAI cannot check wallet requests made from this embedded frame or popup. ' +
+    const message = 'ShieldBot cannot check wallet requests made from this embedded frame or popup. ' +
       'Open the dApp in its own tab.';
     for (const args of [
       {method: 'eth_sendTransaction', params: [tx]},
@@ -1893,7 +1893,7 @@ def test_a_refused_send_or_send_async_call_brings_one_notice():
   const notices = body.children.filter(el => el.shadow && el.shadow.children.some(child => child.className === 'shieldai-notice'));
   assert.equal(notices.length, 1, 'expected one notice however many calls were refused');
   const notice = notices[0].shadow.children.find(child => child.className === 'shieldai-notice');
-  assert.match(notice.textContent, /older wallet method ShieldAI cannot check/);
+  assert.match(notice.textContent, /older wallet method ShieldBot cannot check/);
   assert.equal(notice.attrs.role, 'status');
   // An unchecked call brings none.
   legacy.sendAsync({method: 'eth_chainId'}, () => {});

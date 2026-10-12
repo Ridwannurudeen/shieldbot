@@ -1,0 +1,59 @@
+/* ShieldBot extension pages (welcome, popup, side panel): the website's dark tokens
+   (landing-src/public/css/tokens.css, THEME-SPEC 1.2 and 2.2) and its two families, packaged here.
+   Geist carries the interface; IBM Plex Mono carries every address, score, amount, count and label.
+   Text/surface contrast, WCAG (text 4.5:1 floor, control edges 3:1):
+   ink #F7F6F2 on ground #0B0B0A 18.21, on ground-alt #171716 16.59, on panel #1F1F1E 15.25
+   secondary #A3A39E 7.77 / 7.08 / 6.51 · accent #EA66D8 6.93 / 6.31 / 5.81
+   block-text #F0756A 6.99 / 6.37 / 5.86 · safe-text #4FCF95 10.03 / 9.13 / 8.40
+   edge #767671 4.31 / 3.93 / 3.61 · block-edge #E04556 4.83 / 4.40 / 4.05
+   white on accent-fill #A3168F 6.84, on block #C21F30 5.94 · on-unknown #141414 on unknown #8B8B86 5.38 */
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/geist-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/geist-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+}
+
+:root {
+  --ground: #0B0B0A;
+  --ground-alt: #171716;
+  --panel: #1F1F1E;
+  --ink: #F7F6F2;
+  --secondary: #A3A39E;
+  --hairline: #232322;
+  --hairline-strong: #343433;
+  --edge: #767671;
+  --accent: #EA66D8;
+  --accent-fill: #A3168F;
+  --accent-fill-hover: #8A1279;
+  --on-accent: #FFFFFF;
+  --accent-tint: #2B1227;
+  --block: #C21F30;
+  --block-edge: #E04556;
+  --block-text: #F0756A;
+  --safe: #2DB47C;
+  --safe-text: #4FCF95;
+  --unknown: #8B8B86;
+  --on-unknown: #141414;
+  --sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}

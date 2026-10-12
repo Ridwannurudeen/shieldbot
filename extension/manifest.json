@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extName__",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "__MSG_extDescription__",
   "default_locale": "en",
   "minimum_chrome_version": "111",
@@ -51,7 +51,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "ShieldAI Firewall"
+    "default_title": "ShieldBot Firewall"
   },
   "web_accessible_resources": [
     {
@@ -61,7 +61,10 @@
         "i18n.js",
         "locales/en/messages.json",
         "locales/zh/messages.json",
-        "locales/vi/messages.json"
+        "locales/vi/messages.json",
+        "fonts/geist-latin-400-normal.woff2",
+        "fonts/geist-latin-500-normal.woff2",
+        "fonts/ibm-plex-mono-latin-400-normal.woff2"
       ],
       "matches": [
         "https://*/*"

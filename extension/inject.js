@@ -1,5 +1,5 @@
 /**
- * ShieldAI Inject Script
+ * ShieldBot Inject Script
  * A manifest content script that runs in the page's own JavaScript world
  * ("world": "MAIN") at document_start, in every frame, to intercept wallet
  * requests. Wraps provider.request() directly — compatible with MetaMask's
@@ -332,7 +332,7 @@
         // another one.
         const method = ownValue(args, "method");
         if (typeof method !== "string") {
-          reject(new NativeError("ShieldAI rejected a wallet request without a string method"));
+          reject(new NativeError("ShieldBot rejected a wallet request without a string method"));
           return;
         }
         const kind = requestKind(method);
@@ -341,7 +341,7 @@
           return;
         }
         if (reachable) {
-          const error = new NativeError("ShieldAI cannot check wallet requests made from this embedded frame or " +
+          const error = new NativeError("ShieldBot cannot check wallet requests made from this embedded frame or " +
             "popup. Open the dApp in its own tab.");
           // EIP-1193 4100: Unauthorized.
           defineProperty(error, "code", {
@@ -483,11 +483,11 @@
             if (index < decisions) {
               requestAnalysis(method, unreadable ? callsOnAnotherChain : payloadAt(index, chainId), (action) => {
                 if (structured && chainId === null) {
-                  reject(rejectedRequest("Transaction blocked by ShieldAI: wallet chain is unknown or mismatched"));
+                  reject(rejectedRequest("Transaction blocked by ShieldBot: wallet chain is unknown or mismatched"));
                   return;
                 }
                 if (action !== "proceed") {
-                  reject(rejectedRequest("Transaction blocked by ShieldAI Firewall"));
+                  reject(rejectedRequest("Transaction blocked by ShieldBot Firewall"));
                   return;
                 }
                 decide(index + 1);
@@ -502,7 +502,7 @@
             // even when the provider does not implement chainChanged events.
             resolveChainId((latestChainId) => {
               if (revision !== chainRevision || latestChainId !== chainId) {
-                reject(rejectedRequest("Transaction blocked by ShieldAI: wallet chain changed; retry analysis"));
+                reject(rejectedRequest("Transaction blocked by ShieldBot: wallet chain changed; retry analysis"));
                 return;
               }
               // The wallet holds the request to the analysed chain only when
@@ -627,7 +627,7 @@
       const check = checkOf(this);
       if (check === undefined) {
         return new NativePromise((resolve, reject) => {
-          reject(rejectedRequest("Transaction blocked by ShieldAI Firewall"));
+          reject(rejectedRequest("Transaction blocked by ShieldBot Firewall"));
         });
       }
       const target = this;
@@ -669,7 +669,7 @@
           ? callFunction(original, this, payload)
           : callFunction(original, this, payload, second);
       }
-      const error = new NativeError("ShieldAI cannot check wallet requests made with send or sendAsync. " +
+      const error = new NativeError("ShieldBot cannot check wallet requests made with send or sendAsync. " +
         "Use request instead.");
       // content.js shows the user a notice saying why, once.
       postMessage({ type: "SHIELDAI_LEGACY_REFUSED" }, "*");

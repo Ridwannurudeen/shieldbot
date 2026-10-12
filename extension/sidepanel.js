@@ -413,18 +413,36 @@ document.addEventListener("DOMContentLoaded", async () => {
   // -------------------------------------------------------------------
   // Tab switching
   // -------------------------------------------------------------------
-  const tabBtns = document.querySelectorAll(".tab-btn");
+  const tabBtns = Array.from(document.querySelectorAll(".tab-btn"));
   const panels = document.querySelectorAll(".panel");
 
   function switchTab(tabName) {
-    tabBtns.forEach(b => b.classList.toggle("active", b.dataset.tab === tabName));
+    tabBtns.forEach(b => {
+      const selected = b.dataset.tab === tabName;
+      b.classList.toggle("active", selected);
+      b.setAttribute("aria-selected", String(selected));
+      b.tabIndex = selected ? 0 : -1;
+    });
     panels.forEach(p => p.classList.toggle("active", p.id === tabName + "Panel"));
     localStorage.setItem("shieldbot_active_tab", tabName);
     if (tabName === "guardian") loadGuardianData();
   }
 
-  tabBtns.forEach(btn => {
+  tabBtns.forEach((btn, index) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+    // Arrow keys, Home and End move between tabs and open the one they reach, as in the popup.
+    btn.addEventListener("keydown", (event) => {
+      const target = {
+        ArrowRight: (index + 1) % tabBtns.length,
+        ArrowLeft: (index - 1 + tabBtns.length) % tabBtns.length,
+        Home: 0,
+        End: tabBtns.length - 1,
+      }[event.key];
+      if (target === undefined) return;
+      event.preventDefault();
+      tabBtns[target].focus();
+      switchTab(tabBtns[target].dataset.tab);
+    });
   });
 
   // Restore last active tab
@@ -498,8 +516,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     };
     let statsHtml = `<div class="health-stats">
       <div class="health-stat"><span class="health-stat-val">${totalApprovals}</span><span class="health-stat-label">Approvals</span></div>
-      <div class="health-stat"><span class="health-stat-val" style="color:#C21F30">${dangerousCount}</span><span class="health-stat-label">High Risk</span></div>
-      <div class="health-stat"><span class="health-stat-val" style="color:#141414">${valueText}</span><span class="health-stat-label">At Risk</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:var(--block-text)">${dangerousCount}</span><span class="health-stat-label">High Risk</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:var(--ink)">${valueText}</span><span class="health-stat-label">At Risk</span></div>
     </div>`;
     let compHtml = "";
     for (const [key, val] of Object.entries(components)) {
@@ -511,7 +529,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     guardianHealthEl.innerHTML = `<div class="health-card">
       <div class="health-header">
-        <span class="health-score" style="color:${incomplete ? '#141414' : score >= 70 ? '#176E48' : score >= 40 ? '#141414' : '#C21F30'}">${incomplete ? "?" : score}</span>
+        <span class="health-score" style="color:${incomplete ? 'var(--ink)' : score >= 70 ? 'var(--safe-text)' : score >= 40 ? 'var(--ink)' : 'var(--block-text)'}">${incomplete ? "?" : score}</span>
         <span class="health-level ${escapeHtml(level)}">${escapeHtml(level)}</span>
       </div>
       ${statsHtml}

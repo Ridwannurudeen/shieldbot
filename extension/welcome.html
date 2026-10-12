@@ -3,89 +3,127 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ShieldAI</title>
+  <title>ShieldBot</title>
+  <link rel="stylesheet" href="tokens.css" />
   <style>
-    :root {
-      color-scheme: light;
-      --paper: #FFFFFF;
-      --panel: #F7F6F2;
-      --ink: #141414;
-      --muted: #6B6B66;
-      --line: #E6E5E1;
-      --accent: #A3168F;
-      --accent-hover: #8A1279;
-    }
+    /* Welcome page, opened once on install. Tokens in tokens.css. A masthead, the claim and its one
+       action on the left; on the right the record of what is checked, in order, and the networks
+       covered, as a ledger. */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       min-height: 100vh;
-      padding: 48px 24px;
-      background: var(--paper);
+      background: var(--ground);
       color: var(--ink);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.55;
+      font-synthesis-weight: none;
     }
-    .card { width: 100%; max-width: 640px; margin: 0 auto 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; text-align: left; }
-    .logo { display: block; width: auto; height: auto; margin: 0 0 28px; color: var(--accent); font-size: 16px; font-weight: 600; letter-spacing: -.04em; }
-    h1 { margin-bottom: 8px; color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -.03em; }
-    .subtitle { margin-bottom: 32px; color: var(--muted); font-size: 15px; line-height: 1.5; }
-    .steps { display: flex; flex-direction: column; gap: 0; margin-bottom: 30px; text-align: left; }
-    .step { display: flex; align-items: flex-start; gap: 16px; padding: 13px 0; border-bottom: 1px solid var(--line); background: transparent; }
-    .step-icon { flex: 0 0 32px; margin-top: 2px; color: var(--accent); font-size: 12px; font-weight: 600; line-height: 1.5; font-variant-numeric: tabular-nums; letter-spacing: .06em; }
-    .step-body { min-width: 0; }
-    .step-title { margin-bottom: 3px; color: var(--ink); font-size: 14px; font-weight: 600; }
-    .step-desc { color: var(--muted); font-size: 13px; line-height: 1.5; }
-    #connectBtn { display: inline-block; min-width: 205px; padding: 12px 16px; border: 0; border-radius: 5px; background: var(--accent); color: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer; transition: background .15s; }
-    #connectBtn:hover:not(:disabled) { background: var(--accent-hover); }
+    .version { color: #A3A39E; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; }
+    .masthead { display: flex; align-items: center; gap: 14px; max-width: 1200px; margin: 0 auto; padding: 20px 40px; border-bottom: 1px solid var(--hairline-strong); }
+    .logo { color: var(--ink); font-size: 20px; font-weight: 500; letter-spacing: -0.03em; }
+    .masthead-label { color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+    .masthead .version { margin: 0 0 0 auto; }
+    .card { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 72px; max-width: 1200px; margin: 0 auto; padding: 72px 40px 56px; }
+    h1 { margin-bottom: 18px; color: var(--ink); font-size: 52px; font-weight: 500; line-height: 1.02; letter-spacing: -0.035em; }
+    .subtitle { max-width: 34em; margin-bottom: 32px; color: var(--secondary); font-size: 16px; line-height: 1.55; }
+    #connectBtn { display: inline-flex; align-items: center; gap: 14px; min-height: 48px; padding: 0 20px; border: 1px solid var(--accent); border-radius: 0; background: var(--accent-fill); color: var(--on-accent); font: inherit; font-size: 15px; font-weight: 500; cursor: pointer; transition: background-color .15s; }
+    #connectBtn::after { content: "\2192"; font-family: var(--mono); }
+    #connectBtn:hover:not(:disabled) { background: var(--accent-fill-hover); }
     #connectBtn:disabled { cursor: not-allowed; }
     #connectBtn:focus-visible, #closeLink:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-    #statusMsg { min-height: 20px; margin-top: 10px; color: var(--muted); font-size: 13px; }
-    #closeLink { display: none; margin-top: 12px; color: var(--muted); font-size: 13px; cursor: pointer; text-decoration: underline; }
+    #statusMsg { min-height: 22px; margin-top: 14px; color: var(--secondary); font-family: var(--mono); font-size: 12px; }
+    #closeLink { display: none; margin-top: 10px; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
     #closeLink:hover { color: var(--accent); }
-    .version { margin-top: 32px; color: #6B6B66; font-size: 11px; }
-    .version a { color: #A3168F; }
+    .scope { margin-top: 40px; padding: 12px 14px; border-left: 2px solid var(--edge); background: var(--ground-alt); color: var(--secondary); font-size: 13px; line-height: 1.55; }
+    .steps { display: flex; flex-direction: column; margin-bottom: 40px; text-align: left; }
+    .step { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 0; padding: 18px 0; border-bottom: 1px solid var(--hairline-strong); }
+    .step-icon { color: var(--accent); font-family: var(--mono); font-size: 13px; line-height: 1.6; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+    .step-body { min-width: 0; }
+    .step-title { margin-bottom: 4px; color: var(--ink); font-size: 17px; font-weight: 500; letter-spacing: -0.01em; }
+    .step-desc { color: var(--secondary); font-size: 14px; line-height: 1.6; }
+    .chains { width: 100%; border-collapse: collapse; }
+    .chains td { padding: 8px 0; border-bottom: 1px solid var(--hairline-strong); font-size: 14px; }
+    .chains td:last-child { color: var(--secondary); font-family: var(--mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+    .chains th { padding-bottom: 10px; border-bottom: 1px solid var(--ink); color: var(--secondary); font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: .1em; text-align: left; text-transform: uppercase; }
+    .chains th:last-child { text-align: right; }
+    .footer { display: flex; align-items: center; gap: 24px; max-width: 1200px; margin: 0 auto; padding: 18px 40px 28px; border-top: 1px solid var(--hairline-strong); }
+    .version a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+    .version a:hover { color: var(--accent); }
+    @media (max-width: 900px) {
+      .card { grid-template-columns: minmax(0, 1fr); gap: 48px; padding: 44px 24px 40px; }
+      .masthead, .footer { padding-left: 24px; padding-right: 24px; }
+      h1 { font-size: 40px; }
+    }
     @media (max-width: 600px) {
-      body { padding: 28px 16px; }
-      .step { gap: 10px; }
+      .masthead { flex-wrap: wrap; gap: 6px 12px; padding: 16px; }
+      .masthead .version { width: 100%; margin: 0; }
+      .card { padding: 32px 16px 32px; gap: 40px; }
+      .footer { flex-wrap: wrap; gap: 8px 20px; padding: 16px; }
+      h1 { font-size: 34px; }
+      .step { grid-template-columns: 40px minmax(0, 1fr); }
     }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="logo">ShieldAI</div>
-
-    <h1 data-i18n="welcomeTitle">ShieldAI</h1>
-    <p class="subtitle" data-i18n="welcomeSubtitle">
-      Checks your transactions on 8 EVM chains before you sign: Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.
-    </p>
-
-    <div class="steps">
-      <div class="step">
-        <div class="step-icon">01</div>
-        <div class="step-body">
-          <div class="step-title" data-i18n="step1Title">Analyze</div>
-          <div class="step-desc" data-i18n="step1Desc">Transactions and signature requests a page sends to your wallet are checked for honeypots, rug pulls and drainer contracts before you confirm. Sends you start in your wallet's own window are not checked.</div>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step-icon">02</div>
-        <div class="step-body">
-          <div class="step-title" data-i18n="step2Title">Simulate</div>
-          <div class="step-desc" data-i18n="step2Desc">When a transaction can be simulated, see which tokens leave and enter your wallet before you confirm.</div>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step-icon">03</div>
-        <div class="step-body">
-          <div class="step-title" data-i18n="step3Title">Warn</div>
-          <div class="step-desc" data-i18n="step3Desc">High-risk transactions get a clear warning before you sign, and you choose whether to cancel or continue. If a request times out, or your wallet's chain cannot be identified or differs from the chain the transaction names, the request is refused so you can retry. Known phishing sites are flagged when you open them.</div>
-        </div>
-      </div>
-    </div>
-
-    <button id="connectBtn" data-i18n="welcomeConnectBtn">Activate Protection</button>
-    <div id="statusMsg"></div>
-    <div id="closeLink" data-i18n="welcomeClose">Close this tab</div>
-
+  <div class="masthead">
+    <div class="logo">ShieldBot</div>
+    <div class="masthead-label">Transaction Firewall</div>
     <div class="version"></div>
+  </div>
+
+  <main class="card">
+    <section>
+      <h1 data-i18n="welcomeTitle">ShieldBot</h1>
+      <p class="subtitle" data-i18n="welcomeSubtitle">
+        Checks your transactions on 8 EVM chains before you sign: Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain.
+      </p>
+      <button id="connectBtn" data-i18n="welcomeConnectBtn">Activate Protection</button>
+      <div id="statusMsg" role="status"></div>
+      <button type="button" id="closeLink" data-i18n="welcomeClose">Close this tab</button>
+      <p class="scope" data-i18n="coverageNote">Checks requests a page sends through an injected wallet (window.ethereum or EIP-6963). WalletConnect connections and actions started inside the wallet are not checked.</p>
+    </section>
+
+    <section>
+      <div class="steps">
+        <div class="step">
+          <div class="step-icon">01</div>
+          <div class="step-body">
+            <div class="step-title" data-i18n="step1Title">Analyze</div>
+            <div class="step-desc" data-i18n="step1Desc">Transactions and signature requests a page sends to your wallet are checked for honeypots, rug pulls and drainer contracts before you confirm. Sends you start in your wallet's own window are not checked.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-icon">02</div>
+          <div class="step-body">
+            <div class="step-title" data-i18n="step2Title">Simulate</div>
+            <div class="step-desc" data-i18n="step2Desc">When a transaction can be simulated, see which tokens leave and enter your wallet before you confirm.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-icon">03</div>
+          <div class="step-body">
+            <div class="step-title" data-i18n="step3Title">Warn</div>
+            <div class="step-desc" data-i18n="step3Desc">High-risk transactions get a clear warning before you sign, and you choose whether to cancel or continue. If a request times out, or your wallet's chain cannot be identified or differs from the chain the transaction names, the request is refused so you can retry. Known phishing sites are flagged when you open them.</div>
+          </div>
+        </div>
+      </div>
+
+      <table class="chains">
+        <thead><tr><th scope="col" data-i18n="labelChain">Chain</th><th scope="col">ID</th></tr></thead>
+        <tr><td>Ethereum</td><td>1</td></tr>
+        <tr><td>BNB Chain</td><td>56</td></tr>
+        <tr><td>opBNB</td><td>204</td></tr>
+        <tr><td>Base</td><td>8453</td></tr>
+        <tr><td>Arbitrum</td><td>42161</td></tr>
+        <tr><td>Polygon</td><td>137</td></tr>
+        <tr><td>Optimism</td><td>10</td></tr>
+        <tr><td>Robinhood Chain</td><td>4663</td></tr>
+      </table>
+    </section>
+  </main>
+
+  <div class="footer">
     <div class="version"><a href="https://shieldbotsecurity.online/terms.html" target="_blank" rel="noopener noreferrer" data-i18n="linkTerms">Terms of Service</a></div>
   </div>
 

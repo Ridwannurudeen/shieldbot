@@ -1011,6 +1011,9 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert/strict');
 const compact = JSON.parse(process.argv[1]);
+// Colours are dark-theme tokens; resolve them from extension/tokens.css so a wrong token value fails too.
+const tokens = fs.readFileSync('extension/tokens.css', 'utf8');
+const resolve = value => String(value).replace(/var[(](--[a-z-]+)[)]/g, (_, name) => tokens.split(name + ':')[1].trim().slice(0, 7));
 function element() {return {innerHTML: '', textContent: '', style: {}};}
 const context = {
   URLSearchParams, location: {search: ''}, t: key => key, escapeHtml: String,
@@ -1025,13 +1028,13 @@ context.renderHealthData({
   high_risk: 0, medium_risk: 0, approvals: [{risk_level: 'unknown', token_symbol: 'TKN', spender: '0xabc'}],
 }, ctx);
 assert.notEqual(ctx.scoreNumEl.textContent, 100);
-assert.notEqual(ctx.scoreNumEl.style.color, '#176E48');
+assert.notEqual(resolve(ctx.scoreNumEl.style.color), '#4FCF95');
 assert(!ctx.approvalsEl.innerHTML.includes('risk-low'));
 context.renderHealthData({
   high_risk: 0, medium_risk: 0, approvals: [{risk_level: 'LOW', token_symbol: 'TKN', spender: '0xabc'}],
 }, ctx);
 assert.equal(ctx.scoreNumEl.textContent, 100);
-assert.equal(ctx.scoreNumEl.style.color, '#176E48');
+assert.equal(resolve(ctx.scoreNumEl.style.color), '#4FCF95');
 assert(ctx.approvalsEl.innerHTML.includes('risk-low'));
 '''
     result = subprocess.run(
@@ -1126,6 +1129,9 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert/strict');
 const surface = JSON.parse(process.argv[1]);
+// Colours are dark-theme tokens; resolve them from extension/tokens.css so a wrong token value fails too.
+const tokens = fs.readFileSync('extension/tokens.css', 'utf8');
+const resolve = value => String(value).replace(/var[(](--[a-z-]+)[)]/g, (_, name) => tokens.split(name + ':')[1].trim().slice(0, 7));
 function element() {return {innerHTML: '', textContent: '', style: {}};}
 const context = {
   URLSearchParams, location: {search: ''}, t: key => key, escapeHtml: String,
@@ -1148,7 +1154,7 @@ if (surface === 'sidepanel-guardian') {
   let html = context.guardianHealthEl.innerHTML;
   assert(!html.includes('$0'));
   assert(html.includes('Unknown'));
-  assert(!html.includes('#176E48'));
+  assert(!resolve(html).includes('#4FCF95'));
   context.renderGuardianHealth({
     health_score: 50, level: 'unknown', status: 'unknown', total_value_at_risk_usd: null,
     coverage_reasons: {dangerous_approvals: 'dangerous_approvals data incomplete'},
@@ -1162,7 +1168,7 @@ if (surface === 'sidepanel-guardian') {
   });
   html = context.guardianHealthEl.innerHTML;
   assert(html.includes('$0.00'));
-  assert(html.includes('#176E48'));
+  assert(resolve(html).includes('#4FCF95'));
 } else {
   vm.runInContext(fs.readFileSync('extension/popup.js', 'utf8'), context);
   context.escapeHtml = String;

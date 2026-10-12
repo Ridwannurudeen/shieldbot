@@ -42,8 +42,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     } catch (err) {
       const msg = err.message || t("welcomePermDenied");
       btn.textContent = t("welcomeRetry");
-      btn.style.background = "#dc2626";
-      btn.style.color = "#fff";
+      btn.style.background = "var(--block)";
+      btn.style.color = "var(--on-accent)";
       btn.disabled = false;
       statusMsg.textContent = msg;
     }

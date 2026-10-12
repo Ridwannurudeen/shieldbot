@@ -92,7 +92,7 @@ def test_a_signature_the_api_could_not_check_is_unknown_never_safe(policy):
   const html = overlay().innerHTML;
   assert.deepEqual(overlay().querySelector('.shieldai-badge').className.split(/\s+/), ['shieldai-badge', 'shieldai-badge-unknown']);
   assert(html.includes('UNKNOWN') && !html.includes('>SAFE<'), html);
-  assert(html.includes('Why: Could not reach the ShieldAI API: API error 503: unavailable'), html);
+  assert(html.includes('Why: Could not reach the ShieldBot API: API error 503: unavailable'), html);
   assert(html.includes('hello'), 'the message is no longer shown');
   const strict = storage.policyMode === 'STRICT';
   assert.equal(html.includes('id="shieldai-proceed"'), !strict);

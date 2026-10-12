@@ -404,21 +404,22 @@ def contrast(foreground, background):
 @pytest.mark.parametrize(
     ("page", "selector", "background"),
     [
-        ("popup.html", ".history-time", "#FFFFFF"),
-        ("popup.html", ".feed-time", "#FFFFFF"),
-        ("popup.html", ".gauge-sub", "#FFFFFF"),
-        ("popup.html", ".ctr-meta", "#FFFFFF"),
-        ("popup.html", ".dh-version", "#FFFFFF"),
-        ("popup.html", ".feed-empty-lbl", "#FFFFFF"),
-        ("popup.html", ".wh-hint", "#FFFFFF"),
-        ("welcome.html", ".version", "#FFFFFF"),
+        ("popup.html", ".history-time", "#0B0B0A"),
+        ("popup.html", ".feed-time", "#0B0B0A"),
+        ("popup.html", ".gauge-sub", "#0B0B0A"),
+        ("popup.html", ".ctr-meta", "#0B0B0A"),
+        ("popup.html", ".dh-version", "#0B0B0A"),
+        ("popup.html", ".feed-empty-lbl", "#0B0B0A"),
+        ("popup.html", ".wh-hint", "#0B0B0A"),
+        ("welcome.html", ".version", "#0B0B0A"),
     ],
 )
 def test_popup_secondary_text_is_readable(page, selector, background):
     html = (EXTENSION / page).read_text(encoding="utf-8")
     rule = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", html).group(1)
     color = re.search(r"(?:^|;)\s*(?:color|fill):\s*(#[0-9a-fA-F]{6})", rule).group(1)
-    # Each selector is checked against the darkest surface it actually sits on.
+    # Each selector is checked against the surface it actually sits on: since 3.3.0 the pages are dark
+    # and these lines sit on the ground, #0B0B0A.
     assert contrast(color, background) >= 4.5, (page, selector, color, background)
 
 
