@@ -51,7 +51,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "ShieldAI Firewall"
+    "default_title": "ShieldBot Firewall"
   },
   "web_accessible_resources": [
     {

@@ -92,7 +92,7 @@
         })
         .catch(function (e) {
           var msg = (e && e.message) || String(e);
-          if (/ShieldAI/i.test(msg)) log("STOPPED BY SHIELDBOT: " + msg);
+          if (/ShieldBot|ShieldAI/i.test(msg)) log("STOPPED BY SHIELDBOT: " + msg);
           else log("Rejected: " + msg);
         })
         .then(function () { button.disabled = false; });

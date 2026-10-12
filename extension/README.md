@@ -1,4 +1,4 @@
-# ShieldAI browser extension
+# ShieldBot browser extension
 
 A Chrome extension (Manifest V3, Chrome 111 or later) that shows a warning before a web page's
 wallet request reaches the wallet, and waits for the user to decide. It runs on https pages only.
@@ -140,7 +140,7 @@ second limit below is the case where they did not.
   handover completes: a frame whose parent is same-origin, an `about:blank` or `about:srcdoc`
   document (a frame's initial empty document is `about:blank`), or a popup whose opener is
   same-origin. No key is handed over there, and the request is rejected with EIP-1193 code 4100 and
-  the message "ShieldAI cannot check wallet requests made from this embedded frame or popup. Open the
+  the message "ShieldBot cannot check wallet requests made from this embedded frame or popup. Open the
   dApp in its own tab." The first time, a notice in that document says so; it has no buttons and
   decides nothing. Cross-origin frames and top-level pages without a same-origin opener are checked
   normally.
@@ -252,10 +252,10 @@ A page can find out that the extension is installed, in these ways:
   `SHIELDAI_LEGACY_REFUSED`) reach every `message` listener of the page. They carry proofs, never
   the key, so the page can read them but not make them; `SHIELDAI_SETTINGS` also tells the page
   whether the firewall is switched on. While a warning shows, its host element is in the page's DOM
-  (what it holds is in a closed shadow root). The first warning, banner or notice also adds the
-  dialog's two typefaces to `document.fonts` as "ShieldBot Geist" and "ShieldBot Plex Mono" (a
-  font declared inside a shadow root is not loaded, so they are registered on the document), and
-  the page can list them there.
+  (what it holds is in a closed shadow root). While a warning, banner or notice is on the page,
+  its two typefaces are also in `document.fonts` as "ShieldBot Geist" and "ShieldBot Plex Mono" (a
+  font declared inside a shadow root is not loaded, so they are registered on the document); they
+  are taken out again when the last of them is gone.
 - The files `manifest.json` lists under `web_accessible_resources` (`overlay.css`, `welcome.html`,
   `i18n.js`, `locales/en/messages.json`, `locales/zh/messages.json`, `locales/vi/messages.json`,
   `fonts/geist-latin-400-normal.woff2`, `fonts/geist-latin-500-normal.woff2` and

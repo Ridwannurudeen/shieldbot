@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0B0B0A" />
   <script src="/js/theme.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>About ShieldAI — Web3 Transaction Firewall & Crypto Security Extension</title>
-  <meta name="description" content="How the ShieldBot browser extension (ShieldAI Transaction Firewall) checks transactions before you sign: contract analysis, honeypot simulation, risk scores and honest Unknown results.">
+  <title>About ShieldBot — Web3 Transaction Firewall & Crypto Security Extension</title>
+  <meta name="description" content="How the ShieldBot browser extension (ShieldBot Transaction Firewall) checks transactions before you sign: contract analysis, honeypot simulation, risk scores and honest Unknown results.">
   <link rel="canonical" href="https://shieldbotsecurity.online/about.html">
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://shieldbotsecurity.online/about.html">
@@ -421,11 +421,11 @@
   <main class="wrap">
 
     <div class="hero">
-      <h1>How ShieldAI Protects Your Wallet</h1>
+      <h1>How ShieldBot Protects Your Wallet</h1>
       </div>
 
     <div class="callout">
-      ShieldAI operates at the transaction layer, not the URL layer. In the browser's page context, before your wallet receives the request, it intercepts transactions (<code>eth_sendTransaction</code>, <code>eth_signTransaction</code>), batches (<code>wallet_sendCalls</code>) and signature requests (<code>eth_signTypedData</code> and its <code>_v1</code>, <code>_v3</code> and <code>_v4</code> forms, <code>personal_sign</code> and <code>eth_sign</code>).
+      ShieldBot operates at the transaction layer, not the URL layer. In the browser's page context, before your wallet receives the request, it intercepts transactions (<code>eth_sendTransaction</code>, <code>eth_signTransaction</code>), batches (<code>wallet_sendCalls</code>) and signature requests (<code>eth_signTypedData</code> and its <code>_v1</code>, <code>_v3</code> and <code>_v4</code> forms, <code>personal_sign</code> and <code>eth_sign</code>).
     </div>
 
     <h2>How Risk Is Rated</h2>
@@ -442,7 +442,7 @@
 
     <h2>Wallet Drainer Protection</h2>
     <p>A wallet drainer is a malicious smart contract that exploits ERC-20 approval functions or EIP-712 permit signatures to transfer all tokens from a wallet in a single transaction. Standard browser phishing warnings cannot detect these because they operate at the URL layer — the attack happens at the transaction layer.</p>
-    <p>ShieldAI helps against wallet drainers by:</p>
+    <p>ShieldBot helps against wallet drainers by:</p>
     <ul>
       <li>Catching the transaction or signature request before your wallet shows it</li>
       <li>Analyzing EIP-712 permit and Permit2 signature requests for approval exploits</li>
@@ -452,11 +452,11 @@
 
     <h2>Honeypot Detection</h2>
     <p>A honeypot token allows users to buy but contains hidden code that blocks all sell transactions. The token appears to have liquidity and price action, but holders can never exit.</p>
-    <p>ShieldAI looks for honeypots in two ways. It simulates a buy and a sell of the token where the chain has a simulator: honeypot.is on Ethereum, BNB Chain and Base, and ShieldBot's own simulation on supported Arbitrum and Robinhood Chain pool routes. On Arbitrum those are pools pairing the token with WETH on Uniswap V3, Uniswap V2 or SushiSwap. On the other chains, and for an Arbitrum token with no such pool (for example one traded only on Camelot, or only against stablecoins), it uses GoPlus's honeypot and tax flags instead. It also checks the contract's bytecode for owner powers a honeypot can use, such as a blacklist or a pause switch, which works even for unverified contracts. If a simulation fails, or neither source answers, the result is Unknown rather than Safe.</p>
+    <p>ShieldBot looks for honeypots in two ways. It simulates a buy and a sell of the token where the chain has a simulator: honeypot.is on Ethereum, BNB Chain and Base, and ShieldBot's own simulation on supported Arbitrum and Robinhood Chain pool routes. On Arbitrum those are pools pairing the token with WETH on Uniswap V3, Uniswap V2 or SushiSwap. On the other chains, and for an Arbitrum token with no such pool (for example one traded only on Camelot, or only against stablecoins), it uses GoPlus's honeypot and tax flags instead. It also checks the contract's bytecode for owner powers a honeypot can use, such as a blacklist or a pause switch, which works even for unverified contracts. If a simulation fails, or neither source answers, the result is Unknown rather than Safe.</p>
 
     <h2>Pre-Sign Transaction Simulation</h2>
-    <p>When transaction simulation is enabled, ShieldAI sends the transaction to Tenderly for simulation on a copy of the chain state. Tenderly runs it in a sandbox and returns the tokens and amounts that would leave or enter your wallet.</p>
-    <p>ShieldAI displays this asset delta before the wallet signature dialog appears. For example: <em>"You will send 2.5 BNB and receive 10,000 TOKEN."</em> Tokens the simulation shows leaving your wallet are listed among the danger signals; they do not change the verdict itself. If the transaction reverts in the simulation, the result is incomplete and cannot be SAFE, and a revert on a contract whose own risk score, before community reports and campaign boosts, is already 30 or more is BLOCK RECOMMENDED.</p>
+    <p>When transaction simulation is enabled, ShieldBot sends the transaction to Tenderly for simulation on a copy of the chain state. Tenderly runs it in a sandbox and returns the tokens and amounts that would leave or enter your wallet.</p>
+    <p>ShieldBot displays this asset delta before the wallet signature dialog appears. For example: <em>"You will send 2.5 BNB and receive 10,000 TOKEN."</em> Tokens the simulation shows leaving your wallet are listed among the danger signals; they do not change the verdict itself. If the transaction reverts in the simulation, the result is incomplete and cannot be SAFE, and a revert on a contract whose own risk score, before community reports and campaign boosts, is already 30 or more is BLOCK RECOMMENDED.</p>
 
     <h2>What we saw on the chain</h2>
     <dl class="census-grid">

@@ -1811,7 +1811,7 @@ def test_documents_the_page_can_reach_first_get_no_key_and_reject_requests(kind,
   const notices = () => body.children.filter(el => el.shadow && el.shadow.children.some(child => child.className === 'shieldai-notice'));
   const tx = {to: '0x' + 'a'.repeat(40)};
   if (reachable) {
-    const message = 'ShieldAI cannot check wallet requests made from this embedded frame or popup. ' +
+    const message = 'ShieldBot cannot check wallet requests made from this embedded frame or popup. ' +
       'Open the dApp in its own tab.';
     for (const args of [
       {method: 'eth_sendTransaction', params: [tx]},
