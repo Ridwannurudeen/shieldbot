@@ -498,8 +498,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     };
     let statsHtml = `<div class="health-stats">
       <div class="health-stat"><span class="health-stat-val">${totalApprovals}</span><span class="health-stat-label">Approvals</span></div>
-      <div class="health-stat"><span class="health-stat-val" style="color:#C21F30">${dangerousCount}</span><span class="health-stat-label">High Risk</span></div>
-      <div class="health-stat"><span class="health-stat-val" style="color:#141414">${valueText}</span><span class="health-stat-label">At Risk</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:var(--block-text)">${dangerousCount}</span><span class="health-stat-label">High Risk</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:var(--ink)">${valueText}</span><span class="health-stat-label">At Risk</span></div>
     </div>`;
     let compHtml = "";
     for (const [key, val] of Object.entries(components)) {
@@ -511,7 +511,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     guardianHealthEl.innerHTML = `<div class="health-card">
       <div class="health-header">
-        <span class="health-score" style="color:${incomplete ? '#141414' : score >= 70 ? '#176E48' : score >= 40 ? '#141414' : '#C21F30'}">${incomplete ? "?" : score}</span>
+        <span class="health-score" style="color:${incomplete ? 'var(--ink)' : score >= 70 ? 'var(--safe-text)' : score >= 40 ? 'var(--ink)' : 'var(--block-text)'}">${incomplete ? "?" : score}</span>
         <span class="health-level ${escapeHtml(level)}">${escapeHtml(level)}</span>
       </div>
       ${statsHtml}
