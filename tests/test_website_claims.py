@@ -1317,3 +1317,15 @@ def test_the_footer_legend_explains_the_registry_chip():
     assert "Object.values(labels).map(" in footer
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
     assert text in bundle
+
+
+def test_stylesheets_hold_no_c1_control_characters():
+    # A CSS escape mangled on its way to disk (the minus \2212 read as the octal \221 plus "2") leaves a C1
+    # control in the file, which renders as a box. No stylesheet, source or built, holds U+0080..U+009F.
+    source = LANDING_SRC / "src" / "index.css"
+    built = list((ROOT / "landing" / "assets").glob("index-*.css"))
+    assert built
+    for path in [source, *built]:
+        bad = sorted({f"U+{ord(ch):04X}" for ch in read(path) if 0x80 <= ord(ch) <= 0x9F})
+        assert not bad, f"{path.name} holds C1 control characters {bad}"
+    assert '.disclose[open] > summary::before { content: "' + chr(92) + '2212"; }' in read(source)

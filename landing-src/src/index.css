@@ -455,7 +455,7 @@
     font-family: theme("fontFamily.mono");
     color: rgb(var(--c-accent));
   }
-  .disclose[open] > summary::before { content: "2"; }
+  .disclose[open] > summary::before { content: "\2212"; }
 }
 
 /* Feature tabs (FeatureTabs.tsx): the panel that appears rises from 0.6 opacity over 150 ms. */
