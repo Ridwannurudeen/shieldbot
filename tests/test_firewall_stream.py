@@ -533,8 +533,9 @@ async def test_a_hanging_pre_step_still_gets_the_first_at_the_timer(stream_api, 
 
 
 @pytest.mark.asyncio
-async def test_a_hanging_verification_does_not_hold_back_the_analyzers(stream_api, monkeypatch, mock_web3_client):
-    # Verification runs beside the analyzers, so by the first verdict they have all answered.
+async def test_a_hanging_verification_does_not_hold_back_the_verdict(stream_api, monkeypatch, mock_web3_client):
+    # Verification runs beside the analyzers, and nothing waits on it when the intent analyzer does
+    # not read it (the structural analyzer reads verification itself), so the final comes first.
     api, _ = stream_api
     timer(monkeypatch, api, FIRST_VERDICT_SECONDS * SCALE)
     gate = asyncio.Event()
@@ -545,13 +546,11 @@ async def test_a_hanging_verification_does_not_hold_back_the_analyzers(stream_ap
 
     mock_web3_client.is_verified_contract = AsyncMock(side_effect=verification)
     events = events_of(api)
-    kind, first = await next_event(events)
+    kind, final = await next_event(events)
 
-    assert kind == "first"
-    assert not scan_task().done()
-    assert first["pending_sources"] == []
+    assert kind == "final"
+    assert "verification" not in final.get("coverage_reasons", {})
     gate.set()
-    assert [kind for kind, _ in await remaining(events)] == ["final"]
 
 
 @pytest.mark.asyncio

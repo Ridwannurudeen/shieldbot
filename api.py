@@ -1457,15 +1457,16 @@ async def _firewall_verdict(
             # Verification takes up to 8 s on Robinhood Chain (Sourcify and Blockscout) and 16 s
             # on an Etherscan chain, so it runs beside the analyzers. When the intent analyzer will
             # read it, it is settled first, as before, so that wait is not spent inside the
-            # analyzers' deadline.
+            # analyzers' deadline. Otherwise nothing waits on it: the structural analyzer reads
+            # verification itself, sharing these lookups.
             if is_contract is not False:
                 verification = asyncio.create_task(_target_verification(to_addr, req.chainId, code))
-                if progress is not None:
-                    progress.deadline_pending.add("verification")
                 verification.add_done_callback(
                     lambda task: task.exception() if not task.cancelled() else None
                 )
                 if reads_verification(req.data, req.value):
+                    if progress is not None:
+                        progress.deadline_pending.add("verification")
                     await verification
                     if progress is not None:
                         progress.deadline_pending.discard("verification")
@@ -1481,6 +1482,7 @@ async def _firewall_verdict(
                     'verification': verification,
                     'is_contract': is_contract,
                     'authorization_list': req.authorizationList,
+                    'deadline': deadline,
                 },
             )
 
@@ -1517,11 +1519,6 @@ async def _firewall_verdict(
                 )
                 analyzer_results = None
                 simulation_result = None
-            if verification is not None:
-                await verification
-                if progress is not None:
-                    progress.deadline_pending.discard("verification")
-
             # Compute risk from analyzer results
             if analyzer_results is not None:
                 risk_output = risk_engine.compute_from_results(analyzer_results, is_token=is_token)
@@ -3717,22 +3714,6 @@ async def _analyze_router_swap(
 
     async def analyze_token(token_addr):
         async with slots:
-            verification_source = f"{token_addr}:verification"
-            verification = asyncio.create_task(
-                _target_verification(token_addr, req.chainId, None)
-            )
-            if progress is not None:
-                progress.deadline_pending.add(verification_source)
-
-            def verification_done(task):
-                if progress is not None:
-                    progress.deadline_pending.discard(verification_source)
-                if not task.cancelled():
-                    task.exception()
-
-            verification.add_done_callback(verification_done)
-            if deadline is None or reads_verification(req.data, req.value):
-                await verification
             ctx = AnalysisContext(
                 address=token_addr,
                 chain_id=req.chainId,
@@ -3743,10 +3724,9 @@ async def _analyze_router_swap(
                     "value": req.value,
                     "typed_data": req.typedData,
                     "sign_method": req.signMethod,
-                    "verification": verification,
-                    "is_verified": None,
                     "router": to_addr,
                     "whitelisted_router": whitelisted,
+                    "deadline": analysis_deadline,
                 },
             )
 
@@ -3759,13 +3739,6 @@ async def _analyze_router_swap(
             if progress is not None:
                 for result in analyzer_results:
                     progress.pending.discard(f"{token_addr}:{result.name}")
-            if verification.done():
-                try:
-                    await verification
-                except UnsupportedChainError:
-                    raise
-                except Exception:
-                    pass
             return token_addr, analyzer_results
 
     token_tasks = [
@@ -3849,16 +3822,6 @@ async def _analyze_router_swap(
                 progress.pending.discard(f"{token_addr}:{result.name}")
 
         risk_output = risk_engine.compute_from_results(analyzer_results, is_token=True)
-        verification_source = f"{token_addr}:verification"
-        if progress is not None and verification_source in progress.deadline_pending:
-            risk_output["status"] = "unknown"
-            risk_output["coverage"] = {
-                **risk_output.get("coverage", {}), "verification": 0,
-            }
-            risk_output["coverage_reasons"] = {
-                **risk_output.get("coverage_reasons", {}),
-                "verification": "Contract verification provider timed out at the firewall request deadline",
-            }
 
         if container.policy_engine:
             risk_output = container.policy_engine.apply(

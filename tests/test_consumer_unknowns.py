@@ -444,22 +444,10 @@ async def test_firewall_robinhood_swap_deadline_returns_unknown_with_each_pendin
         is_whitelisted_target=lambda *args, **kwargs: 'Robinhood Router',
     )
 
-    verification_started = asyncio.Event()
     scans_started = asyncio.Event()
     simulation_started = asyncio.Event()
     release = asyncio.Event()
-    verification_calls = []
-    verification_tasks = []
     scanned_tokens = []
-
-    async def verification(address, **kwargs):
-        verification_calls.append(address.lower())
-        verification_tasks.append(asyncio.current_task())
-        if len(verification_calls) == 2:
-            verification_started.set()
-        await verification_started.wait()
-        await release.wait()
-        return True, None
 
     async def run_all(ctx, **kwargs):
         scanned_tokens.append(ctx.address.lower())
@@ -474,7 +462,7 @@ async def test_firewall_robinhood_swap_deadline_returns_unknown_with_each_pendin
         await release.wait()
         return {'success': True}
 
-    api.web3_client.is_verified_contract = verification
+    api.web3_client.is_verified_contract = AsyncMock(return_value=(True, None))
     services.registry.run_all = run_all
     api.tenderly_simulator = SimpleNamespace(
         is_enabled=lambda: True, simulate_transaction=simulate_transaction,
@@ -499,7 +487,9 @@ async def test_firewall_robinhood_swap_deadline_returns_unknown_with_each_pendin
     assert response['status'] == 'unknown'
     assert response['classification'] != 'SAFE'
     assert response['partial'] is True
-    assert len(verification_calls) == 2
+    # A trusted router's swap tokens get no verification lookup of their own: the structural
+    # analyzer reads verification itself.
+    api.web3_client.is_verified_contract.assert_not_awaited()
     assert len(scanned_tokens) == 2
     assert simulation_started.is_set()
     assert scans_started.is_set()
@@ -509,7 +499,6 @@ async def test_firewall_robinhood_swap_deadline_returns_unknown_with_each_pendin
         assert f'{token}:honeypot' in response['coverage_reasons']
 
     release.set()
-    await asyncio.gather(*verification_tasks, return_exceptions=True)
 
 
 @pytest.mark.asyncio
