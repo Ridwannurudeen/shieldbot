@@ -818,6 +818,7 @@ class RobinhoodSimulator:
         self._sim_rpc_url = sim_rpc_url or None
         self._cache = TTLCache(maxsize=1024, ttl=CACHE_TTL_SECONDS)
         self._inflight = {}
+        self._simulation_lock = asyncio.Lock()
 
     async def simulate(self, token: str) -> dict:
         token = token.lower()
@@ -833,7 +834,8 @@ class RobinhoodSimulator:
         # Discovery and every pool attempt contribute evidence; retain the oldest read time.
         observed_at = time.time()
         try:
-            result = await self._run(token)
+            async with self._simulation_lock:
+                result = await self._run(token)
         except SimulationUnavailable as e:
             logger.warning("Robinhood simulation unavailable: %s", type(e).__name__)
             result = aggregate_outcomes([], [e.reason])
