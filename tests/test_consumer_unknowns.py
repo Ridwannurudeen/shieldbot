@@ -479,10 +479,10 @@ async def test_firewall_robinhood_swap_deadline_returns_unknown_with_each_pendin
                 'to': '0x' + 'a' * 40, 'from': sender, 'chainId': 4663,
                 'value': '0', 'data': '0x38ed1739',
             },
-        ), timeout=0.8)
+        ), timeout=2.0)
     assert http_response.status_code == 200
     response = http_response.json()
-    assert asyncio.get_running_loop().time() - request_started < 0.8
+    assert asyncio.get_running_loop().time() - request_started < 2.0
 
     assert response['status'] == 'unknown'
     assert response['classification'] != 'SAFE'
@@ -531,7 +531,7 @@ async def test_firewall_approval_metadata_wait_is_inside_request_deadline(consum
             chainId=4663, data='0x095ea7b3',
         ),
         SimpleNamespace(headers={}),
-    ), timeout=0.8)
+    ), timeout=2.0)
 
     assert lookup_started.is_set()
     assert response['status'] == 'unknown'

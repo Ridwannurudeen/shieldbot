@@ -1083,9 +1083,13 @@ async def firewall(req: FirewallRequest, request: Request):
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
-    return await _firewall_response(
-        req, request, deadline=time.monotonic() + FIREWALL_REQUEST_DEADLINE_SECONDS,
-    )
+    return await _firewall_response(req, request, deadline=_firewall_deadline(req, time.monotonic()))
+
+
+def _firewall_deadline(req: FirewallRequest, started: float) -> Optional[float]:
+    """When a firewall request must answer: FIREWALL_REQUEST_DEADLINE_SECONDS after it started on
+    Robinhood Chain, where it was measured; no request-wide deadline on other chains."""
+    return started + FIREWALL_REQUEST_DEADLINE_SECONDS if req.chainId == 4663 else None
 
 
 def _firewall_deadline_response(
@@ -1166,6 +1170,9 @@ async def _firewall_response(
                     req, request, trail, progress, deadline=work_deadline,
                 )
     except TimeoutError:
+        # Only the request's own deadline; a provider's TimeoutError is not relabelled as it.
+        if work_deadline is None or time.monotonic() < work_deadline:
+            raise
         started = deadline - FIREWALL_REQUEST_DEADLINE_SECONDS
         response = _firewall_deadline_response(
             req, progress, round((time.monotonic() - started) * 1000),
@@ -1225,10 +1232,7 @@ async def _firewall_events(req: FirewallRequest, request: Request, started: floa
         policy_mode,
     )
     scan = _fire_and_forget(
-        _firewall_response(
-            req, request, progress,
-            deadline=started + FIREWALL_REQUEST_DEADLINE_SECONDS,
-        ),
+        _firewall_response(req, request, progress, deadline=_firewall_deadline(req, started)),
         label="firewall_stream_scan",
     )
     block_known = asyncio.ensure_future(progress.block_known.wait())
@@ -3745,6 +3749,8 @@ async def _analyze_router_swap(
                     progress.pending.discard(f"{token_addr}:{result.name}")
             return token_addr, analyzer_results
 
+    # The registry stamps each result with when its run started; one rebuilt below gets the same stamp.
+    analysis_started = time.time()
     token_tasks = [
         (token_addr, asyncio.create_task(analyze_token(token_addr)))
         for token_addr in valid_candidates
@@ -3806,6 +3812,12 @@ async def _analyze_router_swap(
                 result for token, result in (progress.results if progress is not None else [])
                 if token == token_addr
             ]
+            for result in analyzer_results:
+                if result.data and not result.data.get('skipped'):
+                    result.data = {
+                        **result.data,
+                        'observed_at': min(analysis_started, result.data.get('observed_at', analysis_started)),
+                    }
             names_returned = {result.name for result in analyzer_results}
             analyzer_results.extend(
                 AnalyzerResult(
