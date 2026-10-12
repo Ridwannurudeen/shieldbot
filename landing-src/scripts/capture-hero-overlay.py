@@ -193,8 +193,10 @@ def main():
     request = json.loads((SCRIPTS / args.request).read_text(encoding="utf-8"))
     reply = json.loads((SCRIPTS / args.response).read_text(encoding="utf-8"))
     if args.verify:
+        if not reply["evidence_url"].startswith("https://"):
+            sys.exit(f"{args.response}: evidence_url is not https")
         try:
-            with urllib.request.urlopen(reply["evidence_url"], timeout=30) as answer:
+            with urllib.request.urlopen(reply["evidence_url"], timeout=30) as answer:  # nosec B310
                 print(f"{args.response}: evidence {answer.status}")
         except urllib.error.HTTPError as e:
             sys.exit(
