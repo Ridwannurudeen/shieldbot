@@ -209,7 +209,8 @@ function launchCell(chain: Chain): { state: CellState; label: string } {
 
 // The chains in orbit (index.css, "Orbits"): each chain on its own ellipse, inner ones faster, logos upright; the
 // magenta ellipse is Robinhood Chain's, the registry's chain. A picture of the table below, which carries the facts,
-// so it is hidden from assistive technology. It moves only while on screen (useAlive).
+// so it is hidden from assistive technology. It moves only while on screen (useAlive). Below 1024 px the planets
+// carry no names (the table does): eight labels do not fit those rings without clipping or overlapping.
 function Orbits() {
   const { ref, on, paused, setPaused } = useAlive<HTMLDivElement>();
   return (
@@ -224,7 +225,7 @@ function Orbits() {
             <div className="orbit-arm">
               <div className="orbit-up flex flex-col items-center gap-1 whitespace-nowrap font-mono text-[11px] text-secondary">
                 {chain.logo}
-                <span className="max-sm:hidden">{chain.name}</span>
+                <span className="max-lg:hidden">{chain.name}</span>
               </div>
             </div>
           </div>
