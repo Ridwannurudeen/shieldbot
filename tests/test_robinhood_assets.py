@@ -549,19 +549,27 @@ async def served(monkeypatch):
         await runner.cleanup()
 
 
+async def fresh(service):
+    """The list once any refresh listed() started in the background has ended."""
+    await service.listed()
+    if service._refreshing is not None:
+        await service._refreshing
+    return await service.listed()
+
+
 def _shortened(count):
     return json.dumps({**RECORDED, "assets": RECORDED["assets"][:count]})
 
 
 @pytest.mark.asyncio
 async def test_the_list_is_fetched_again_only_once_it_is_six_hours_old(served):
-    assert await served.service.listed() == LISTED
+    assert await fresh(served.service) == LISTED
     served.clock += CACHE_TTL_SECONDS - 1
-    await served.service.listed()
+    await fresh(served.service)
     assert served.list_requests == 1
 
     served.clock += 1
-    await served.service.listed()
+    await fresh(served.service)
     assert served.list_requests == 2
 
 
@@ -574,42 +582,42 @@ async def test_the_list_is_fetched_again_only_once_it_is_six_hours_old(served):
 async def test_a_failed_refresh_keeps_the_last_good_list_and_waits_before_retrying(
     served, status, body
 ):
-    await served.service.listed()
+    await fresh(served.service)
     served.clock += CACHE_TTL_SECONDS
     served.list_status, served.list_body = status, body
 
-    assert await served.service.listed() == LISTED
+    assert await fresh(served.service) == LISTED
     served.clock += RETRY_SECONDS - 1
-    assert await served.service.listed() == LISTED
+    assert await fresh(served.service) == LISTED
     assert served.list_requests == 2
 
     served.clock += 1
     served.list_status, served.list_body = 200, RECORDED_TEXT
-    assert await served.service.listed() == LISTED
+    assert await fresh(served.service) == LISTED
     assert served.list_requests == 3
 
 
 @pytest.mark.asyncio
 async def test_a_list_that_shrank_by_at_most_a_fifth_replaces_the_last(served):
-    await served.service.listed()
+    await fresh(served.service)
     served.clock += CACHE_TTL_SECONDS
     served.list_body = _shortened(156)
 
-    assert len(await served.service.listed()) == 156
+    assert len(await fresh(served.service)) == 156
 
 
 @pytest.mark.asyncio
 async def test_a_list_that_shrank_further_is_taken_once_fetched_at_the_same_size_three_times(
     served, caplog
 ):
-    await served.service.listed()
+    await fresh(served.service)
     served.clock += CACHE_TTL_SECONDS
     served.list_body = _shortened(100)
 
     with caplog.at_level(logging.ERROR, logger="services.robinhood_assets"):
         sizes = []
         for _ in range(SHRUNK_LIST_CONFIRMATIONS):
-            sizes.append(len(await served.service.listed()))
+            sizes.append(len(await fresh(served.service)))
             served.clock += RETRY_SECONDS
 
     assert SHRUNK_LIST_CONFIRMATIONS == 3
@@ -619,28 +627,52 @@ async def test_a_list_that_shrank_further_is_taken_once_fetched_at_the_same_size
 
 @pytest.mark.asyncio
 async def test_a_shrunken_list_of_another_size_starts_the_count_again(served):
-    await served.service.listed()
+    await fresh(served.service)
     for count in (100, 101, 100, 100):
         served.clock += CACHE_TTL_SECONDS
         served.list_body = _shortened(count)
-        await served.service.listed()
+        await fresh(served.service)
 
-    assert len(await served.service.listed()) == 195
+    assert len(await fresh(served.service)) == 195
     served.clock += CACHE_TTL_SECONDS
-    assert len(await served.service.listed()) == 100
+    assert len(await fresh(served.service)) == 100
 
 
 @pytest.mark.asyncio
 async def test_a_failed_fetch_between_shrunken_lists_neither_counts_nor_resets(served):
-    await served.service.listed()
+    await fresh(served.service)
     sizes = []
     for status in (200, 503, 200, 200):
         served.clock += CACHE_TTL_SECONDS
         served.list_status, served.list_body = status, _shortened(100)
-        sizes.append(len(await served.service.listed()))
+        sizes.append(len(await fresh(served.service)))
 
     assert sizes == [195, 195, 195, 100]
     assert served.list_requests == 5
+
+
+@pytest.mark.asyncio
+async def test_a_held_list_is_served_while_it_refreshes(served):
+    # A refresh (up to 10 s) every six hours must not hold up the scans that read the list.
+    assert await served.service.listed() == LISTED
+    served.clock += CACHE_TTL_SECONDS
+    gate = asyncio.Event()
+    fetch = served.service._fetch
+
+    async def slow_fetch():
+        await gate.wait()
+        return await fetch()
+
+    served.service._fetch = slow_fetch
+    served.list_body = _shortened(156)
+
+    assert await asyncio.wait_for(served.service.listed(), timeout=1) == LISTED
+    assert await asyncio.wait_for(served.service.listed(), timeout=1) == LISTED
+    assert not served.service._refreshing.done()
+    gate.set()
+    await served.service._refreshing
+    assert len(await served.service.listed()) == 156
+    assert served.list_requests == 2
 
 
 @pytest.mark.asyncio

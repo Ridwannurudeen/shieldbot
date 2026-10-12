@@ -545,6 +545,11 @@ async def _read_capped(response, limit: int) -> bytes:
     raise ValueError("Response too large")
 
 
+def _log_refresh_error(task: asyncio.Task):
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("Robinhood official token list refresh failed: %s", type(task.exception()).__name__)
+
+
 class RobinhoodAssets:
     """Holds the official token list and checks 4663 tokens against it.
 
@@ -562,12 +567,29 @@ class RobinhoodAssets:
         # The size of the last shrunken list fetched, and how many fetches have returned it since another size.
         self._shrunk = (0, 0)
         self._lock = asyncio.Lock()
+        self._refreshing = None
 
     async def listed(self) -> Optional[Dict[str, Tuple[str, str]]]:
-        """The official tokens by address, or None while no fetch has succeeded."""
+        """The official tokens by address, or None while no fetch has succeeded.
+
+        Only a first load is waited on. Once a list is held, a due refresh (a fetch of up to
+        TIMEOUT_SECONDS) runs in the background and the held list is served meanwhile, so the scans
+        that read it do not wait on it.
+        """
+        if self._listed is None:
+            await self._refresh()
+        elif self._due() and (self._refreshing is None or self._refreshing.done()):
+            self._refreshing = asyncio.create_task(self._refresh())
+            self._refreshing.add_done_callback(_log_refresh_error)
+        return self._listed
+
+    def _due(self) -> bool:
+        now = time.time()
+        return now - self._fetched_at >= CACHE_TTL_SECONDS and now >= self._retry_at
+
+    async def _refresh(self):
         async with self._lock:
-            now = time.time()
-            if now - self._fetched_at >= CACHE_TTL_SECONDS and now >= self._retry_at:
+            if self._due():
                 try:
                     listed = await self._fetch()
                 except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
@@ -577,7 +599,6 @@ class RobinhoodAssets:
                     )
                 else:
                     self._take(listed)
-        return self._listed
 
     def _take(self, listed: Dict[str, Tuple[str, str]]):
         """Keep a fetched list, unless it shrank and has not yet been fetched at that size often enough."""
