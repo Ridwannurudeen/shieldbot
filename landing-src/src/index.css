@@ -101,7 +101,7 @@
   h1, h2, h3, h4 { @apply text-ink; text-wrap: balance; }
 
   :focus-visible {
-    outline: 2px solid rgb(var(--c-accent));
+    outline: 2px solid rgb(var(--c-focus));
     outline-offset: 3px;
     border-radius: 4px;
   }
@@ -288,9 +288,12 @@
   }
 }
 
-/* The hero story (HeroRecord.tsx): about 7 s, replayed on each pick and 14 s after it last started while on screen.
+/* The hero story (HeroRecord.tsx): about 7 s on the pick's verdict field, played on each pick; 10 s after it started
+   the next pick (BLOCK, UNKNOWN, SAFE) mounts while on screen.
    The final frame is the base style: the signing card receded behind the overlay's verdict dialog, the record read,
    the commit card at the stage's foot. Depth is 2D only: scale and shadow, no tilt, nothing dims the page.
+     0     the field is already on (the incoming one fades in over the last one, 400 ms, opacity only); what the reply
+           says wipes in at the top of the field with the request line
      0     1. the signing card rises into the stage (from 0.6, 28 px, scale .97), the request line wipes in
      1100  2. the loading dialog slides up over it (48 px, scale .94); the card recedes (scale .96, -8 px). The two
               captures carry text, so they are revealed by a clip, never faded in
@@ -298,18 +301,41 @@
               presses (scale .9); on one that did not, the needle stalls part way and fades, the dashed edge draws
               and its served reason settles beside the row
      4300  4. the rule draws; at 4550 the chip stamps (scale 1.6 to 1, opened from its centre, a shadow tightening
-              and fading: it lands, no bounce); the verdict dialog replaces the loading one; the evidence settles
+              and fading: it lands, no bounce) and the field's light brightens once (600 ms); the verdict dialog
+              replaces the loading one; the evidence settles
      5800  5. the commit card slides up into the stage; the seal draws, block and evidence hash tick in
-   [data-out] eases the story to 0.6 just before it replays; [data-paused] (off screen, a hidden tab or the Pause
-   button) holds every frame. */
+   [data-out] eases the story (not the field) to 0.6 just before the next pick; [data-paused] (off screen, a hidden tab
+   or the Pause button) holds every frame. */
 .hero-loading { opacity: 0; }
 .hero-tick { display: inline-block; }
 .hero-card { transform-origin: top; transform: translateY(-8px) scale(0.96); }
-.hero-seal { stroke: rgb(var(--c-accent)); stroke-width: 1.6; stroke-dasharray: 1; }
+.hero-seal { stroke: rgb(var(--c-accent-fill)); stroke-width: 1.6; stroke-dasharray: 1; }
 .vr-hero .vr-slot { width: 100%; max-width: 88px; height: auto; aspect-ratio: 1; }
 .vr-hero .vr-slot + span { font-size: 13px; line-height: 18px; }
 .vr-hero .vr-cell { border-width: 2px; }
 .vr-hero > article { overflow-x: clip; }
+
+/* The verdict fields (THEME-SPEC 2.3): the hero stage's ground for each pick, the same in both themes. Rich by depth:
+   a deep, saturated edge rising to the verdict's hue, one soft light behind the white dialog. Text on a field is
+   paper and sits only in the upper zone (0-55 %). UNKNOWN also carries a dashed frame: "did not run" at stage scale.
+   .hero-light is the stamp's brightening, the light's own layer, so only its opacity animates. */
+.field-block   { background: radial-gradient(70% 60% at 68% 38%, var(--f-light) 0%, transparent 70%),
+                             linear-gradient(160deg, #3A0A12 0%, #7A1020 55%, #C21F30 100%); --f-light: rgb(255 255 255 / 0.14); }
+.field-unknown { background: radial-gradient(70% 60% at 68% 38%, var(--f-light) 0%, transparent 70%),
+                             linear-gradient(160deg, #1C1C1B 0%, #4A4A47 55%, #8B8B86 100%); --f-light: rgb(255 255 255 / 0.10); }
+.field-safe    { background: radial-gradient(70% 60% at 68% 38%, var(--f-light) 0%, transparent 70%),
+                             linear-gradient(160deg, #06281A 0%, #0F5C3B 55%, #1A7D50 100%); --f-light: rgb(255 255 255 / 0.12); }
+.field-unknown::before {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border: 2px dashed rgb(255 255 255 / 0.35);
+  border-radius: 4px;
+}
+.hero-light {
+  background: radial-gradient(70% 60% at 68% 38%, rgb(255 255 255 / 0.08) 0%, transparent 70%);
+  opacity: 0;
+}
 
 @media (prefers-reduced-motion: no-preference) {
   :root { --e-stamp: cubic-bezier(0.2, 0.9, 0.1, 1); }
@@ -317,8 +343,12 @@
   [data-paused] *::before,
   [data-paused] *::after { animation-play-state: paused !important; }
 
-  .hero-run { transition: opacity 400ms var(--e-draw); }
-  [data-out] .hero-run { opacity: 0.6; }
+  .hero-dim { transition: opacity 400ms var(--e-draw); }
+  [data-out] .hero-dim { opacity: 0.6; }
+
+  .hero-field { animation: story-fade-in 400ms var(--e-draw) backwards; }
+  .hero-light { animation: hero-light 600ms var(--e-stamp) 4550ms backwards; }
+  .hero-says { animation: vr-wipe 450ms var(--e-out) backwards; }
 
   .hero-card { animation: hero-card 1800ms var(--e-out) backwards; }
   .hero-loading { animation: hero-loading 5000ms linear backwards; }
@@ -349,7 +379,7 @@
     position: absolute;
     inset: 0;
     border-radius: 6px;
-    box-shadow: 0 18px 32px -8px rgb(var(--c-ink) / 0.45);
+    box-shadow: 0 18px 32px -8px rgb(var(--c-shadow) / 0.45);
     opacity: 0;
     animation: vr-shadow 700ms var(--e-out) calc(var(--vr-r) + 250ms) backwards;
   }
@@ -396,6 +426,7 @@
   to { clip-path: inset(-48px); }
 }
 @keyframes hero-commit { from { transform: translateY(calc(100% + 16px)); } }
+@keyframes hero-light { 40% { opacity: 1; } }
 @keyframes hero-seal { from { stroke-dashoffset: 1; } }
 @keyframes vr-press { 40% { transform: scale(0.9); } }
 @keyframes vr-stall {
@@ -412,11 +443,15 @@
 @keyframes vr-shadow { from { opacity: 1; transform: translateY(14px) scale(1.25); } }
 
 @layer components {
+  /* The chevron is the secondary text colour of each theme; a data URI cannot inherit currentColor, so one per theme. */
   .try-select {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%236B6B66' stroke-width='1.5'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23A3A39E' stroke-width='1.5'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 10px center;
     background-size: 14px;
+  }
+  :root[data-theme="light"] .try-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%236B6B66' stroke-width='1.5'/%3E%3C/svg%3E");
   }
 }
 

@@ -12,6 +12,7 @@ export interface RecordedReply extends ScanReply {
   fixture: string;
   sent_at: string;
   request: { method: string; to: string; spender: string };
+  coverage: Record<string, number>;
   chain_id: number;
   network: string;
   plain_english: string;

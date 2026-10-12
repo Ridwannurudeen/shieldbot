@@ -1,21 +1,29 @@
 import { useEffect, useState } from "react";
+import Badge from "./Badge";
 import VerdictRecord from "./VerdictRecord";
 import { PauseButton } from "./Button";
+import { CHECK_ORDER } from "./CheckRow";
 import { verdictOf } from "../firewallVerdict";
 import { recordedReplies } from "../recordedReplies";
 import { useAlive } from "../reading";
 import { short, useFeed, utc } from "../registryFeed";
 
-// The hero figure: one recorded /api/firewall reply told as a story (index.css, "The hero story"), about 7 s, then
-// held. 1. A signing card, an illustration: a placeholder dApp asks to sign the recorded call. 2. The extension's
-// real loading dialog (a capture) slides in over it. 3. The verdict record beside it takes a large reading of the
-// six checks. 4. The chip stamps and the overlay's verdict dialog (a capture of the overlay fed that same reply)
-// replaces the loading one. 5. The commit card: the recorded replies were never published, so it shows the newest
-// live registry record the page already fetched (src/registryFeed.ts), labelled as another token's record, never
-// this request's. A record and a capture are only ever shown together for the same reply. The story replays on each
-// pick, and 14 s after it last started while it is on screen (useAlive: not off screen, not in a hidden tab, not
-// paused, never with reduced motion); whenever it is not, the frame on screen holds (data-paused). The final frame is
-// the base style, so reduced motion shows it at once.
+// The hero figure: one recorded /api/firewall reply told as a story (index.css, "The hero story"), about 7 s, on
+// its verdict's field (a deep gradient in the verdict's own hue, index.css .field-*). At the top of the field, what
+// ShieldBot says: the chip, one sentence of the reply's plain_english and its measure line (risk_score, or the
+// coverage keys below 1 when the reply is incomplete). 1. A signing card, an illustration: a placeholder dApp asks
+// to sign the recorded call. 2. The extension's real loading dialog (a capture) slides in over it. 3. The verdict
+// record beside it takes a large reading of the six checks. 4. The chip stamps, the field's light brightens once
+// and the overlay's verdict dialog (a capture of the overlay fed that same reply) replaces the loading one. 5. The
+// commit card: the recorded replies were never published, so it shows the newest live registry record the page
+// already fetched (src/registryFeed.ts), labelled as another token's record, never this request's. A record and a
+// capture are only ever shown together for the same reply. The captures stay the real white dialog, on paper
+// plates in both themes.
+// The picks cycle BLOCK, UNKNOWN, SAFE: 10 s after a story started the hero eases to 0.6 (data-out) and the next
+// one mounts, its field fading in over the last one's. A click plays that pick and the cycle continues from it.
+// The cycle runs only while the hero is on screen (useAlive: not off screen, not in a hidden tab, not paused, never
+// with reduced motion); whenever it is not, the frame on screen holds (data-paused). The final frame is the base
+// style, so reduced motion shows it at once and the buttons switch picks instantly.
 // Nothing here sends a request: the commit card reads the shared feed.
 type Pick = "block" | "unknown" | "safe";
 
@@ -24,6 +32,24 @@ const picks: { id: Pick; label: string }[] = [
   { id: "unknown", label: "UNKNOWN" },
   { id: "safe", label: "SAFE" },
 ];
+
+// What the reply says, every word a field of it: the first sentence of plain_english, or for an incomplete reply its
+// last (the first lists the coverage reasons, which the measure line and the record already print); then risk_score,
+// or each coverage key below 1 with its value, and the chain.
+function saysOf(pick: Pick) {
+  const reply = recordedReplies[pick];
+  const { incomplete } = verdictOf(reply);
+  const sentences = reply.plain_english.split(/(?<=\.) /);
+  const measure = incomplete
+    ? CHECK_ORDER.filter((key) => reply.coverage[key] < 1).map(
+        (key) => `${key} ${reply.coverage[key]}`,
+      )
+    : [`risk_score ${reply.risk_score}`];
+  return {
+    sentence: incomplete ? sentences[sentences.length - 1] : sentences[0],
+    measure: [...measure, `chain ${reply.chain_id}`].join(" · "),
+  };
+}
 
 function Capture({ pick }: { pick: Pick }) {
   if (pick === "block")
@@ -99,12 +125,12 @@ function Commit() {
   const value = (text: string | number | null | undefined) =>
     record === undefined ? "…" : (text ?? "Unavailable");
   return (
-    <div className="hero-commit absolute inset-x-3 bottom-3 rounded-lg border border-hairline bg-ground px-4 py-3 shadow-lg">
-      <p className="font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-secondary">
+    <div className="hero-commit absolute inset-x-3 bottom-3 rounded-lg bg-paper px-4 py-3 text-on-paper shadow-lg">
+      <p className="font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-on-paper-2">
         {label} · live, not the request above
         {record && fetchedAt && ` · fetched ${utc(fetchedAt.getTime() / 1000)}`}
       </p>
-      <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[13px] leading-5 text-ink">
+      <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[13px] leading-5">
         <span className="inline-flex items-center gap-2 font-sans font-medium">
           <svg
             className={confirmed ? "hero-seal" : "hero-seal invisible"}
@@ -126,17 +152,17 @@ function Commit() {
               : "Unavailable: the registry feed did not answer"}
         </span>
         <span>
-          <span className="text-secondary">Block </span>
+          <span className="text-on-paper-2">Block </span>
           <span className="hero-tick">{value(record?.observed_block)}</span>
         </span>
         <span>
-          <span className="text-secondary">Evidence </span>
+          <span className="text-on-paper-2">Evidence </span>
           <span className="hero-tick">
             {value(record?.evidence_hash && short(record.evidence_hash))}
           </span>
         </span>
         <span>
-          <span className="text-secondary">Token </span>
+          <span className="text-on-paper-2">Token </span>
           {value(record && short(record.subject))}
         </span>
       </p>
@@ -145,28 +171,42 @@ function Commit() {
 }
 
 export default function HeroRecord() {
-  const [pick, setPick] = useState<Pick>("unknown");
-  const [run, setRun] = useState(0);
+  // pick is on stage; from is the pick before it, whose field stays under the incoming one while it fades in; run
+  // remounts the story, so a click on the pick already shown plays it again.
+  const [{ pick, from, run }, setStage] = useState<{
+    pick: Pick;
+    from: Pick;
+    run: number;
+  }>({
+    pick: "block",
+    from: "block",
+    run: 0,
+  });
   const { ref, on, paused, setPaused } = useAlive<HTMLDivElement>();
   const reply = recordedReplies[pick];
   const { label } = verdictOf(reply);
+  const says = saysOf(pick);
+  const show = (next: Pick) =>
+    setStage((stage) => ({ pick: next, from: stage.pick, run: stage.run + 1 }));
 
-  // While the hero is on screen the story eases to 0.6 opacity (data-out, index.css) and plays again, 14 s after it
-  // last started.
+  // While the hero is on screen the story eases to 0.6 opacity (data-out, index.css) and the next pick mounts, 10 s
+  // after the story started.
   useEffect(() => {
     if (!on) return;
     const element = ref.current!;
-    const fade = setTimeout(() => (element.dataset.out = ""), 13_600);
-    const again = setTimeout(() => {
+    const fade = setTimeout(() => (element.dataset.out = ""), 9_600);
+    const advance = setTimeout(() => {
       delete element.dataset.out;
-      setRun(run + 1);
-    }, 14_000);
+      show(
+        picks[(picks.findIndex(({ id }) => id === pick) + 1) % picks.length].id,
+      );
+    }, 10_000);
     return () => {
       clearTimeout(fade);
-      clearTimeout(again);
+      clearTimeout(advance);
       delete element.dataset.out;
     };
-  }, [on, pick, run]);
+  }, [on, run]);
 
   return (
     <div ref={ref} data-paused={on ? undefined : ""}>
@@ -184,12 +224,12 @@ export default function HeroRecord() {
               key={id}
               type="button"
               aria-pressed={pick === id}
-              onClick={() => setPick(id)}
+              onClick={() => show(id)}
               className={[
                 "h-9 rounded-lg border px-3 font-mono text-xs tracking-[0.04em] transition-colors duration-150",
                 pick === id
-                  ? "border-ink bg-ink text-white"
-                  : "border-hairline-strong bg-ground text-ink hover:bg-ground-alt",
+                  ? "border-ink bg-ink text-on-ink"
+                  : "border-edge bg-ground text-ink hover:bg-ground-alt",
               ].join(" ")}
             >
               {text}
@@ -200,9 +240,9 @@ export default function HeroRecord() {
       </div>
       <div
         key={`${pick}${run}`}
-        className="hero-run mt-4 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-8"
+        className="mt-4 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-8"
       >
-        <div className="vr-hero min-w-0">
+        <div className="hero-dim vr-hero min-w-0">
           <VerdictRecord
             animate
             request={`${reply.request.method} · to ${reply.request.to}`}
@@ -216,53 +256,79 @@ export default function HeroRecord() {
           />
         </div>
         <figure className="min-w-0 max-lg:order-first">
-          <div className="relative h-[540px] overflow-hidden rounded-lg border border-hairline bg-ground-alt sm:h-[520px] lg:h-[420px]">
-            <div className="hero-card absolute inset-x-4 top-4 rounded-lg border border-hairline bg-ground p-4 shadow-sm">
-              <p className="flex justify-between font-mono text-[11px] leading-4 text-secondary">
-                <span>app.example</span>
-                <span>Signature request</span>
-              </p>
-              <p className="mt-2 text-[15px] font-medium text-ink">
-                Approve token spending
-              </p>
-              <dl className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-xs leading-[18px]">
-                <dt className="text-secondary">Method</dt>
-                <dd>{reply.request.method}</dd>
-                <dt className="text-secondary">Token</dt>
-                <dd>{reply.request.to}</dd>
-                <dt className="text-secondary">Spender</dt>
-                <dd>{reply.request.spender}</dd>
-                <dt className="text-secondary">Chain</dt>
-                <dd>
-                  {reply.chain_id} · {reply.network}
-                </dd>
-              </dl>
-              <p className="mt-4 grid grid-cols-2 gap-2 text-center text-sm font-medium">
-                <span className="rounded-lg border border-hairline-strong py-2">
-                  Reject
-                </span>
-                <span className="rounded-lg bg-ink py-2 text-white">Sign</span>
-              </p>
-            </div>
-            <div className="absolute inset-x-6 top-16 h-[330px]">
-              <div className="hero-loading absolute inset-x-0 top-0 overflow-hidden rounded-lg border border-hairline shadow-xl">
-                <img
-                  src="/hero-overlay-loading.webp"
-                  width={490}
-                  height={246}
-                  alt="The ShieldBot extension's dialog while it checks the request. It reads Analyzing transaction..."
-                  className="block w-full h-auto"
-                />
+          <div className="relative h-[676px] overflow-hidden rounded-lg border border-hairline light:border-edge/40 sm:h-[656px] lg:h-[556px]">
+            <div
+              aria-hidden="true"
+              className={`field-${from} absolute inset-0`}
+            />
+            <div
+              aria-hidden="true"
+              className={`hero-field field-${pick} absolute inset-0`}
+            />
+            <div aria-hidden="true" className="hero-light absolute inset-0" />
+            <div className="hero-dim absolute inset-0">
+              <div className="hero-says absolute inset-x-4 top-4 text-paper">
+                <Badge verdict={label.verdict} size="lg" field>
+                  {label.text}
+                </Badge>
+                <p className="mt-3 text-[22px] font-medium leading-[26px] tracking-[-0.01em]">
+                  {says.sentence}
+                </p>
+                <p className="mt-2 font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-paper/80">
+                  {says.measure}
+                </p>
               </div>
-              <div className="hero-verdict relative max-h-full overflow-hidden rounded-lg border border-hairline bg-ground shadow-xl after:absolute after:inset-x-0 after:bottom-0 after:h-14 after:bg-gradient-to-t after:from-ground">
-                <Capture pick={pick} />
+              <div className="hero-card absolute inset-x-4 top-[152px] rounded-lg bg-paper p-4 text-on-paper shadow-lg">
+                <p className="flex justify-between font-mono text-[11px] leading-4 text-on-paper-2">
+                  <span>app.example</span>
+                  <span>Signature request</span>
+                </p>
+                <p className="mt-2 text-[15px] font-medium">
+                  Approve token spending
+                </p>
+                <dl className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-xs leading-[18px]">
+                  <dt className="text-on-paper-2">Method</dt>
+                  <dd>{reply.request.method}</dd>
+                  <dt className="text-on-paper-2">Token</dt>
+                  <dd>{reply.request.to}</dd>
+                  <dt className="text-on-paper-2">Spender</dt>
+                  <dd>{reply.request.spender}</dd>
+                  <dt className="text-on-paper-2">Chain</dt>
+                  <dd>
+                    {reply.chain_id} · {reply.network}
+                  </dd>
+                </dl>
+                {/* The card imitates a third-party dialog, so its buttons are constant literals, not our tokens. */}
+                <p className="mt-4 grid grid-cols-2 gap-2 text-center text-sm font-medium">
+                  <span className="rounded-lg border border-[#D6D5D0] py-2">
+                    Reject
+                  </span>
+                  <span className="rounded-lg bg-[#141414] py-2 text-paper">
+                    Sign
+                  </span>
+                </p>
               </div>
+              <div className="absolute inset-x-6 top-[200px] h-[330px]">
+                <div className="hero-loading absolute inset-x-0 top-0 overflow-hidden rounded-lg bg-paper shadow-lg">
+                  <img
+                    src="/hero-overlay-loading.webp"
+                    width={490}
+                    height={246}
+                    alt="The ShieldBot extension's dialog while it checks the request. It reads Analyzing transaction..."
+                    className="block w-full h-auto"
+                  />
+                </div>
+                <div className="hero-verdict relative max-h-full overflow-hidden rounded-lg bg-paper shadow-lg after:absolute after:inset-x-0 after:bottom-0 after:h-14 after:bg-gradient-to-t after:from-paper">
+                  <Capture pick={pick} />
+                </div>
+              </div>
+              <Commit />
             </div>
-            <Commit />
           </div>
-          <figcaption className="mt-3 text-xs leading-[18px] text-secondary">
-            {captions[pick]} Recorded examples, not live scans. The signing card is an illustration: a placeholder dApp asking to
-            sign the recorded call.
+          <figcaption className="hero-dim mt-3 text-xs leading-[18px] text-secondary">
+            {captions[pick]} Recorded examples, not live scans. The signing card
+            is an illustration: a placeholder dApp asking to sign the recorded
+            call.
           </figcaption>
         </figure>
       </div>
