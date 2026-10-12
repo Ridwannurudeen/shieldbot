@@ -88,7 +88,7 @@ export default function Mechanism() {
           Each check runs, or it says it did not.
         </h3>
 
-        <div className="mt-8 grid grid-cols-1 items-start gap-12 lg:grid-cols-[minmax(0,6fr)_minmax(0,5fr)] lg:gap-16">
+        <div className="mt-8 grid grid-cols-1 items-start gap-10">
           <figure className="rounded-lg border border-hairline bg-ground p-5 sm:p-6">
             <figcaption id="check-definition-title" className="font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-secondary">
               The six check keys
@@ -124,7 +124,7 @@ export default function Mechanism() {
           </figure>
 
           <div>
-            <div className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-3 lg:grid-cols-1">
+            <div className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-3">
               <Figure
                 loading={loading}
                 value={count(stats?.transactions_monitored)}
@@ -145,7 +145,7 @@ export default function Mechanism() {
                 label="Verdict records confirmed in the Robinhood Chain registry, all time"
               />
             </div>
-            <p className="mt-8 text-xs leading-[18px] text-secondary">
+            <p className="mt-6 text-xs leading-[18px] text-secondary">
               {stats
                 ? `GET /api/stats, as of ${fetchedAt?.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} in your time zone. A source that is not running reads Unavailable, never 0.`
                 : stats === null
