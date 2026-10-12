@@ -177,7 +177,7 @@
   .rd-cell.rd-late { animation: none; }
 }
 
-/* A record inside a section read on view (registry records, the process track's record) waits on its first frame, so
+/* A record inside a section read on view (the registry records) waits on its first frame, so
    its chip rises from 0.6 opacity instead of wiping in from nothing. Text never animates from below 0.6 anywhere:
    reasons, evidence lines and source rise from 0.6 in every record; only the rule, the needle, the cell fills and the
    dt ticks draw from nothing. */
@@ -186,8 +186,8 @@
 }
 
 /* Process track (HowItWorks.tsx): the rule draws one segment per step, 900 ms each, a 3 px magenta pen head riding its
-   front; as a segment starts its node lights and its step rises from 0.6; the last segment is the magenta one, and the
-   record at its end reads itself from 2400 ms (--vr-d), its needle 3 px. About 5 s, once. */
+   front; as a segment starts its node lights and its step rises from 0.6; the last segment is the magenta one. About
+   3 s, once. The compact records (the recent-records strip) read with a 3 px needle. */
 @media (prefers-reduced-motion: no-preference) {
   .pt-step { border-color: transparent; }
   .pt-step::after {
