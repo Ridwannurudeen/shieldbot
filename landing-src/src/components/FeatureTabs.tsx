@@ -21,9 +21,8 @@ const features: {
     tab: "Unknown",
     eyebrow: "When a check cannot run",
     title: "Unknown, with the reason. Never Safe.",
-    desc: "If a data provider does not answer, the chain has no sell simulation route or the request cannot be read, the overlay reads UNKNOWN and names the check that did not run.",
+    desc: "If a provider does not answer, the chain has no sell simulation route, or the request cannot be read, the overlay reads UNKNOWN and names the check that did not run.",
     points: [
-      "The reason is printed on the dialog, after Why:",
       "Strict mode removes the option to sign an Unknown request",
       "The Telegram bot marks an incomplete scan UNKNOWN, never safe",
     ],
@@ -33,7 +32,7 @@ const features: {
     tab: "On-chain guard",
     eyebrow: "On-chain registry and guard",
     title: "Contracts ask before funds move.",
-    desc: "On Robinhood Chain, a contract calls the ShieldBot guard before it moves a token. The guard reads the verdict registry and allows the token when its latest record is LOW or MEDIUM and within the age limit the caller sets.",
+    desc: "On Robinhood Chain a contract calls the guard before it moves a token; the guard allows the token when its latest record is LOW or MEDIUM and within the caller's age limit.",
     points: [
       "HIGH and HONEYPOT are refused even after the record expires",
       "Registry, guard and guarded transfer deployed on Robinhood Chain on 27 September 2026",
@@ -45,11 +44,11 @@ const features: {
     tab: "Transaction check",
     eyebrow: "Browser extension",
     title: "A verdict before the wallet opens.",
-    desc: "The extension decodes each transaction a page sends to your wallet (which function, which spender, how much) and shows SAFE, CAUTION, HIGH RISK, BLOCK RECOMMENDED or UNKNOWN with a safety score and the reasons.",
+    desc: "The extension decodes each transaction (function, spender, amount) and shows SAFE, CAUTION, HIGH RISK, BLOCK RECOMMENDED or UNKNOWN with the reasons.",
     points: [
       "Decoded calldata, so an unlimited approval reads as Unlimited",
       "Danger signals are listed even when the verdict is SAFE",
-      "You choose to cancel or sign; Strict mode holds BLOCK RECOMMENDED",
+      "You cancel or sign; Strict mode holds BLOCK RECOMMENDED",
     ],
   },
   {
@@ -59,7 +58,7 @@ const features: {
     title: "Signatures read like transactions.",
     desc: "Signature requests are checked by the server like transactions and shown in readable form: permits, Permit2, and Seaport and Blur marketplace orders.",
     points: [
-      "A Sign-In with Ethereum message made for another site is flagged BLOCK RECOMMENDED, and so is every eth_sign request",
+      "A Sign-In with Ethereum message made for another site, and every eth_sign request, is BLOCK RECOMMENDED",
       "Typed data the server cannot read is Unknown",
       "The text of a message you sign is never sent",
     ],
@@ -69,10 +68,9 @@ const features: {
     tab: "Phishing banner",
     eyebrow: "Every site you open",
     title: "A warning on known phishing sites.",
-    desc: "The address of each https site you open is checked against phishing intelligence, and a warning banner appears when the site is flagged, before you connect your wallet.",
+    desc: "Each https origin you open is checked against phishing intelligence; a banner appears on a flagged site, before you connect your wallet.",
     points: [
       "The check sends the site's origin: scheme, host and port",
-      "Results are kept for the browser session",
     ],
   },
 ];
@@ -121,8 +119,8 @@ function Illustration({
         {children}
       </div>
       <figcaption className="mt-3 text-xs leading-[18px] text-secondary">
-        Illustration, not a capture: no capture of this {subject} has been
-        recorded yet. The text beside it is from the extension's store listing.
+        Illustration, not a capture: this {subject} has not been captured yet.
+        Text from the extension's store listing.
       </figcaption>
     </figure>
   );
@@ -134,7 +132,7 @@ function Media({ id }: { id: string }) {
       <Capture
         src="/hero-overlay-unknown.webp"
         alt="The ShieldBot extension's dialog for a token approval on Robinhood Chain whose token has no supported pool. The verdict badge reads UNKNOWN. Why: No DexScreener pairs on requested chain (robinhood); Initialize logs scanned over blocks 85694876-85724875; No supported pool found; Unknown fields: buy_tax, sell_tax, can_sell. The danger signals include Top 10 holders own 100.0% of supply (burn, locked, pool and locker addresses excluded)."
-        caption="Recorded /api/firewall reply of 11 October 2026, chain 4663, UNKNOWN. Upper part of the dialog, overlay at unreleased commit 2b54a1b."
+        caption="Recorded /api/firewall reply of 11 October 2026, chain 4663, UNKNOWN. Upper part of the overlay at unreleased commit 2b54a1b."
       />
     );
   if (id === "transaction")
@@ -142,7 +140,7 @@ function Media({ id }: { id: string }) {
       <Capture
         src="/hero-overlay-safe.webp"
         alt="The ShieldBot extension's dialog for a 250 ARB approval to Uniswap's SwapRouter02 on Arbitrum One. The verdict badge reads SAFE — Safety: 93.6/100. The danger signals include Proxy/upgradeable contract."
-        caption="Recorded /api/firewall reply of 11 October 2026, chain 42161, SAFE. Upper part of the dialog, overlay at unreleased commit 2b54a1b."
+        caption="Recorded /api/firewall reply of 11 October 2026, chain 42161, SAFE. Upper part of the overlay at unreleased commit 2b54a1b."
       />
     );
   if (id === "registry")
@@ -169,8 +167,8 @@ function Media({ id }: { id: string }) {
           </pre>
         </div>
         <figcaption className="mt-3 text-xs leading-[18px] text-secondary">
-          Recorded: scripts/verify_deployment.py against the live contracts on
-          27 September 2026 reported allowed=True, reason=0 for{" "}
+          Recorded: scripts/verify_deployment.py on 27 September 2026 reported
+          allowed=True, reason=0 for{" "}
           <a
             href={`https://robin.etherscan.io/address/${VIRTUAL}`}
             target="_blank"
@@ -189,8 +187,8 @@ function Media({ id }: { id: string }) {
             docs/SUBMISSION.md
           </a>
           ). Derived: the registry's record for 0x3435…26dd, as served on 11
-          October 2026, is HONEYPOT, and the guard's source returns reason 4
-          for a HONEYPOT record at any age.
+          October 2026, is HONEYPOT; the guard returns reason 4 for HONEYPOT at
+          any age.
         </figcaption>
       </figure>
     );
@@ -371,9 +369,7 @@ export default function FeatureTabs() {
             Where a verdict shows up.
           </h2>
           <p className="mt-4 text-[17px] md:text-lg leading-relaxed text-secondary">
-            One engine behind the extension, the Telegram bot and the on-chain
-            guard. Each entry shows a recorded answer or says it is an
-            illustration.
+            Each entry shows a recorded answer or says it is an illustration.
           </p>
         </div>
 
