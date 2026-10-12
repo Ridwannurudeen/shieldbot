@@ -273,7 +273,7 @@ export default function OnChain() {
           id="on-chain-title"
           eyebrow="On Robinhood Chain (4663)"
           title="A contract can check the verdict before it moves funds."
-          lead="ShieldBot publishes the Robinhood Chain verdicts of its Telegram scans, guard rescans, and launches it blocks or the guard watches, each with the hash of its evidence. A guard contract allows only a fresh LOW or MEDIUM record; everything else is denied."
+          lead="ShieldBot publishes the Robinhood Chain verdicts of its Telegram scans, guard rescans, and launches it blocks or the guard watches, each with the hash of its evidence. A guard contract allows only a fresh LOW or MEDIUM record; everything else is denied. Permission is not a safety guarantee: the guard accepts MEDIUM risk."
         />
 
         <RecentRecords />

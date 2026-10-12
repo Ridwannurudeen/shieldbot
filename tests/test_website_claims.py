@@ -669,6 +669,9 @@ HERO_SECTION_COPY = {
         "Newest confirmed records in the registry",
         "Records of the newest launches ShieldBot blocked",
         "/api/verdicts/recent?chain_id=4663&limit=",
+        # The guard's MEDIUM caveat sits beside the visible guard description, not only in a non-default tab.
+        "A guard contract allows only a fresh LOW or MEDIUM record; everything else is denied. Permission is not a "
+        "safety guarantee: the guard accepts MEDIUM risk.",
     ),
     "CtaCard.tsx": (
         "Check before you sign.",
