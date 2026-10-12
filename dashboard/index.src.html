@@ -860,22 +860,47 @@
       );
     }
 
-    function RobinhoodPanel({ launches, launchesLoading, cursor, onLoadOlder, loadingOlder, olderError }) {
+    function RobinhoodPanel({ launches, launchesLoading, cursor, onLoadOlder, loadingOlder, olderError, stats, loading, asOf }) {
       const [expanded, setExpanded] = useState(false);
+      // A null count is unknown, never 0: the stats reply may be missing or predate these fields.
+      const discovery = (stats && stats.launch_discovery) || null;
+      const share     = (discovery && discovery.scanned_share) || null;
+      const day       = share ? `last ${share.window_hours} h` : 'last 24 h';
+      const lag       = discovery && discovery.lag_blocks != null ? discovery.lag_blocks : null;
+      const headAt    = discovery ? discovery.confirmed_head_at : null;
+      const evidence  = stats && stats.evidence_documents ? (stats.evidence_documents[LAUNCH_CHAIN] || 0) : null;
+      const confirmed = stats ? stats.registry_records_confirmed : null;
       const registry  = (
         <a href={`${EXPLORERS[LAUNCH_CHAIN]}/address/${REGISTRY_ADDRESS}`} target="_blank" rel="noopener noreferrer"
            className="inline-flex items-center min-h-[44px] md:min-h-0" style={{ color:'var(--accent)' }}>
           Registry contract ↗
         </a>
       );
+      const tiles = [
+        { label:'Launches Discovered', span:day,                                value: share ? share.launches : null },
+        { label:'Launches Scanned',    span:day,                                value: share ? share.scanned : null },
+        { label:'Discovery Lag',       span:'blocks behind the confirmed head', value: lag,
+          note: headAt ? `head read ${timeAgo(headAt)}` : null },
+        { label:'Evidence Documents',  span:'stored verdicts · all time',       value: evidence },
+        { label:'Registry Records',    span:'confirmed on-chain',               value: confirmed, note: registry },
+      ];
       const shown = launches && !expanded ? launches.slice(0, LAUNCH_VISIBLE) : launches;
       const allShown = Boolean(launches) && shown.length === launches.length;
       return (
         <div className="bg-ground-alt border border-hairline rounded-lg p-4 md:p-5" style={{ border:'1px solid var(--hairline)' }}>
-
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mb-4">
+            {tiles.map(t => (
+              <StatCard key={t.label} label={t.label} span={t.span} value={t.value} color="var(--ink)"
+                        loading={loading} asOf={asOf} note={t.note} />
+            ))}
+          </div>
           <div className="text-xs mb-3 max-w-[72ch]" style={{ color:'var(--secondary)' }}>
-            Blocked token launches on Robinhood Chain, newest first. Each row links to its published verdict when one is recorded.
-            This list refreshes every {SLOW_REFRESH_MS / 60000} minutes. {registry}
+            Launch discovery records the token launches it reads on Robinhood Chain; its lag is how far its cursor
+            is behind the confirmed head it last read. Scans share one small RPC budget and only launches seen
+            trading soon after launch are picked, so launches scanned says how many of the last day's launches
+            have any outcome. Below are the launches the hunter blocked, newest block first, each linking its
+            published verdict where one is recorded. These scans are recorded on each launch and in its verdict,
+            not in the firewall counts below. This list refreshes every {SLOW_REFRESH_MS / 60000} minutes.
           </div>
           <div className="flex flex-col gap-2">
             {launchesLoading
@@ -1139,15 +1164,34 @@
       );
     }
 
-    // Overview counters keep their windows and sources together.
-    const OVERVIEW_ITEMS = [
-      { key:'contracts_scanned_24h', label:'Contracts Scanned', span:'last 24 h - extension and agent firewalls' },
-      { key:'threats_detected_24h', label:'Contract Threats', span:'last 24 h' },
+    // The firewall counts read the contract scores the extension and agent firewalls write; the mempool
+    // counts are the monitor's in-memory counters.
+    const FIREWALL_ITEMS = [
+      { key:'contracts_scanned',        label:'Contracts Scanned',    span:'all time · extension and agent firewalls' },
+      { key:'contracts_scanned_24h',    label:'Contracts Scanned',    span:'last 24 h · extension and agent firewalls' },
+      { key:'threats_detected',         label:'Contract Threats',     span:'on record' },
+      { key:'threats_detected_24h',     label:'Contract Threats',     span:'last 24 h' },
+      { key:'transactions_blocked',     label:'Transactions Blocked', span:'all time' },
       { key:'transactions_blocked_24h', label:'Transactions Blocked', span:'last 24 h' },
-      { key:'transactions_monitored', label:'Transactions Monitored', span:'since monitor start' },
     ];
 
-    function StatCard({ label, span, value, color, loading, asOf, missing = '—' }) {
+    const MEMPOOL_ITEMS = [
+      { key:'transactions_monitored', label:'Transactions Monitored', span:'since monitor start' },
+      { key:'sandwiches_caught',      label:'Sandwich Attacks Caught',span:'since monitor start' },
+      { key:'suspicious_approvals',   label:'Suspicious Approvals',   span:'since monitor start' },
+      { key:'chains_protected',       label:'Mempool Chains Watched', span:'last poll' },
+    ];
+
+    // The counts the mempool monitor keeps in memory.
+    const MEMPOOL_KEYS = MEMPOOL_ITEMS.map(s => s.key);
+
+    // A null count is unknown, never 0. A background_workers_note says the mempool monitor runs in a separate
+    // process this API does not read, so its counts are Unavailable; any other null count is a dash.
+    function missingText(stats, key) {
+      return stats && stats.background_workers_note && MEMPOOL_KEYS.includes(key) ? 'Unavailable' : '—';
+    }
+
+    function StatCard({ label, span, value, color, loading, asOf, note, missing = '—' }) {
       const display = value == null ? 0 : value;
       return (
         <div className="bg-ground-alt border border-hairline rounded-lg p-4 fade-up flex flex-col gap-1 text-center"
@@ -1161,32 +1205,64 @@
           }
           <div className="text-xs font-medium mt-1" style={{ color:'var(--secondary)' }}>{label}</div>
           <div className="text-xs" style={{ color:'var(--secondary)' }}>{span}</div>
+          {note && <div className="text-xs" style={{ color:'var(--secondary)' }}>{note}</div>}
           <div className="text-xs" style={{ color:'var(--secondary)' }}>as of {asOf ? timeAgo(asOf / 1000) : '—'}</div>
         </div>
       );
     }
 
-    function OverviewStats({ stats, loading, asOf }) {
-      const since = stats && stats.mempool_counting_since;
-      const unavailable = Boolean(stats && stats.background_workers_note);
-      const missing = key => key === 'transactions_monitored' && unavailable ? 'Unavailable' : '—';
+    function FirewallStatsBar({ stats, loading, asOf }) {
+      const dashed = stats && FIREWALL_ITEMS.some(s => stats[s.key] == null);
+      const footnote = stats === null
+        ? 'Firewall statistics are unavailable right now.'
+        : 'Both contracts scanned counts cover the extension and agent firewalls only; Telegram, /api/scan and '
+          + 'Robinhood Chain launch scans are not in them. A contract threat is a contract those firewalls scored '
+          + 'high risk. On record means its latest score, since a rescan replaces it; it counts in the last 24 h '
+          + 'when that scan falls in the window.'
+          + (dashed ? ' A dash means that source is not reporting right now.' : '');
       return (
         <div>
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-            {OVERVIEW_ITEMS.map(item => (
-              <StatCard key={item.key} label={item.label} span={item.span}
-                        value={stats ? stats[item.key] : null} color="var(--ink)"
-                        loading={loading} asOf={asOf} missing={missing(item.key)} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+            {FIREWALL_ITEMS.map(s => (
+              <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
+                        color="var(--ink)" loading={loading} asOf={asOf} />
             ))}
           </div>
           {!loading && (
-            <div className="text-xs mt-3 max-w-[80ch]" style={{ color:'var(--secondary)' }}>
-              Contracts scanned covers the extension and agent firewalls only; Telegram, /api/scan and Robinhood Chain launch scans are not included.
-              A contract threat is its latest high-risk score; a rescan replaces the previous score. A last-24-hour count uses the scan time.
-              {since && ` Transactions monitored are counted since ${new Date(since * 1000).toLocaleString()}.`}
-              {unavailable && ' The mempool monitor runs in a separate process this API cannot read, so its count is unavailable, not zero.'}
-              {stats === null && ' Statistics are unavailable right now.'}
-            </div>
+            <div className="text-xs mt-3 max-w-[72ch]" style={{ color:'var(--secondary)' }}>{footnote}</div>
+          )}
+        </div>
+      );
+    }
+
+    function MempoolStatsBar({ stats, loading, asOf }) {
+      const since = stats && stats.mempool_counting_since;
+      const dashed = stats && MEMPOOL_ITEMS.some(s => stats[s.key] == null && missingText(stats, s.key) === '—');
+      const footnote = stats === null
+        ? 'Mempool statistics are unavailable right now.'
+        : [
+            stats.background_workers_note
+              && 'Unavailable: the mempool monitor runs in a separate process that this API does not read, so its counts are unknown here, not zero.',
+            since
+              ? `Transactions monitored, sandwich attacks and suspicious approvals are counted since ${new Date(since * 1000).toLocaleString()}, when the mempool monitor last started.`
+              : dashed && 'A dash means that source is not reporting right now.',
+          ].filter(Boolean).join(' ');
+      // A monitored chain whose mempool could not be read is Unknown; it is not counted as watched.
+      const unobservable = (stats && stats.mempool_chains_unobservable) || [];
+      const mempoolNote = unobservable.length
+        ? 'Unknown: ' + unobservable.map(id => CHAIN_NAMES[id] || `Chain ${id}`).join(', ')
+        : null;
+      return (
+        <div>
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+            {MEMPOOL_ITEMS.map(s => (
+              <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
+                        color="var(--ink)" loading={loading} asOf={asOf} missing={missingText(stats, s.key)}
+                        note={s.key === 'chains_protected' ? mempoolNote : null} />
+            ))}
+          </div>
+          {!loading && footnote && (
+            <div className="text-xs mt-3 max-w-[72ch]" style={{ color:'var(--secondary)' }}>{footnote}</div>
           )}
         </div>
       );
@@ -1387,15 +1463,20 @@
 
             <Section id="robinhood-chain" title="Robinhood Chain">
               <RobinhoodPanel launches={launches} launchesLoading={slowLoading} cursor={launchCursor}
-                              onLoadOlder={loadOlder} loadingOlder={loadingOlder} olderError={olderError} />
-            </Section>
-
-            <Section title="Overview">
-              <OverviewStats stats={stats} loading={loading} asOf={statsUpdated} />
+                              onLoadOlder={loadOlder} loadingOlder={loadingOlder} olderError={olderError}
+                              stats={stats} loading={loading} asOf={statsUpdated} />
             </Section>
 
             <Section title="Provider Answers">
               <ProviderAnswersPanel stats={stats} loading={loading} asOf={statsUpdated} />
+            </Section>
+
+            <Section title="Firewall Scans">
+              <FirewallStatsBar stats={stats} loading={loading} asOf={statsUpdated} />
+            </Section>
+
+            <Section title="Mempool Monitor">
+              <MempoolStatsBar stats={stats} loading={loading} asOf={statsUpdated} />
             </Section>
 
             <Section title="Live Threat Feed">
