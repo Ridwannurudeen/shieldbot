@@ -3,11 +3,11 @@ import type { ReactNode } from "react";
 export default function Button(props: { variant?: "primary" | "secondary" | "ghost"; size?: "md" | "sm"; href?: string; onClick?: () => void; type?: "button" | "submit"; disabled?: boolean; className?: string; children: ReactNode; ariaLabel?: string; ariaPressed?: boolean; ariaExpanded?: boolean; ariaControls?: string }) {
   const { variant = "primary", size = "md", href, onClick, type, disabled, className, children, ariaLabel, ariaPressed, ariaExpanded, ariaControls } = props;
   const classes = [
-    "inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 ease-out disabled:opacity-50 disabled:cursor-not-allowed",
-    size === "md" ? "h-12 px-6 text-[15px]" : "h-10 px-4 text-sm",
-    variant === "primary" && "bg-emerald text-onfill shadow-button hover:bg-emerald-deep active:bg-emerald-deep active:translate-y-px active:shadow-none",
-    variant === "secondary" && "bg-surface text-ink border border-line-strong shadow-sm hover:border-ink",
-    variant === "ghost" && "bg-transparent text-muted hover:bg-surface-3 hover:text-ink",
+    "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors duration-150 ease-out disabled:opacity-50 disabled:cursor-not-allowed",
+    size === "md" ? "h-11 px-5 text-[15px]" : "h-10 px-4 text-sm",
+    variant === "primary" && "bg-accent-fill text-on-accent shadow-button hover:bg-accent-fill-hover active:bg-accent-fill-hover",
+    variant === "secondary" && "bg-ground text-ink border border-edge shadow-sm hover:bg-ground-alt",
+    variant === "ghost" && "bg-transparent text-secondary hover:bg-ground-alt hover:text-ink",
     className,
   ].filter(Boolean).join(" ");
 
@@ -17,4 +17,14 @@ export default function Button(props: { variant?: "primary" | "secondary" | "gho
   }
 
   return <button type={type ?? "button"} onClick={onClick} disabled={disabled} aria-label={ariaLabel} aria-pressed={ariaPressed} aria-expanded={ariaExpanded} aria-controls={ariaControls} className={classes}>{children}</button>;
+}
+
+// Pause and play for a part of the page that keeps moving (useAlive, src/reading.ts); hidden with reduced motion,
+// where nothing moves.
+export function PauseButton({ paused, setPaused }: { paused: boolean; setPaused: (paused: boolean) => void }) {
+  return (
+    <button type="button" onClick={() => setPaused(!paused)} className="h-9 rounded-lg border border-hairline-strong bg-ground px-3 font-mono text-xs text-ink transition-colors duration-150 hover:bg-ground-alt motion-reduce:hidden">
+      {paused ? "Play motion" : "Pause motion"}
+    </button>
+  );
 }

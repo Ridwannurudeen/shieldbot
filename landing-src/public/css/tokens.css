@@ -1,0 +1,78 @@
+/* ShieldBot colour tokens (THEME-SPEC 1.2, 2.2). Dark is the default; light is :root[data-theme="light"],
+   set by /js/theme.js. The landing app holds the same values as channel triplets in src/index.css. */
+:root {
+  --ground: #0B0B0A;
+  --ground-alt: #171716;
+  --panel: #1F1F1E;
+  --ink: #F7F6F2;
+  --on-ink: #0B0B0A;
+  --secondary: #A3A39E;
+  --hairline: #232322;
+  --hairline-strong: #343433;
+  --edge: #767671;
+  --accent: #EA66D8;
+  --accent-fill: #A3168F;
+  --accent-fill-hover: #8A1279;
+  --on-accent: #FFFFFF;
+  --accent-tint: #2B1227;
+  --on-panel: #F7F6F2;
+  --on-panel-2: #A3A39E;
+  --accent-on-panel: #EA66D8;
+  --block-on-panel: #F0756A;
+  --paper: #FFFFFF;
+  --on-paper: #141414;
+  --on-paper-2: #6B6B66;
+  --focus: #EA66D8;
+  --shadow: #000000;
+  --block: #C21F30;
+  --block-edge: #E04556;
+  --block-text: #F0756A;
+  --safe: #2DB47C;
+  --safe-text: #4FCF95;
+  --unknown: #8B8B86;
+  --on-unknown: #141414;
+  --block-on-paper: #A81A29;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --ground: #FFFFFF;
+  --ground-alt: #F7F6F2;
+  --panel: #141414;
+  --ink: #141414;
+  --on-ink: #FFFFFF;
+  --secondary: #6B6B66;
+  --hairline: #E6E5E1;
+  --hairline-strong: #D6D5D0;
+  --edge: #8B8B86;
+  --accent: #A3168F;
+  --accent-fill: #A3168F;
+  --accent-fill-hover: #8A1279;
+  --on-accent: #FFFFFF;
+  --accent-tint: #FBEFF9;
+  --on-panel: #F7F6F2;
+  --on-panel-2: #8B8B86;
+  --accent-on-panel: #EA66D8;
+  --block-on-panel: #F0756A;
+  --paper: #FFFFFF;
+  --on-paper: #141414;
+  --on-paper-2: #6B6B66;
+  --focus: #A3168F;
+  --shadow: #141414;
+  --block: #C21F30;
+  --block-edge: #C21F30;
+  --block-text: #A81A29;
+  --safe: #1D8A5A;
+  --safe-text: #176E48;
+  --unknown: #8B8B86;
+  --on-unknown: #141414;
+  --block-on-paper: #A81A29;
+  color-scheme: light;
+}
+
+.field-block   { background: radial-gradient(70% 60% at 68% 38%, var(--f-light) 0%, transparent 70%),
+                             linear-gradient(160deg, #3A0A12 0%, #7A1020 55%, #C21F30 100%); --f-light: rgb(255 255 255 / 0.14); }
+.field-unknown { background: radial-gradient(70% 60% at 68% 38%, var(--f-light) 0%, transparent 70%),
+                             linear-gradient(160deg, #1C1C1B 0%, #4A4A47 55%, #8B8B86 100%); --f-light: rgb(255 255 255 / 0.10); }
+.field-safe    { background: radial-gradient(70% 60% at 68% 38%, var(--f-light) 0%, transparent 70%),
+                             linear-gradient(160deg, #06281A 0%, #0F5C3B 55%, #1A7D50 100%); --f-light: rgb(255 255 255 / 0.12); }

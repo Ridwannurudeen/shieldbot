@@ -1,38 +1,21 @@
-import { useState } from "react";
 import Icon from "./Icon";
+import { setTheme, useTheme } from "../theme";
 
-const STORAGE_KEY = "shieldbot-theme"; // the same literal as the restore script in index.html
-const THEME_COLOR = { dark: "#0F172A", light: "#FFFFFF" } as const;
-
-export default function ThemeToggle({ className }: { className?: string }) {
-  const [dark, setDark] = useState(() => document.documentElement.getAttribute("data-theme") !== "light");
-
-  function toggle() {
-    const next = dark ? "light" : "dark";
-    const root = document.documentElement;
-    root.setAttribute("data-theme-switching", "");
-    root.setAttribute("data-theme", next);
-    document.querySelector('meta[name="theme-color"]')!.setAttribute("content", THEME_COLOR[next]);
-    document.querySelector('meta[name="color-scheme"]')!.setAttribute("content", next);
-    requestAnimationFrame(() => requestAnimationFrame(() => root.removeAttribute("data-theme-switching")));
-    setDark(!dark);
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      // Storage unavailable: the theme applies for this page and is not remembered.
-    }
-  }
-
+// The theme switch (THEME-SPEC 4.2): a native button in the switch role, checked when the light theme is on. Enter
+// and Space toggle it; the glyph is a sun while dark and a moon while light.
+export default function ThemeToggle() {
+  const light = useTheme() === "light";
   return (
     <button
       type="button"
       role="switch"
-      aria-checked={dark}
-      aria-label="Dark theme"
-      onClick={toggle}
-      className={["inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-3 hover:text-ink transition-colors duration-150 ease-out", className].filter(Boolean).join(" ")}
+      aria-checked={light}
+      aria-label="Light theme"
+      title="Light theme"
+      onClick={() => setTheme(light ? "dark" : "light")}
+      className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-lg text-ink transition-colors duration-150 ease-out hover:bg-ground-alt"
     >
-      <Icon name={dark ? "moon" : "sun"} size={20} />
+      <Icon name={light ? "moon" : "sun"} size={16} />
     </button>
   );
 }

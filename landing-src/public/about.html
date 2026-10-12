@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#0B0B0A" />
+  <script src="/js/theme.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="dark" />
-  <meta name="theme-color" content="#0F172A" />
-  <script>(function(){try{if(localStorage.getItem("shieldbot-theme")==="light"){var d=document;d.documentElement.setAttribute("data-theme","light");d.querySelector('meta[name="theme-color"]').setAttribute("content","#FFFFFF");d.querySelector('meta[name="color-scheme"]').setAttribute("content","light")}}catch(e){}})()</script>
   <title>About ShieldAI — Web3 Transaction Firewall & Crypto Security Extension</title>
   <meta name="description" content="How the ShieldBot browser extension (ShieldAI Transaction Firewall) checks transactions before you sign: contract analysis, honeypot simulation, risk scores and honest Unknown results.">
   <link rel="canonical" href="https://shieldbotsecurity.online/about.html">
@@ -18,140 +18,428 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
   <link rel="shortcut icon" href="/favicon.png">
+  <link rel="stylesheet" href="/css/tokens.css">
   <style>
-    :root {
-      --c-surface: 15 23 42; --c-surface-2: 10 16 32; --c-surface-3: 30 41 59;
-      --c-line: 39 51 73; --c-ink: 248 250 252; --c-body: 203 213 225; --c-muted: 148 163 184;
-      --c-emerald: 52 211 153; --c-emerald-tint: 15 42 34; --c-emerald-line: 31 95 71;
-      --c-safe-fg: 74 222 128; --c-safe-tint: 15 46 29;
-      --c-caution-fg: 250 204 21; --c-caution-tint: 48 39 8;
-      --c-high-fg: 251 146 60; --c-high-tint: 53 26 11;
-      --c-block-fg: 248 113 113; --c-block-tint: 58 20 24;
-      color-scheme: dark;
-    }
-    :root[data-theme="light"] {
-      --c-surface: 255 255 255; --c-surface-2: 246 248 250; --c-surface-3: 238 242 246;
-      --c-line: 227 232 239; --c-ink: 11 18 32; --c-body: 51 65 85; --c-muted: 71 85 105;
-      --c-emerald: 4 120 87; --c-emerald-tint: 236 253 245; --c-emerald-line: 167 243 208;
-      --c-safe-fg: 22 101 52; --c-safe-tint: 220 252 231;
-      --c-caution-fg: 133 77 14; --c-caution-tint: 254 249 195;
-      --c-high-fg: 154 52 18; --c-high-tint: 255 237 213;
-      --c-block-fg: 185 28 28; --c-block-tint: 254 226 226;
-      color-scheme: light;
-    }
     @font-face {
-      font-family: "Manrope Variable";
+      font-family: "Geist";
       font-style: normal;
-      font-weight: 200 800;
+      font-weight: 400;
       font-display: swap;
-      src: url("/fonts/manrope-latin-wght-normal.woff2") format("woff2-variations");
+      src: url("/fonts/geist-latin-400-normal.woff2") format("woff2");
       unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
     }
     @font-face {
-      font-family: "Manrope Fallback";
+      font-family: "Geist";
+      font-style: normal;
+      font-weight: 500;
+      font-display: swap;
+      src: url("/fonts/geist-latin-500-normal.woff2") format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: "IBM Plex Mono";
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: url("/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: "Geist Fallback";
       src: local("Arial");
-      size-adjust: 128.11%;
-      ascent-override: 83.21%;
-      descent-override: 23.42%;
+      size-adjust: 134.8%;
+      ascent-override: 74.56%;
+      descent-override: 21.88%;
       line-gap-override: 0%;
     }
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; }
     body {
-      font-family: "Manrope Variable", "Manrope Fallback", Arial, Helvetica, sans-serif;
-      background: rgb(var(--c-surface));
-      color: rgb(var(--c-body));
-      line-height: 1.7;
+      min-width: 320px;
+      margin: 0;
+      background: var(--ground);
+      color: var(--ink);
+      font: 400 16px/1.65 "Geist", "Geist Fallback", Arial, Helvetica, sans-serif;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+    a:hover { color: var(--ink); }
+    a:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+    b, strong, th, h1, h2, h3 { font-weight: 500; }
+    em { color: var(--ink); font-style: normal; font-weight: 500; }
+    code { font: 400 0.92em/1.6 "IBM Plex Mono", ui-monospace, monospace; overflow-wrap: anywhere; }
+    p { margin: 0 0 14px; font-size: 15px; overflow-wrap: anywhere; }
+    ul { margin: 8px 0 16px 20px; padding: 0; }
+    li { margin-bottom: 8px; font-size: 15px; overflow-wrap: anywhere; }
+    li strong { color: var(--ink); }
+    .site-nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid var(--hairline);
+      background: var(--ground);
+    }
+    .nav-inner {
+      width: calc(100% - 32px);
+      max-width: 1152px;
+      height: 64px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .wordmark {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .nav-actions { display: flex; align-items: center; gap: 24px; }
+    .nav-links { display: flex; align-items: center; gap: 24px; }
+    .nav-links a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 500;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .nav-links a:hover { color: var(--accent); }
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .theme-toggle:hover { background: var(--ground-alt); }
+    .theme-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+    .theme-icon-moon { display: none; }
+    .theme-toggle[aria-checked="true"] .theme-icon-sun { display: none; }
+    .theme-toggle[aria-checked="true"] .theme-icon-moon { display: block; }
+    .nav-cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
       padding: 0 16px;
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+      background: var(--ground);
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 500;
+      text-decoration: none;
+      white-space: nowrap;
     }
-    a { color: rgb(var(--c-emerald)); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    p a { text-decoration: underline; }
-    .nav {
-      max-width: 800px; margin: 0 auto;
-      padding: 20px 0;
-      display: flex; align-items: center; gap: 10px;
-      border-bottom: 1px solid rgb(var(--c-line));
-      margin-bottom: 48px;
+    .nav-cta:hover { background: var(--ground-alt); color: var(--ink); }
+    .mobile-menu { display: none; }
+    .mobile-menu summary { cursor: pointer; list-style: none; }
+    .mobile-menu summary::-webkit-details-marker { display: none; }
+    .mobile-panel { display: none; }
+    .wrap {
+      width: calc(100% - 32px);
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 48px 0 88px;
     }
-    .nav-name { font-size: 15px; font-weight: 700; color: rgb(var(--c-ink)); }
-    .nav-back { margin-left: auto; font-size: 13px; color: rgb(var(--c-muted)); }
-    .nav-back:hover { color: rgb(var(--c-emerald)); text-decoration: none; }
-    .wrap { max-width: 680px; margin: 0 auto; padding-bottom: 80px; }
-    .hero { margin-bottom: 48px; }
-    .hero h1 { font-size: 36px; font-weight: 800; color: rgb(var(--c-ink)); letter-spacing: -0.02em; margin-bottom: 12px; }
-    .hero p { font-size: 16px; color: rgb(var(--c-body)); max-width: 600px; }
-    h2 { font-size: 22px; font-weight: 700; color: rgb(var(--c-ink)); margin: 40px 0 12px; padding-bottom: 10px; border-bottom: 1px solid rgb(var(--c-line)); }
-    h3 { font-size: 17px; font-weight: 700; color: rgb(var(--c-ink)); margin: 24px 0 8px; }
-    p { margin-bottom: 14px; font-size: 15px; color: rgb(var(--c-body)); }
-    ul { margin: 8px 0 16px 20px; }
-    li { font-size: 15px; color: rgb(var(--c-body)); margin-bottom: 8px; }
-    li strong { color: rgb(var(--c-ink)); }
+    .hero { margin-bottom: 40px; }
+    .hero h1 {
+      margin: 0 0 12px;
+      color: var(--ink);
+      font-size: clamp(32px, 5vw, 40px);
+      font-weight: 500;
+      letter-spacing: -0.03em;
+      line-height: 1.12;
+      overflow-wrap: anywhere;
+    }
+    .hero p { max-width: 600px; font-size: 16px; }
+    .hero-meta { color: var(--secondary); font-size: 13px; }
+    h2 {
+      margin: 40px 0 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--hairline);
+      color: var(--ink);
+      font-size: 21px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+    h3 { margin: 24px 0 8px; color: var(--ink); font-size: 17px; }
     .callout {
-      background: rgb(var(--c-emerald-tint));
-      border: 1px solid rgb(var(--c-emerald-line));
-      border-left: 3px solid rgb(var(--c-emerald));
-      border-radius: 8px;
-      padding: 16px 18px;
-      margin: 24px 0;
-      font-size: 14px; color: rgb(var(--c-body));
+      margin: 20px 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: var(--ink);
+      font-size: 14px;
+      overflow-wrap: anywhere;
     }
-    .score-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
-    .score-table th { text-align: left; font-size: 12px; color: rgb(var(--c-muted)); text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid rgb(var(--c-line)); }
-    .score-table td { font-size: 13px; color: rgb(var(--c-body)); padding: 10px 12px; border-bottom: 1px solid rgb(var(--c-line)); }
-    .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-    .safe { background: rgb(var(--c-safe-tint)); color: rgb(var(--c-safe-fg)); }
-    .caution { background: rgb(var(--c-caution-tint)); color: rgb(var(--c-caution-fg)); }
-    .high { background: rgb(var(--c-high-tint)); color: rgb(var(--c-high-fg)); }
-    .block { background: rgb(var(--c-block-tint)); color: rgb(var(--c-block-fg)); }
-    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
-    .compare-card { background: rgb(var(--c-surface-2)); border: 1px solid rgb(var(--c-line)); border-radius: 12px; padding: 18px; }
-    .compare-card.shield { border-color: rgb(var(--c-emerald-line)); }
+    .callout p:last-child { margin-bottom: 0; }
+    .score-table {
+      width: 100%;
+      margin: 16px 0;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    .score-table th {
+      color: var(--secondary);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-align: left;
+      text-transform: uppercase;
+    }
+    .score-table th:first-child, .score-table td:first-child { width: 19%; }
+    .score-table th:nth-child(2), .score-table td:nth-child(2) { width: 30%; }
+    .score-table th:nth-child(3), .score-table td:nth-child(3) { width: 51%; }
+    .score-table th, .score-table td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--hairline);
+      color: var(--ink);
+      font-size: 13px;
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+    .score-table th { color: var(--secondary); }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 4px;
+      max-width: 100%;
+      padding: 3px 8px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      line-height: 1.35;
+      text-align: center;
+      overflow-wrap: normal;
+      word-break: normal;
+      white-space: normal;
+      vertical-align: middle;
+    }
+    .badge-glyph { flex: none; }
+    .badge.block { border-color: var(--block); background: var(--block); color: var(--on-accent); }
+    .badge.high { border: 2px solid var(--block-edge); background: var(--ground); color: var(--block-text); }
+    .badge.caution { border-color: var(--edge); background: var(--ground); color: var(--ink); }
+    .badge.safe { border-color: var(--safe); background: var(--ground); color: var(--safe-text); }
+    .badge.unknown { border: 1px dashed var(--on-unknown); background: var(--unknown); color: var(--on-unknown); }
+    .compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+    .compare-card { min-width: 0; padding: 18px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--ground-alt); }
+    .compare-card.shield { border-color: var(--hairline-strong); }
     .compare-card ul { margin-left: 16px; }
     .compare-card li { font-size: 13px; margin-bottom: 6px; }
-    .footer { max-width: 800px; margin: 48px auto 0; padding-top: 24px; border-top: 1px solid rgb(var(--c-line)); font-size: 12px; color: rgb(var(--c-muted)); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-    @media (max-width: 600px) { .compare-grid { grid-template-columns: 1fr; } .hero h1 { font-size: 26px; } }
+    .census-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px 24px;
+      margin: 16px 0;
+    }
+    .census-grid > div { border-top: 1px solid var(--hairline); padding-top: 12px; }
+    .census-grid dt { color: var(--ink); font-size: 32px; font-weight: 500; line-height: 1; }
+    .census-grid dd { margin: 10px 0 0; color: var(--secondary); font-size: 14px; }
+    .error-page { max-width: 680px; min-height: 360px; }
+    .error-page .hero { margin-bottom: 0; }
+    .error-state { margin-top: 24px; }
+    .not-found-links { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 32px 0 0; padding: 0; list-style: none; }
+    .not-found-links li { margin: 0; }
+    .footer { width: 100%; border-top: 1px solid var(--hairline-strong); background: var(--ground-alt); color: var(--ink); }
+    .footer-inner {
+      width: calc(100% - 32px);
+      max-width: 1152px;
+      margin: 0 auto;
+      padding: 56px 0 0;
+    }
+    .footer-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; }
+    .footer-wordmark { color: var(--ink); font-size: 20px; font-weight: 500; text-decoration: none; }
+    .footer-wordmark span:last-child { color: var(--ink); }
+    .footer-brand p { max-width: 26em; margin: 12px 0 0; color: var(--secondary); font-size: 14px; }
+    .footer-brand .founder { color: var(--secondary); font-size: 13px; }
+    .footer-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+    .footer-cols section { min-width: 0; }
+    .footer-cols h2 {
+      margin: 0 0 12px;
+      padding: 0;
+      border: 0;
+      color: var(--secondary);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .footer-cols a {
+      display: flex;
+      align-items: center;
+      min-height: 40px;
+      color: var(--ink);
+      font-size: 14px;
+      text-decoration: none;
+      overflow-wrap: anywhere;
+    }
+    .footer-cols a:hover { color: var(--accent); }
+    .footer-cols a.footer-email { overflow-wrap: normal; white-space: normal; }
+    .footer-cols a.footer-email span { min-width: 0; }
+    .footer a:focus-visible { outline-color: var(--accent); }
+    .footer-bottom {
+      margin-top: 48px;
+      padding: 20px 0;
+      border-top: 1px solid var(--hairline-strong);
+      color: var(--secondary);
+      font-size: 12px;
+    }
+    @media (max-width: 1080px) {
+      .nav-links, .nav-cta { display: none; }
+      .mobile-menu { display: block; }
+      .mobile-menu summary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--ink);
+      }
+      .mobile-menu summary:hover { background: var(--ground-alt); }
+      .menu-icon-close { display: none; }
+      .mobile-menu[open] .menu-icon-bars { display: none; }
+      .mobile-menu[open] .menu-icon-close { display: block; }
+      .mobile-panel {
+        position: fixed;
+        top: 64px;
+        right: 0;
+        left: 0;
+        z-index: 21;
+        padding: 8px 16px 16px;
+        border-bottom: 1px solid var(--hairline);
+        background: var(--ground);
+      }
+      .mobile-menu[open] .mobile-panel { display: flex; flex-direction: column; }
+      .mobile-panel a:not(.nav-cta) {
+        display: flex;
+        align-items: center;
+        min-height: 48px;
+        border-bottom: 1px solid var(--hairline);
+        color: var(--ink);
+        font-size: 15px;
+        font-weight: 500;
+        text-decoration: none;
+      }
+      .mobile-panel .nav-cta { display: inline-flex; justify-content: center; margin-top: 14px; }
+      .footer-grid { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+    }
+    @media (max-width: 600px) {
+      .wrap { padding: 36px 0 64px; }
+      .hero { margin-bottom: 32px; }
+      .hero h1 { font-size: 32px; }
+      .score-table th, .score-table td { padding: 8px 4px; font-size: 12px; }
+      .score-table th:nth-child(2), .score-table td:nth-child(2) { padding-left: 3px; padding-right: 3px; }
+      .score-table th:nth-child(2), .score-table td:nth-child(2) { width: 40%; }
+      .score-table th:nth-child(3), .score-table td:nth-child(3) { width: 41%; }
+      .compare-grid { grid-template-columns: minmax(0, 1fr); }
+      .compare-card { padding: 16px; }
+      .footer-inner { padding-top: 40px; }
+      .footer-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 16px; }
+      .footer-bottom { margin-top: 36px; }
+    }
   </style>
 
     <script src="/js/plausible-init.js"></script>
     <script async src="/js/script.js"></script>
+    <script src="/js/theme-toggle.js" defer></script>
+    <script src="/js/static-nav.js" defer></script>
 </head>
 <body>
 
-  <nav class="nav">
-    <span style="font-size:22px;" aria-hidden="true">&#128737;</span>
-    <span class="nav-name">ShieldAI Transaction Firewall</span>
-    <a href="/" class="nav-back">&#8592; Back to home</a>
+  <nav class="site-nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="wordmark" href="/">ShieldBot</a>
+      <div class="nav-actions">
+        <div class="nav-links">
+          <a href="/#how-it-works">How it works</a>
+          <a href="/#chains">Coverage</a>
+          <a href="/#on-chain">On-chain registry</a>
+          <a href="/#telegram">Telegram</a>
+          <a href="/safety.html">Safety guide</a>
+          <a href="/dashboard">Dashboard</a>
+        </div>
+        <button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Light theme" title="Light theme">
+          <svg class="theme-icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+          </svg>
+          <svg class="theme-icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+            <path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z" />
+          </svg>
+        </button>
+        <a class="nav-cta" href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Add to Chrome</a>
+        <details class="mobile-menu">
+          <summary aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu">
+            <svg viewBox="0 0 32 32" width="24" height="24" fill="currentColor" aria-hidden="true">
+              <g class="menu-icon-bars">
+                <path d="M4 6H28V8H4z" />
+                <path d="M4 24H28V26H4z" />
+                <path d="M4 12H28V14H4z" />
+                <path d="M4 18H28V20H4z" />
+              </g>
+              <path class="menu-icon-close" d="M17.4141 16 24 9.4141 22.5859 8 16 14.5859 9.4143 8 8 9.4141 14.5859 16 8 22.5859 9.4143 24 16 17.4141 22.5859 24 24 22.5859 17.4141 16z" />
+            </svg>
+          </summary>
+          <div class="mobile-panel" id="mobile-menu">
+            <a href="/#how-it-works">How it works</a>
+            <a href="/#chains">Coverage</a>
+            <a href="/#on-chain">On-chain registry</a>
+            <a href="/#telegram">Telegram</a>
+            <a href="/safety.html">Safety guide</a>
+            <a href="/dashboard">Dashboard</a>
+            <a class="nav-cta" href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Add to Chrome</a>
+          </div>
+        </details>
+      </div>
+    </div>
   </nav>
 
   <main class="wrap">
 
     <div class="hero">
       <h1>How ShieldAI Protects Your Wallet</h1>
-      <p>ShieldAI checks blockchain transactions before your wallet signs them, combining contract analysis, a buy and sell simulation where the chain has one, and threat intelligence into one risk score. If a check cannot run, it says Unknown instead of Safe.</p>
-    </div>
+      </div>
 
     <div class="callout">
       ShieldAI operates at the transaction layer, not the URL layer. In the browser's page context, before your wallet receives the request, it intercepts transactions (<code>eth_sendTransaction</code>, <code>eth_signTransaction</code>), batches (<code>wallet_sendCalls</code>) and signature requests (<code>eth_signTypedData</code> and its <code>_v1</code>, <code>_v3</code> and <code>_v4</code> forms, <code>personal_sign</code> and <code>eth_sign</code>).
     </div>
 
-    <!-- BLOCK 1: What it is -->
-    <h2>What ShieldAI Does</h2>
-    <p>ShieldAI is a Chrome browser extension that acts as a transaction firewall for Web3 wallets. Every time you initiate a transaction on a DApp — a swap, a token purchase, an NFT mint — ShieldAI intercepts it before your wallet receives the signature request.</p>
-    <p>The risk score combines four weighted checks: contract code (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, and honeypot checks (a buy and sell simulation where the chain has one), together with scam databases such as GoPlus. The result is a risk score from 0 to 100 with a plain-English explanation of what was found. For a warning, you choose whether to cancel or sign.</p>
-
-    <!-- BLOCK 2: Risk score -->
     <h2>How Risk Is Rated</h2>
     <p>Every transaction receives a risk score before you sign it. Higher means riskier:</p>
     <table class="score-table">
       <tr><th>Risk score</th><th>Verdict</th><th>What you see</th></tr>
       <tr><td>0 – 30</td><td><span class="badge safe">SAFE</span></td><td>The verdict and details; you can continue</td></tr>
-      <tr><td>31 – 49</td><td><span class="badge caution">CAUTION</span></td><td>A warning; you choose to proceed or cancel</td></tr>
-      <tr><td>50 – 70</td><td><span class="badge high">HIGH RISK</span></td><td>A strong warning with threat details</td></tr>
+      <tr><td>31 – 49</td><td><span class="badge caution"><span class="badge-glyph" aria-hidden="true">!</span>CAUTION</span></td><td>A warning; you choose to proceed or cancel</td></tr>
+      <tr><td>50 – 70</td><td><span class="badge high"><span class="badge-glyph" aria-hidden="true">!</span>HIGH RISK</span></td><td>A strong warning with threat details</td></tr>
       <tr><td>71 – 100</td><td><span class="badge block">BLOCK RECOMMENDED</span></td><td>The highest risk verdict; blocking is strongly recommended</td></tr>
+      <tr><td>&mdash;</td><td><span class="badge unknown"><span class="badge-glyph" aria-hidden="true">?</span>UNKNOWN</span></td><td></td></tr>
     </table>
     <p>The extension shows this as a safety score, 100 minus the risk score, so higher is safer there. These are the default bands. A score in the SAFE band is still shown as CAUTION when the risk engine rates the token medium risk or the data is incomplete, and if a check could not run the result is shown as Unknown instead of a number.</p>
 
-    <!-- BLOCK 3: Wallet drainers -->
     <h2>Wallet Drainer Protection</h2>
     <p>A wallet drainer is a malicious smart contract that exploits ERC-20 approval functions or EIP-712 permit signatures to transfer all tokens from a wallet in a single transaction. Standard browser phishing warnings cannot detect these because they operate at the URL layer — the attack happens at the transaction layer.</p>
     <p>ShieldAI helps against wallet drainers by:</p>
@@ -162,75 +450,76 @@
       <li>Showing the exact asset change before you sign, when transaction simulation is enabled</li>
     </ul>
 
-    <!-- BLOCK 4: Honeypot detection -->
     <h2>Honeypot Detection</h2>
     <p>A honeypot token allows users to buy but contains hidden code that blocks all sell transactions. The token appears to have liquidity and price action, but holders can never exit.</p>
     <p>ShieldAI looks for honeypots in two ways. It simulates a buy and a sell of the token where the chain has a simulator: honeypot.is on Ethereum, BNB Chain and Base, and ShieldBot's own simulation on supported Arbitrum and Robinhood Chain pool routes. On Arbitrum those are pools pairing the token with WETH on Uniswap V3, Uniswap V2 or SushiSwap. On the other chains, and for an Arbitrum token with no such pool (for example one traded only on Camelot, or only against stablecoins), it uses GoPlus's honeypot and tax flags instead. It also checks the contract's bytecode for owner powers a honeypot can use, such as a blacklist or a pause switch, which works even for unverified contracts. If a simulation fails, or neither source answers, the result is Unknown rather than Safe.</p>
 
-    <!-- BLOCK 5: Transaction simulation -->
     <h2>Pre-Sign Transaction Simulation</h2>
     <p>When transaction simulation is enabled, ShieldAI sends the transaction to Tenderly for simulation on a copy of the chain state. Tenderly runs it in a sandbox and returns the tokens and amounts that would leave or enter your wallet.</p>
     <p>ShieldAI displays this asset delta before the wallet signature dialog appears. For example: <em>"You will send 2.5 BNB and receive 10,000 TOKEN."</em> Tokens the simulation shows leaving your wallet are listed among the danger signals; they do not change the verdict itself. If the transaction reverts in the simulation, the result is incomplete and cannot be SAFE, and a revert on a contract whose own risk score, before community reports and campaign boosts, is already 30 or more is BLOCK RECOMMENDED.</p>
 
-    <!-- BLOCK 6: Comparison -->
-    <h2>ShieldAI vs. Browser Phishing Warnings</h2>
-    <div class="compare-grid">
-      <div class="compare-card">
-        <h3>Browser built-in warnings</h3>
-        <ul>
-          <li>Operate at the URL / domain layer</li>
-          <li>Cannot inspect transaction data</li>
-          <li>Do not analyze smart contract code</li>
-          <li>Cannot simulate asset loss before signing</li>
-          <li>Miss all on-chain attacks on legitimate sites</li>
-        </ul>
+    <h2>What we saw on the chain</h2>
+    <dl class="census-grid">
+      <div>
+        <dt>68,666</dt>
+        <dd>new tokens first seen in a liquidity pool</dd>
       </div>
-      <div class="compare-card shield">
-        <h3>ShieldAI Transaction Firewall</h3>
-        <ul>
-          <li>Intercepts the transaction, batch and signature methods listed above</li>
-          <li>Analyzes contract bytecode for honeypot/rug patterns</li>
-          <li>Simulates the asset change before signing, when enabled</li>
-          <li>Scores deployer history across past deployments</li>
-          <li>Flags risky Permit2 and approval signature requests</li>
-        </ul>
+      <div>
+        <dt>~8,000</dt>
+        <dd>new tokens a day</dd>
       </div>
-    </div>
-
-    <!-- BLOCK 7: Privacy / Trust -->
-    <h2>What Data ShieldAI Collects</h2>
-    <p>The extension sends only what a check needs to the ShieldAI API, over HTTPS. For a transaction, or each call of a batch, that is the recipient, sender, value, calldata and chain ID, and for an EIP-7702 transaction each delegate's address, never the signed authorization. For a typed-data signature it is the signing method, any EIP-712 typed data, your address and the chain ID. For <code>personal_sign</code> and <code>eth_sign</code> it is only the signing method and the chain ID: never the message or hash you sign, and not your address. Each of these checks carries your Balanced or Strict setting. The phishing check sends only the origin (scheme, host and port) of the site you open. When you use Wallet Health, the wallet address you enter and the chain you selected are sent too.</p>
-    <ul>
-      <li>Scan results are stored by contract address and chain, <strong>not</strong> with your IP address</li>
-      <li>Scan history (last 50 results) is stored locally in <code>chrome.storage.local</code> — never uploaded</li>
-      <li>The <code>tabs</code> permission is used only to open extension pages and to read the active tab when you ask the extension to scan a page; no <code>scripting</code> or <code>webRequest</code> permissions are used</li>
-      <li>Scan results are kept on the server to speed up repeat checks; see the privacy policy for details</li>
-    </ul>
-    <p>Full privacy policy: <a href="/privacy.html">shieldbotsecurity.online/privacy.html</a></p>
-
-    <!-- BLOCK 8: Compatibility -->
-    <h2>Wallet & Chain Compatibility</h2>
-    <p>ShieldAI hooks into the browser's <code>window.ethereum</code> provider at page load and is designed for:</p>
-    <ul>
-      <li>Wallets that inject <code>window.ethereum</code></li>
-      <li>Wallets announced through EIP-6963</li>
-    </ul>
-    <p>Testing across every wallet is still in progress.</p>
-    <p>Chains supported for scans: Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Version 3.1.0 of the browser extension, on the Chrome Web Store, asks the wallet which chain it is on and sends Robinhood Chain requests to the API for analysis. It has been tested with Rabby; MetaMask testing is still outstanding.</p>
-    <p>The hook is injected into the page's MAIN world before any DApp code runs — contracts cannot detect or remove it from within a transaction.</p>
+      <div>
+        <dt>28.76%</dt>
+        <dd>of mature tokens met a minimal liquidity or activity bar</dd>
+      </div>
+      <div>
+        <dt>49%</dt>
+        <dd>could not be resolved either way and are reported as unknown</dd>
+      </div>
+    </dl>
+    <p>Observed from 14 to 22 September 2026, about 8.6 days. These figures describe the chain, not ShieldBot scans. A token is counted when it first appears in a liquidity pool, not when it is deployed, and missing evidence is reported as unknown, never as zero. <a href="https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/census-4663.md" target="_blank" rel="noopener noreferrer">Method and limits</a></p>
 
   </main>
 
   <footer class="footer">
-    <span>&#169; 2026 ShieldBot Security. All rights reserved.</span>
-    <nav aria-label="Footer">
-      <a href="/">Home</a>
-      <a href="/about.html">About</a>
-      <a href="/privacy.html">Privacy</a>
-      <a href="/terms.html">Terms</a>
-      <a href="/security.html">Security</a>
-      <a href="mailto:support@shieldbotsecurity.online">Support</a>
-    </nav>
+    <div class="footer-inner">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="footer-wordmark" href="/"><span>Shield</span><span>Bot</span></a>
+          <p>The security layer that says what it checked.</p>
+          <p class="founder">Built by Ridwan Nurudeen, founder and solo builder.</p>
+        </div>
+        <div class="footer-cols">
+          <section>
+            <h2>Product</h2>
+            <a href="/#how-it-works">How it works</a>
+            <a href="/safety.html">Safety guide</a>
+            <a href="/#on-chain">On-chain check</a>
+            <a href="/#chains">Coverage</a>
+            <a href="/#agent-security">For builders</a>
+            <a href="/dashboard">Threat dashboard</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/about.html">About</a>
+            <a href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Chrome extension</a>
+            <a href="https://api.shieldbotsecurity.online/docs" target="_blank" rel="noopener noreferrer">API docs</a>
+          </section>
+          <section>
+            <h2>Legal</h2>
+            <a href="/privacy.html">Privacy Policy</a>
+            <a href="/terms.html">Terms of Service</a>
+            <a href="/security.html">Security</a>
+          </section>
+          <section>
+            <h2>Community</h2>
+            <a href="https://github.com/Ridwannurudeen/shieldbot" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href="https://t.me/shieldbot_bnb_bot" target="_blank" rel="noopener noreferrer">Telegram bot</a>
+            <a href="https://x.com/shieldbot_" target="_blank" rel="noopener noreferrer">@shieldbot_</a>
+            <a class="footer-email" href="mailto:support@shieldbotsecurity.online"><span>support@<wbr>shieldbotsecurity.online</span></a>
+          </section>
+        </div>
+      </div>
+      <div class="footer-bottom">&#169; 2026 ShieldBot.</div>
+    </div>
   </footer>
 
 </body>

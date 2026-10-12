@@ -29,32 +29,32 @@ export default function ContractCard({
   }
 
   return (
-    <div className="rounded-2xl border border-line bg-surface p-6 shadow-sm">
-      <h3 className="font-mono text-sm font-bold text-ink">{name}</h3>
-      <p className="mt-2 text-sm text-body">{role}</p>
-      <div className="mt-4 flex items-center gap-2 font-mono text-[13px] text-body">
+    <div className="rounded-2xl border border-hairline bg-ground p-6 shadow-sm">
+      <h3 className="font-mono text-sm font-medium text-ink">{name}</h3>
+      <p className="mt-2 text-sm text-ink">{role}</p>
+      <div className="mt-4 flex items-center gap-2 font-mono text-[13px] text-ink">
         <span className="lg:hidden">{short}</span>
         <span className="hidden lg:inline break-all">{address}</span>
         <button
           type="button"
           aria-label="Copy the address"
           onClick={copyAddress}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-surface-3 hover:text-ink"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-secondary hover:bg-ground-alt hover:text-ink"
         >
           {copyState === "failed" ? (
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-caution-fg"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 9v4M12 17h.01" /></svg>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-ink"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 9v4M12 17h.01" /></svg>
           ) : <Icon name={copyState === "copied" ? "check" : "copy"} size={16} />}
         </button>
         <span className="sr-only" aria-live="polite">
           {copyState === "copied" ? "Address copied" : copyState === "failed" ? "Could not copy" : ""}
         </span>
       </div>
-      <p className="mt-3 text-[13px] text-muted">Deployed 27 September 2026</p>
+      <p className="mt-3 text-[13px] text-secondary">Deployed 27 September 2026</p>
       <div className="mt-2 flex flex-col">
         {links.map((link) => (
           <a
             key={link.href}
-            className="inline-flex min-h-[44px] items-center gap-1.5 self-start text-sm font-semibold text-emerald underline underline-offset-4 hover:text-emerald-deep"
+            className="inline-flex min-h-[44px] items-center gap-1.5 self-start text-sm font-medium text-accent underline underline-offset-4 hover:text-ink"
             href={link.href}
             target="_blank"
             rel="noopener noreferrer"

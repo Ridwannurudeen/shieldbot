@@ -1,9 +1,17 @@
-import type { ReactNode } from "react";
-import SectionHeader from "./SectionHeader";
+import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useStats, type Stats } from "../liveStats";
+import { useAlive, useReading } from "../reading";
+import { PauseButton } from "./Button";
 
 // Per-chain coverage. tests/test_website_claims.py checks each row against the chain adapters
 // (sell simulation), services/mempool_service.py (mempool) and services/launch_discovery.py.
+// The sell simulation and launch scan columns are drawn from these rows. GET /api/coverage/{chain_id} serves the same
+// adapter configuration for sell simulation, so asking it for each chain would add eight requests and no information;
+// it has no launch scan field, so that column is from services/launch_discovery.py alone. Whether a
+// public mempool was read is live: GET /api/stats (src/liveStats.ts, the request Mechanism already makes) lists
+// the chains the monitor read on its last poll.
 interface Chain {
+  chainId: number;
   name: string;
   // Who simulates a buy and a sell: honeypot.is, ShieldBot's own simulator, or nobody.
   simulation: "honeypot.is" | "ShieldBot" | null;
@@ -14,8 +22,12 @@ interface Chain {
   logo: ReactNode;
 }
 
+// Chains the scanner accepts (utils/chain_info.py). tests/test_website_claims.py keeps this in sync.
+const SUPPORTED_CHAINS = 8;
+
 const chains: Chain[] = [
   {
+    chainId: 1,
     name: "Ethereum",
     simulation: "honeypot.is",
     mempool: true,
@@ -33,6 +45,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 56,
     name: "BNB Chain",
     simulation: "honeypot.is",
     mempool: true,
@@ -45,6 +58,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 8453,
     name: "Base",
     simulation: "honeypot.is",
     mempool: false,
@@ -57,6 +71,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 42161,
     name: "Arbitrum",
     simulation: "ShieldBot",
     mempool: false,
@@ -71,6 +86,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 137,
     name: "Polygon",
     simulation: null,
     mempool: true,
@@ -83,6 +99,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 10,
     name: "Optimism",
     simulation: null,
     mempool: false,
@@ -95,6 +112,7 @@ const chains: Chain[] = [
     ),
   },
   {
+    chainId: 204,
     name: "opBNB",
     simulation: null,
     mempool: true,
@@ -108,6 +126,7 @@ const chains: Chain[] = [
   },
   {
     // Generic chain-link mark: no third-party logo.
+    chainId: 4663,
     name: "Robinhood Chain",
     simulation: "ShieldBot",
     mempool: false,
@@ -122,76 +141,251 @@ const chains: Chain[] = [
 ];
 
 
-export default function Chains() {
-  return (
-    <section id="chains" aria-labelledby="chains-title" className="bg-surface-2 py-14 md:py-[72px] lg:py-24">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        <SectionHeader
-          id="chains-title"
-          eyebrow="Coverage"
-          title="Coverage by chain"
-          lead="Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is reported as Unknown, never as Safe."
-        />
+type CellState = "available" | "unavailable" | "unknown";
 
-        <div className="mt-10 max-w-4xl overflow-x-auto rounded-2xl border border-line bg-surface px-3 py-2 shadow-sm sm:px-6" tabIndex={0} aria-label="Coverage by chain">
-          <table className="w-full text-[13px] sm:text-sm">
-            <caption className="sr-only">
-              Which checks run on each supported chain
-            </caption>
-            <thead>
-              <tr className="text-left text-[11px] uppercase text-muted md:tracking-wider sm:text-xs">
-                <th scope="col" className="py-3 pr-1.5 font-semibold sm:pr-2">Chain</th>
-                <th scope="col" className="py-3 px-1.5 sm:px-2 font-semibold">Sell simulation</th>
-                <th scope="col" className="py-3 px-1.5 sm:px-2 font-semibold">Mempool watch</th>
-                <th scope="col" className="py-3 pl-1.5 sm:pl-2 font-semibold">Launch scans</th>
-              </tr>
-            </thead>
-            <tbody>
-              {chains.map((c) => (
-                <tr key={c.name} className="border-t border-line">
-                  <th scope="row" className="py-3 pr-1.5 text-left font-semibold text-ink sm:pr-2">
-                    <span className="flex items-center gap-1.5 sm:gap-3">
-                      {c.logo}
-                      {c.name}
-                    </span>
-                  </th>
-                  <td className={`py-3 px-1.5 sm:px-2 ${c.simulation ? "text-body" : "text-caution-fg"}`}>
-                    {c.simulation ?? "None"}
-                    {c.simulationScope && (
-                      <span className="block text-xs text-muted">{c.simulationScope}</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-1.5 text-body sm:px-2">{c.mempool ? "Yes" : "No"}</td>
-                  <td className="py-3 pl-1.5 text-body sm:pl-2">{c.launches ? "Yes" : "No"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+function CapabilityCell({
+  state,
+  label,
+  note,
+  late,
+}: {
+  state: CellState;
+  label: string;
+  note?: string;
+  late?: boolean;
+}) {
+  const square =
+    state === "available"
+      ? "border-ink bg-ink"
+      : state === "unavailable"
+        ? "border-dashed border-ink"
+        : "border-ink bg-ground";
+
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-start gap-1 text-[11px] leading-4 text-ink sm:items-center sm:gap-2 sm:text-[13px] sm:leading-5">
+      <span
+        aria-hidden="true"
+        className={`rd-cell rd-${state}${late ? " rd-late" : ""} h-3 w-3 sm:h-3.5 sm:w-3.5 flex-none rounded-[2px] border ${square}`}
+      />
+      <span className="min-w-0 whitespace-normal">
+        {label}
+        {note && <span className="block text-secondary">{note}</span>}
+      </span>
+    </span>
+  );
+}
+
+function simulationCell(chain: Chain): { state: CellState; label: string; note?: string } {
+  if (chain.simulation === null) {
+    return { state: "unavailable", label: "GoPlus flags only" };
+  }
+  return {
+    state: "available",
+    label: chain.simulation === "ShieldBot" ? "ShieldBot simulator" : chain.simulation,
+    note: chain.simulationScope,
+  };
+}
+
+function mempoolCell(
+  chain: Chain,
+  stats: Stats | null | undefined,
+): { state: CellState; label: string } {
+  if (!chain.mempool) return { state: "unavailable", label: "No public mempool" };
+  if (stats === undefined) return { state: "unknown", label: "Loading" };
+  const observable = stats?.mempool_chains_observable;
+  if (!observable) return { state: "unknown", label: "Unavailable" };
+  // A public mempool the monitor did not read on its last poll is a reading not taken, not a check that does not
+  // run here: the legend's outline, never the dashed cell.
+  return observable.includes(chain.chainId)
+    ? { state: "available", label: "Observed on last poll" }
+    : { state: "unknown", label: "Not read on last poll" };
+}
+
+function launchCell(chain: Chain): { state: CellState; label: string } {
+  return chain.launches
+    ? { state: "available", label: "/launchalerts" }
+    : { state: "unavailable", label: "No" };
+}
+
+// The chains in orbit (index.css, "Orbits"): each chain on its own ellipse, inner ones faster, logos upright; the
+// magenta ellipse is Robinhood Chain's, the registry's chain. A picture of the table below, which carries the facts,
+// so it is hidden from assistive technology. It moves only while on screen (useAlive). Below 1024 px the planets
+// carry no names (the table does): eight labels do not fit those rings without clipping or overlapping.
+function Orbits() {
+  const { ref, on, paused, setPaused } = useAlive<HTMLDivElement>();
+  return (
+    <div ref={ref} data-paused={on ? undefined : ""} className="mt-10">
+      <div aria-hidden="true" className="orbits relative mx-auto max-w-[920px]">
+        {chains.map((chain, i) => (
+          <div
+            key={chain.chainId}
+            className={chain.chainId === 4663 ? "orbit orbit-mark" : "orbit"}
+            style={{ "--o": i } as CSSProperties}
+          >
+            <div className="orbit-arm">
+              <div className="orbit-up flex flex-col items-center gap-1 whitespace-nowrap font-mono text-[11px] text-secondary">
+                {chain.logo}
+                <span className="max-lg:hidden">{chain.name}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+        <p className="absolute inset-0 grid place-content-center text-center font-mono text-[11px] uppercase tracking-[0.08em] text-secondary">
+          <span className="font-sans text-[44px] font-medium normal-case leading-none tracking-[-0.03em] text-ink">8</span>
+          chains
+        </p>
+      </div>
+      <div className="flex justify-end">
+        <PauseButton paused={paused} setPaused={setPaused} />
+      </div>
+    </div>
+  );
+}
+
+export default function Chains() {
+  const { stats, fetchedAt } = useStats();
+  // The matrix takes its reading on view: a magenta needle sweeps across each row and the row's cells resolve
+  // behind it, left to right (index.css).
+  const matrix = useReading<HTMLDivElement>();
+  // A /api/stats reply that lands after the matrix has started its reading switches the mempool squares in place:
+  // no replay, so a square never vanishes for its row's delay (rd-late, index.css).
+  const [late, setLate] = useState(false);
+  useLayoutEffect(() => {
+    if (stats !== undefined && matrix.current!.dataset.read === "go") setLate(true);
+  }, [stats, matrix]);
+  return (
+    <section id="chains" aria-labelledby="chains-title" className="bg-ground-alt py-14 md:py-[72px] lg:py-24">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
+        <div className="mx-auto max-w-3xl text-center">
+          <p className="text-sm font-medium text-accent">Coverage</p>
+          <h2 id="chains-title" className="mt-3 text-h2-sm md:text-h2 text-ink">8 chains</h2>
+          <p className="mt-4 text-[17px] md:text-lg leading-relaxed text-secondary">
+            Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is reported as Unknown, never as Safe.
+          </p>
         </div>
 
-        <ul className="mt-6 max-w-3xl space-y-2 text-sm leading-relaxed text-muted">
+        <Orbits />
+
+        <div className="mt-10">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <h3 className="font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-secondary">
+              Chain capabilities
+            </h3>
+            <div
+              role="group"
+              aria-label="Capability cell legend"
+              className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-secondary"
+            >
+              <span className="inline-flex items-center gap-2">
+                <span aria-hidden="true" className="h-3 w-3 rounded-[2px] border border-ink bg-ink" />
+                Filled: runs
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <span aria-hidden="true" className="h-3 w-3 rounded-[2px] border border-dashed border-ink" />
+                Dashed: does not run on this chain
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <span aria-hidden="true" className="h-3 w-3 rounded-[2px] border border-ink bg-ground" />
+                Outline: Unavailable
+              </span>
+            </div>
+          </div>
+
+          <div
+            ref={matrix}
+            data-read="wait"
+            role="region"
+            className="mt-4 overflow-x-auto rounded-lg border border-hairline bg-ground"
+            tabIndex={0}
+            aria-label="Capability matrix by chain"
+          >
+            <table className="w-full table-fixed text-xs sm:text-sm">
+              <colgroup>
+                <col style={{ width: "30%" }} />
+                <col style={{ width: "23.3333%" }} />
+                <col style={{ width: "23.3333%" }} />
+                <col style={{ width: "23.3333%" }} />
+              </colgroup>
+              <caption className="sr-only">
+                Sell simulation and launch scans by supported chain, from the code; public mempool
+                from the monitor's last poll, live from GET /api/stats.
+              </caption>
+              <thead>
+                <tr className="text-left text-[11px] uppercase text-secondary sm:text-xs">
+                  <th scope="col" className="py-3 pl-2 pr-1 text-left font-medium sm:pl-4 sm:pr-3">Chain</th>
+                  <th scope="col" className="px-1.5 py-3 text-left font-medium sm:px-3">Sell simulation</th>
+                  <th scope="col" className="px-1.5 py-3 text-left font-medium sm:px-3">Public mempool</th>
+                  <th scope="col" className="py-3 pl-1.5 pr-2 text-left font-medium sm:pl-3 sm:pr-4">Launch scans</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chains.map((chain, i) => {
+                  const simulation = simulationCell(chain);
+                  const mempool = mempoolCell(chain, stats);
+
+                  return (
+                    <tr
+                      key={chain.chainId}
+                      className="border-t border-hairline"
+                      style={{ "--r": i } as CSSProperties}
+                    >
+                      <th
+                        scope="row"
+                        className="rd-row py-3 pl-2 pr-1 text-left font-medium text-ink sm:pl-4 sm:pr-3"
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5 sm:gap-3">
+                          {chain.logo}
+                          <span className="min-w-0">{chain.name}</span>
+                        </span>
+                      </th>
+                      <td className="px-0.5 py-3 sm:px-3">
+                        <CapabilityCell {...simulation} />
+                      </td>
+                      <td className="px-0.5 py-3 sm:px-3">
+                        <CapabilityCell {...mempool} late={late} />
+                      </td>
+                      <td className="py-3 pl-0.5 pr-1 sm:pl-3 sm:pr-4">
+                        <CapabilityCell {...launchCell(chain)} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="mt-4 text-xs leading-[18px] text-secondary">
+            Sell simulation: from the code, the chain adapters, the configuration GET /api/coverage/{"{chain_id}"} serves.
+            Launch scans: from the code, services/launch_discovery.py, Robinhood Chain only.{" "}
+            {stats === null
+              ? "Public mempool: Unavailable. GET /api/stats did not answer, so no chain is shown as observed."
+              : stats === undefined
+                ? "Public mempool: loading GET /api/stats."
+                : !stats.mempool_chains_observable
+                  ? "Public mempool: Unavailable. GET /api/stats did not report which mempools the monitor read."
+                  : `Public mempool: live from GET /api/stats, the monitor's last poll${fetchedAt ? `, fetched ${fetchedAt.toISOString().slice(11, 16)} UTC` : ""}.`}
+          </p>
+        </div>
+
+        <ul className="mt-6 max-w-3xl space-y-2 text-sm leading-relaxed text-secondary">
           <li>
             <span className="text-ink">Sell simulation:</span> honeypot.is
             simulates a buy and a sell on Ethereum, BNB Chain and Base, and
             ShieldBot runs its own on supported Arbitrum and Robinhood Chain pool
             routes. On Arbitrum those are pools pairing the token with WETH on
-            Uniswap V3, Uniswap V2 or SushiSwap.
-            Where it says None, and for an Arbitrum token with no such pool (for
-            example one traded only on Camelot, or only against stablecoins),
-            honeypot and tax flags come from GoPlus alone, and they read Unknown
-            when GoPlus has no answer.
+            Uniswap V3, Uniswap V2 or SushiSwap. Elsewhere honeypot and tax flags
+            come from GoPlus alone and read Unknown when GoPlus has no answer.
+            <details className="disclose">
+              <summary>Why ShieldBot simulates on Arbitrum itself</summary>
+              <p>
+                ARBROKER (<span className="font-mono text-[13px] break-all">0x8328ffdecbd36294b4fcc50c1c25cde18f4a8b2b</span>):
+                GoPlus reported it as not a honeypot on 29 September 2026;
+                ShieldBot's own simulation found that its sell reverts.
+              </p>
+            </details>
           </li>
           <li>
-            <span className="text-ink">Mempool watch:</span> pending
-            transactions are watched on the 4 chains with a public mempool.
-          </li>
-          <li>
-            <span className="text-ink">Launch scans:</span> new Robinhood
-            Chain tokens are found as their pools open and reported with
-            /launchalerts in Telegram.
-          </li>
-          <li>
-            Version 3.1.0 of the browser extension, on the Chrome Web Store, asks the wallet which chain it is on and sends Robinhood Chain requests to the API for analysis. It has been tested with Rabby; MetaMask testing is still outstanding.
+            Extension 3.1.0 sends Robinhood Chain requests to the API for analysis. It has been tested with Rabby; MetaMask testing is still outstanding.
           </li>
         </ul>
       </div>

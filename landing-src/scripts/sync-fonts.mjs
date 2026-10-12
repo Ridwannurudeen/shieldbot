@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const files = [
-  ["@fontsource-variable/manrope/files/manrope-latin-wght-normal.woff2", "manrope-latin-wght-normal.woff2"],
-  ["@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2", "jetbrains-mono-latin-400-normal.woff2"],
-  ["@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2", "jetbrains-mono-latin-700-normal.woff2"],
+  ["@fontsource/geist/files/geist-latin-400-normal.woff2", "geist-latin-400-normal.woff2"],
+  ["@fontsource/geist/files/geist-latin-500-normal.woff2", "geist-latin-500-normal.woff2"],
+  ["@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2", "ibm-plex-mono-latin-400-normal.woff2"],
 ];
 const out = join(here, "..", "public", "fonts");
 mkdirSync(out, { recursive: true });
