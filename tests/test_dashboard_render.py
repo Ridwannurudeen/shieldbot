@@ -128,7 +128,7 @@ const context = vm.createContext({
   MessageChannel, queueMicrotask, navigator: {userAgent: 'node'}, location: {origin: 'http://dashboard.test'},
   requestAnimationFrame: fn => setTimeout(() => fn(Date.now()), 16), cancelAnimationFrame: id => clearTimeout(id),
   matchMedia: query => ({matches: query === '(prefers-reduced-motion: reduce)'}),
-  getComputedStyle: () => ({}), HTMLIFrameElement: class {},
+  getComputedStyle: () => ({getPropertyValue: () => ''}), HTMLIFrameElement: class {},
   ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
 });
 context.window = context.self = context;

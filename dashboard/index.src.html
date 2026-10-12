@@ -1247,7 +1247,7 @@
       const [updated,   setUpdated]   = useState(null);
       const [health,    setHealth]    = useState('connecting');
       const [chain,     setChain]     = useState('');
-      const [isLight, setIsLight] = useState(() => document.documentElement.dataset.theme === 'light');
+      const [isLight, setIsLight] = useState(() => document.documentElement.getAttribute('data-theme') === 'light');
       const [chartColors, setChartColors] = useState(readChartColors);
       const [statsUpdated, setStatsUpdated] = useState(null);
 
