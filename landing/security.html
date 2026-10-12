@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#0B0B0A" />
+  <script src="/js/theme.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="light" />
-  <meta name="theme-color" content="#FFFFFF" />
   <title>Security — ShieldAI Transaction Firewall</title>
   <meta name="description" content="How to report a security vulnerability in ShieldBot, what is in scope, what to expect after you report, and a note on the September 2026 antivirus flags." />
   <link rel="canonical" href="https://shieldbotsecurity.online/security.html" />
@@ -22,24 +23,8 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
   <link rel="shortcut icon" href="/favicon.png">
+  <link rel="stylesheet" href="/css/tokens.css">
   <style>
-    :root {
-      --ground: #FFFFFF;
-      --ground-alt: #F7F6F2;
-      --ink: #141414;
-      --secondary: #6B6B66;
-      --hairline: #E6E5E1;
-      --hairline-strong: #D6D5D0;
-      --accent: #A3168F;
-      --accent-hover: #8A1279;
-      --accent-tint: #FBEFF9;
-      --block: #C21F30;
-      --block-text: #A81A29;
-      --safe: #1D8A5A;
-      --safe-text: #176E48;
-      --unknown: #8B8B86;
-      color-scheme: light;
-    }
     @font-face {
       font-family: "Geist";
       font-style: normal;
@@ -73,7 +58,6 @@
       line-gap-override: 0%;
     }
     *, *::before, *::after { box-sizing: border-box; }
-    html { color-scheme: light; }
     body {
       min-width: 320px;
       margin: 0;
@@ -83,8 +67,8 @@
       text-rendering: optimizeLegibility;
     }
     a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
-    a:hover { color: var(--accent-hover); }
-    a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    a:hover { color: var(--ink); }
+    a:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
     b, strong, th, h1, h2, h3 { font-weight: 500; }
     code { font: 400 0.92em/1.6 "IBM Plex Mono", ui-monospace, monospace; overflow-wrap: anywhere; }
     p { margin: 0 0 14px; font-size: 15px; overflow-wrap: anywhere; }
@@ -96,9 +80,7 @@
       top: 0;
       z-index: 20;
       border-bottom: 1px solid var(--hairline);
-      background: rgba(255, 255, 255, 0.94);
-      backdrop-filter: saturate(1.4) blur(10px);
-      -webkit-backdrop-filter: saturate(1.4) blur(10px);
+      background: var(--ground);
     }
     .nav-inner {
       width: calc(100% - 32px);
@@ -135,13 +117,31 @@
       white-space: nowrap;
     }
     .nav-links a:hover { color: var(--accent); }
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .theme-toggle:hover { background: var(--ground-alt); }
+    .theme-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+    .theme-icon-moon { display: none; }
+    .theme-toggle[aria-checked="true"] .theme-icon-sun { display: none; }
+    .theme-toggle[aria-checked="true"] .theme-icon-moon { display: block; }
     .nav-cta {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       min-height: 40px;
       padding: 0 16px;
-      border: 1px solid var(--hairline-strong);
+      border: 1px solid var(--edge);
       border-radius: 6px;
       background: var(--ground);
       color: var(--ink);
@@ -186,7 +186,7 @@
     .callout {
       margin: 20px 0;
       padding: 14px 16px;
-      border: 1px solid var(--hairline-strong);
+      border: 1px solid var(--edge);
       border-left: 3px solid var(--accent);
       border-radius: 6px;
       background: var(--accent-tint);
@@ -242,11 +242,11 @@
       vertical-align: middle;
     }
     .badge-glyph { flex: none; }
-    .badge.block { border-color: var(--block); background: var(--block); color: #FFFFFF; }
-    .badge.high { border: 2px solid var(--block); background: var(--ground); color: var(--block-text); }
-    .badge.caution { border-color: var(--unknown); background: var(--ground); color: var(--ink); }
+    .badge.block { border-color: var(--block); background: var(--block); color: var(--on-accent); }
+    .badge.high { border: 2px solid var(--block-edge); background: var(--ground); color: var(--block-text); }
+    .badge.caution { border-color: var(--edge); background: var(--ground); color: var(--ink); }
     .badge.safe { border-color: var(--safe); background: var(--ground); color: var(--safe-text); }
-    .badge.unknown { border: 1px dashed var(--ink); background: var(--unknown); color: var(--ink); }
+    .badge.unknown { border: 1px dashed var(--on-unknown); background: var(--unknown); color: var(--on-unknown); }
     .compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
     .compare-card { min-width: 0; padding: 18px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--ground-alt); }
     .compare-card.shield { border-color: var(--hairline-strong); }
@@ -257,7 +257,7 @@
     .error-state { margin-top: 24px; }
     .not-found-links { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 32px 0 0; padding: 0; list-style: none; }
     .not-found-links li { margin: 0; }
-    .footer { width: 100%; border-top: 1px solid var(--hairline); background: var(--ground); color: var(--ink); }
+    .footer { width: 100%; border-top: 1px solid var(--hairline-strong); background: var(--ground-alt); color: var(--ink); }
     .footer-inner {
       width: calc(100% - 32px);
       max-width: 1152px;
@@ -266,7 +266,7 @@
     }
     .footer-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; }
     .footer-wordmark { color: var(--ink); font-size: 20px; font-weight: 500; text-decoration: none; }
-    .footer-wordmark span:last-child { color: var(--accent); }
+    .footer-wordmark span:last-child { color: var(--ink); }
     .footer-brand p { max-width: 26em; margin: 12px 0 0; color: var(--secondary); font-size: 14px; }
     .footer-brand .founder { color: var(--secondary); font-size: 13px; }
     .footer-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
@@ -296,7 +296,7 @@
     .footer-bottom {
       margin-top: 48px;
       padding: 20px 0;
-      border-top: 1px solid var(--hairline);
+      border-top: 1px solid var(--hairline-strong);
       color: var(--secondary);
       font-size: 12px;
     }
@@ -358,6 +358,7 @@
   </style>
     <script src="/js/plausible-init.js"></script>
     <script async src="/js/script.js"></script>
+    <script src="/js/theme-toggle.js" defer></script>
     <script src="/js/static-nav.js" defer></script>
 </head>
 <body>
@@ -370,9 +371,19 @@
           <a href="/#how-it-works">How it works</a>
           <a href="/#chains">Coverage</a>
           <a href="/#on-chain">On-chain registry</a>
-          <a href="/#agent-security">For builders</a>
+          <a href="/#telegram">Telegram</a>
+          <a href="/safety.html">Safety guide</a>
           <a href="/dashboard">Dashboard</a>
         </div>
+        <button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Light theme" title="Light theme">
+          <svg class="theme-icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+          </svg>
+          <svg class="theme-icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+            <path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z" />
+          </svg>
+        </button>
         <a class="nav-cta" href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Add to Chrome</a>
         <details class="mobile-menu">
           <summary aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu">
@@ -390,7 +401,8 @@
             <a href="/#how-it-works">How it works</a>
             <a href="/#chains">Coverage</a>
             <a href="/#on-chain">On-chain registry</a>
-            <a href="/#agent-security">For builders</a>
+            <a href="/#telegram">Telegram</a>
+            <a href="/safety.html">Safety guide</a>
             <a href="/dashboard">Dashboard</a>
             <a class="nav-cta" href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Add to Chrome</a>
           </div>
@@ -404,10 +416,6 @@
     <div class="hero">
       <h1>Security</h1>
       <div class="hero-meta">Last updated: September 2026 &nbsp;&middot;&nbsp; ShieldBot Security</div>
-    </div>
-
-    <div class="callout">
-      Found a security problem in ShieldBot? Email <a href="mailto:support@shieldbotsecurity.online">support@shieldbotsecurity.online</a> and please keep it private until it is fixed.
     </div>
 
     <h2>1. How to Report a Vulnerability</h2>
@@ -470,6 +478,7 @@
           <section>
             <h2>Product</h2>
             <a href="/#how-it-works">How it works</a>
+            <a href="/safety.html">Safety guide</a>
             <a href="/#on-chain">On-chain check</a>
             <a href="/#chains">Coverage</a>
             <a href="/#agent-security">For builders</a>
