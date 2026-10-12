@@ -4,7 +4,7 @@ import Icon from "./Icon";
 const faqs = [
   {
     q: "What is ShieldBot?",
-    a: "A transaction security tool for EVM chains. The browser extension, listed on the Chrome Web Store as ShieldBot Transaction Firewall, checks transactions before you sign; the Telegram bot, API and MCP server scan contracts on 8 chains, including Robinhood Chain.",
+    a: "A transaction security tool for EVM chains. The browser extension checks transactions before you sign; the Telegram bot, API and MCP server scan contracts on 8 chains, including Robinhood Chain.",
   },
   {
     q: "How does ShieldBot detect rug pulls and scams?",
@@ -20,7 +20,7 @@ const faqs = [
   },
   {
     q: "How do I install ShieldBot, and what does it cost?",
-    a: "Install the extension from the Chrome Web Store, where it is listed as ShieldBot Transaction Firewall. It is free and needs no account, and so is the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report.",
+    a: "Install the extension from the Chrome Web Store. It is free and needs no account, and so is the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report.",
   },
   {
     q: "Does ShieldBot have a token?",
