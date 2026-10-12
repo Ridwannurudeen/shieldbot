@@ -257,7 +257,7 @@
   [data-paused] *::before,
   [data-paused] *::after { animation-play-state: paused !important; }
 
-  .hero-run { transition: opacity 400ms var(--e-draw); animation: vr-legible 400ms var(--e-out) backwards; }
+  .hero-run { transition: opacity 400ms var(--e-draw); }
   [data-out] .hero-run { opacity: 0.6; }
 
   .hero-card { animation: hero-card 1800ms var(--e-out) backwards; }
@@ -358,7 +358,7 @@
    turns back and un-squashes, so it stays upright and crisp; nothing tilts, blurs or fades. With reduced motion the
    planets stand at their starting angles. The only motion on the page that repeats: it runs only while on screen and
    the tab is visible, and its Pause button holds it (data-paused). */
-.orbits { container-type: inline-size; aspect-ratio: 2 / 1; --k: 0.42; --r0: 0.24; --dr: 0.1; }
+.orbits { container-type: inline-size; aspect-ratio: 2 / 1; --k: 0.5; --r0: 0.3; --dr: 0.09; }
 .orbit {
   --r: calc(var(--r0) + var(--o) * var(--dr));
   --a: calc(var(--o) * 137.5deg);
@@ -385,7 +385,7 @@
 }
 .orbit-up svg { width: 32px; height: 32px; }
 @media (max-width: 639px) {
-  .orbits { aspect-ratio: 1; --k: 0.8; --r0: 0.36; --dr: 0.085; }
+  .orbits { aspect-ratio: 1; --k: 0.85; --r0: 0.38; --dr: 0.075; }
   .orbit-up svg { width: 26px; height: 26px; }
 }
 @media (prefers-reduced-motion: no-preference) {
