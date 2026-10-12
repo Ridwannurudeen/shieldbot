@@ -31,7 +31,6 @@ export default function WorkedExample() {
   const steps = reason ? simulations(reason) : null;
   const recordLoading =
     launches === undefined || (!!launch && record === undefined);
-  const score = launch?.scan?.risk_score;
   const reading = useReading<HTMLDivElement>();
 
   return (
@@ -59,10 +58,7 @@ export default function WorkedExample() {
                 {launch.launchpad && utc(launch.block_timestamp)
                   ? `, opened a ${launch.launchpad} pool on ${utc(launch.block_timestamp)}.`
                   : "."}{" "}
-                ShieldBot simulated a sell of it and a plain transfer of it.
-                {launch.scan?.risk_level && typeof score === "number"
-                  ? ` The scan read ${launch.scan.risk_level}, risk ${score}.`
-                  : ""}
+                ShieldBot simulated a sell and a plain transfer.
               </>
             ) : launches === undefined ? (
               "Loading the newest launch ShieldBot blocked on Robinhood Chain…"
@@ -86,17 +82,11 @@ export default function WorkedExample() {
                   publishedAt={record.published_at}
                   evidenceHash={record.evidence_hash}
                   source={
-                    `Live from GET /api/verdict/4663/${short(record.subject)}${fetchedAt ? `, fetched ${utc(fetchedAt.getTime() / 1000)}` : ""}. Anyone can recompute the evidence hash: keccak256 of the served document must equal it.`
+                    `Live from GET /api/verdict/4663/${short(record.subject)}${fetchedAt ? `, fetched ${utc(fetchedAt.getTime() / 1000)}` : ""}. keccak256 of the served document must equal the evidence hash.`
                   }
                   variant="full"
                 />
-                <dl className="mt-3 grid grid-cols-2 gap-3 text-xs leading-[18px] sm:grid-cols-3">
-                  <div className="min-w-0">
-                    <dt className="text-secondary">Token</dt>
-                    <dd className="mt-1 font-mono text-ink [overflow-wrap:anywhere]">
-                      {short(record.subject)}
-                    </dd>
-                  </div>
+                <dl className="mt-3 grid grid-cols-2 gap-3 text-xs leading-[18px]">
                   <div className="min-w-0">
                     <dt className="text-secondary">Registry transaction</dt>
                     <dd className="mt-1 font-mono text-ink [overflow-wrap:anywhere]">
