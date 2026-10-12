@@ -70,7 +70,7 @@ class TransactionScanner:
         self.scam_db = scam_db or ScamDatabase()
         self.ai_analyzer = ai_analyzer
 
-    async def scan_address(self, address: str, chain_id: int = 56) -> Dict:
+    async def scan_address(self, address: str, chain_id: int = 56, *, forensic: bool = True) -> Dict:
         """
         Scan a contract address for security risks.
 
@@ -171,7 +171,7 @@ class TransactionScanner:
         result['confidence'] = compute_confidence(data_sources)
 
         # Generate unified forensic report (replaces separate AI calls)
-        if self.ai_analyzer and self.ai_analyzer.is_available():
+        if forensic and self.ai_analyzer and self.ai_analyzer.is_available():
             try:
                 report = await self.ai_analyzer.generate_forensic_report(
                     address, result, 'contract'

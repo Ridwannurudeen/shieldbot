@@ -47,7 +47,6 @@ async def test_goplus_failure_logs_class_only(caplog, goplus_cache):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method,args", [
-    ("compute_ai_risk_score", (ADDRESS, {})),
     ("generate_forensic_report", (ADDRESS, {}, "contract")),
     ("generate_firewall_report", ({"to": ADDRESS}, {}, "CAUTION", 40)),
 ])
@@ -57,7 +56,6 @@ async def test_ai_provider_failure_logs_class_only(caplog, method, args):
     analyzer.client.messages.create = AsyncMock(
         side_effect=RuntimeError(f"Invalid x-api-key: {TEST_KEY}")
     )
-    analyzer._openai_client = None
     analyzer.model = "test-model"
     caplog.set_level(logging.DEBUG, logger="utils.ai_analyzer")
     assert await getattr(analyzer, method)(*args) is None

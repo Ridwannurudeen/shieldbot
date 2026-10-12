@@ -1486,16 +1486,13 @@ def _token_buttons(address: str, chain_id: int = 56) -> InlineKeyboardMarkup:
 
 
 def format_scan_result(result: dict, chain_id: int) -> str:
-    """Format scan result — use composite report, forensic report, or fallback"""
+    """Format the deterministic scan result with an optional AI summary."""
     if result.get('composite_report'):
         return result['composite_report']
     chain = f"**Chain:** {get_chain_name(chain_id)} ({chain_id})"
     incomplete = is_scan_incomplete(result) or (
         result.get('is_contract') is not False and result.get('is_verified') is None
     )
-    if result.get('forensic_report') and not incomplete:
-        return f"{chain}\n\n{escape_markdown_lines(result['forensic_report'])}"
-
     risk_emoji = {
         'high': '🔴',
         'medium': '🟡',
@@ -1550,39 +1547,21 @@ def format_scan_result(result: dict, chain_id: int) -> str:
         for warning in warnings[:5]:
             response += f"• {escape_untrusted(warning)}\n"
 
-    # AI structured risk score
-    ai_risk = result.get('ai_risk_score')
-    if ai_risk and not incomplete:
-        response += "\n🤖 **AI Risk Assessment:**\n"
-        response += (
-            f"Score: {escape_untrusted(ai_risk.get('risk_score', 'N/A'))}/100 | "
-            f"Level: {escape_untrusted(ai_risk.get('risk_level', 'N/A'))}\n"
-        )
-        findings = ai_risk.get('key_findings', [])
-        for f in findings[:3]:
-            response += f"• {escape_untrusted(f)}\n"
-        rec = ai_risk.get('recommendation', '')
-        if rec:
-            response += f"💡 {escape_untrusted(rec)}\n"
-
-    # Narrative AI analysis
-    if result.get('ai_analysis') and not incomplete:
-        response += f"\n🧠 **AI Analysis:**\n{escape_markdown_lines(result['ai_analysis'][:500])}\n"
+    ai_summary = result.get('forensic_report') or result.get('ai_analysis')
+    if ai_summary and not incomplete:
+        response += f"\n*🧠 AI Analysis:*\n{escape_markdown_lines(ai_summary[:500])}\n"
 
     return response
 
 
 def format_token_result(result: dict, chain_id: int) -> str:
-    """Format token result — use composite report, forensic report, or fallback"""
+    """Format the deterministic token result with an optional AI summary."""
     if result.get('composite_report'):
         return result['composite_report']
     chain = f"**Chain:** {get_chain_name(chain_id)} ({chain_id})"
     incomplete = is_scan_incomplete(result) or any(
         result.get(field) is None for field in ('is_honeypot', 'buy_tax', 'sell_tax')
     ) or result.get('checks', {}).get('can_sell') is None
-    if result.get('forensic_report') and not incomplete:
-        return f"{chain}\n\n{escape_markdown_lines(result['forensic_report'])}"
-
     safety_emoji = {
         'safe': '✅',
         'warning': '⚠️',
@@ -1644,24 +1623,9 @@ def format_token_result(result: dict, chain_id: int) -> str:
     sell_display = 'Unknown' if sell_tax is None else f'{sell_tax}%'
     response += f"\n**Taxes:**\nBuy: {buy_display} | Sell: {sell_display}\n"
 
-    # AI structured risk score
-    ai_risk = result.get('ai_risk_score')
-    if ai_risk and not incomplete:
-        response += "\n🤖 **AI Risk Assessment:**\n"
-        response += (
-            f"Score: {escape_untrusted(ai_risk.get('risk_score', 'N/A'))}/100 | "
-            f"Level: {escape_untrusted(ai_risk.get('risk_level', 'N/A'))}\n"
-        )
-        findings = ai_risk.get('key_findings', [])
-        for f in findings[:3]:
-            response += f"• {escape_untrusted(f)}\n"
-        rec = ai_risk.get('recommendation', '')
-        if rec:
-            response += f"💡 {escape_untrusted(rec)}\n"
-
-    # Narrative AI analysis
-    if result.get('ai_analysis') and not incomplete:
-        response += f"\n🧠 **AI Analysis:**\n{escape_markdown_lines(result['ai_analysis'][:500])}\n"
+    ai_summary = result.get('forensic_report') or result.get('ai_analysis')
+    if ai_summary and not incomplete:
+        response += f"\n*🧠 AI Analysis:*\n{escape_markdown_lines(ai_summary[:500])}\n"
 
     return response
 

@@ -1,5 +1,6 @@
 """Service container — single object holding all shared service instances."""
 
+import asyncio
 import logging
 
 from core.config import Settings
@@ -47,6 +48,7 @@ from services.verdict_publisher import VerdictPublisher
 from services.robinhood_assets import RobinhoodAssets
 
 logger = logging.getLogger(__name__)
+AI_PROBE_TIMEOUT_SECONDS = 10
 
 
 class ServiceContainer:
@@ -261,6 +263,12 @@ class ServiceContainer:
         await self.indexer.start()
         await self.greenfield_service.async_init()
         await self.cache.connect()
+        try:
+            await asyncio.wait_for(self.ai_analyzer.probe(), timeout=AI_PROBE_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+        except Exception as error:
+            logger.info("AI model probe failed: %s", type(error).__name__)
         logger.info("ServiceContainer started")
         logger.info(f"AI Analysis: {'enabled' if self.ai_analyzer.is_available() else 'disabled'}")
         logger.info(f"Greenfield storage: {'enabled' if self.greenfield_service.is_enabled() else 'disabled'}")

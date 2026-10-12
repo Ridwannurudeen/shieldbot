@@ -723,6 +723,26 @@ async def test_legacy_fallback_never_clears_a_transaction_specific_request(cache
     assert (TX_CHECKS_UNAVAILABLE in response["danger_signals"]) is specific
     # The verdict line must not contradict the classification, including the AI's own verdict.
     assert response["verdict"].startswith(response["classification"])
+    api.token_scanner.check_token.assert_awaited_once_with(
+        api.web3_client.to_checksum_address("0x" + "a" * 40), chain_id=56, forensic=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_firewall_address_scanner_skips_a_discarded_forensic_report(cached_firewall_api, monkeypatch):
+    api, services = cached_firewall_api
+    services.registry.run_all.side_effect = RuntimeError("pipeline down")
+    api.web3_client.is_token_contract = AsyncMock(return_value=False)
+    monkeypatch.setattr(api, "_build_fallback_response", MagicMock(return_value={"status": "degraded"}))
+
+    await api.firewall(
+        api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40),
+        SimpleNamespace(headers={}),
+    )
+
+    api.tx_scanner.scan_address.assert_awaited_once_with(
+        api.web3_client.to_checksum_address("0x" + "a" * 40), chain_id=56, forensic=False,
+    )
 
 
 @pytest.mark.asyncio
@@ -903,6 +923,18 @@ async def test_scan_endpoint_preserves_routing_error(routing_error_api):
     with pytest.raises(UnsupportedChainError) as exc:
         await api.scan(api.ScanRequest(address="0x" + "a" * 40))
     assert exc.value is error
+
+
+@pytest.mark.asyncio
+async def test_scan_endpoint_skips_a_discarded_forensic_report(routing_error_api):
+    api, _, scanner, _ = routing_error_api
+    scanner.scan_address.return_value = {"is_contract": False, "coverage": {}, "coverage_reasons": {}}
+
+    await api.scan(api.ScanRequest(address="0x" + "a" * 40))
+
+    scanner.scan_address.assert_awaited_once_with(
+        api.web3_client.to_checksum_address("0x" + "a" * 40), chain_id=56, forensic=False,
+    )
 
 
 @pytest.mark.asyncio

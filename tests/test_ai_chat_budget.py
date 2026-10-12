@@ -36,10 +36,10 @@ async def test_anthropic_usage_counts_input_and_output_tokens():
 
     analyzer = AIAnalyzer.__new__(AIAnalyzer)
     analyzer.client = MagicMock()
-    analyzer._openai_client = None
     analyzer.client.messages.create = AsyncMock(
         return_value=SimpleNamespace(
-            content=[SimpleNamespace(text="reply")],
+            content=[SimpleNamespace(type="text", text="reply")],
+            stop_reason="end_turn",
             usage=SimpleNamespace(input_tokens=1200, output_tokens=300),
         )
     )
@@ -47,22 +47,6 @@ async def test_anthropic_usage_counts_input_and_output_tokens():
         model="m", messages=[{"role": "user", "content": "hi"}]
     ) == ("reply", 1500)
     assert await analyzer.chat(model="m", messages=[{"role": "user", "content": "hi"}]) == "reply"
-
-
-@pytest.mark.asyncio
-async def test_openai_fallback_usage_counts_total_tokens():
-    from utils.ai_analyzer import AIAnalyzer
-
-    analyzer = AIAnalyzer.__new__(AIAnalyzer)
-    analyzer.client = None
-    analyzer._openai_client = MagicMock()
-    analyzer._openai_client.chat.completions.create = AsyncMock(
-        return_value=SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="reply"))],
-            usage=SimpleNamespace(prompt_tokens=900, completion_tokens=100, total_tokens=1000),
-        )
-    )
-    assert await analyzer.chat_with_usage(model="m", messages=[], system="s") == ("reply", 1000)
 
 
 def _advisor(db, budget=10_000, reply=("AI answer", 1500)):

@@ -131,7 +131,7 @@ def test_registered_scan_routes_without_changing_chain(routing_api, chain_id):
     response = client.post("/api/scan", json={"address": ADDRESS, "chainId": chain_id})
     assert response.status_code == 200
     services.tx_scanner.scan_address.assert_awaited_once_with(
-        registry.to_checksum_address(ADDRESS), chain_id=chain_id,
+        registry.to_checksum_address(ADDRESS), chain_id=chain_id, forensic=False,
     )
 
 
