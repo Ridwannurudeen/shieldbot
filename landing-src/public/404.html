@@ -69,8 +69,8 @@
       min-height: 64px;
       margin: 0 auto;
     }
-    .nav-links { display: flex; align-items: center; gap: 24px; }
-    .nav-links a { color: var(--ink); font-size: 15px; text-decoration: none; }
+    .nav-links { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 24px; }
+    .nav-links a { display: inline-flex; align-items: center; min-height: 44px; color: var(--ink); font-size: 15px; text-decoration: none; }
     .theme-toggle {
       display: inline-flex;
       align-items: center;
@@ -107,6 +107,8 @@
     <div class="nav-inner">
       <div class="nav-links">
         <a href="/">Home</a>
+        <a href="/#telegram">Telegram</a>
+        <a href="/safety.html">Safety guide</a>
         <a href="/dashboard">Dashboard</a>
       </div>
       <button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Light theme" title="Light theme">

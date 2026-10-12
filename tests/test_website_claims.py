@@ -27,6 +27,7 @@ def landing_texts() -> dict:
     files = list(COMPONENTS.glob("*.tsx")) + list((LANDING_SRC / "src").glob("*.ts")) + [
         LANDING_SRC / "index.html",
         LANDING_SRC / "public" / "about.html",
+        LANDING_SRC / "public" / "safety.html",
         LANDING_SRC / "scripts" / "gen-og-image.mjs",
     ]
     return {path.name: read(path) for path in files}
@@ -505,6 +506,7 @@ def test_hero_story_shows_the_real_loading_dialog():
         "privacy.html",
         "terms.html",
         "security.html",
+        "safety.html",
         "sitemap.xml",
         ".well-known/security.txt",
         "js/plausible-init.js",
@@ -705,12 +707,14 @@ def test_no_unbacked_marketing_claims_anywhere_on_the_site():
         "landing-src/public/privacy.html": read(LANDING_SRC / "public" / "privacy.html"),
         "landing-src/public/terms.html": read(LANDING_SRC / "public" / "terms.html"),
         "landing-src/public/security.html": read(LANDING_SRC / "public" / "security.html"),
+        "landing-src/public/safety.html": read(LANDING_SRC / "public" / "safety.html"),
         "landing-src/public/404.html": read(LANDING_SRC / "public" / "404.html"),
         "landing-src/public/try/index.html": read(LANDING_SRC / "public" / "try" / "index.html"),
         "landing-src/public/try/harness.js": read(LANDING_SRC / "public" / "try" / "harness.js"),
         "landing/privacy.html": read(ROOT / "landing" / "privacy.html"),
         "landing/terms.html": read(ROOT / "landing" / "terms.html"),
         "landing/security.html": read(ROOT / "landing" / "security.html"),
+        "landing/safety.html": read(ROOT / "landing" / "safety.html"),
         "landing/404.html": read(ROOT / "landing" / "404.html"),
         "landing/try/index.html": read(ROOT / "landing" / "try" / "index.html"),
         "landing/try/harness.js": read(ROOT / "landing" / "try" / "harness.js"),
@@ -745,7 +749,7 @@ def test_fonts_are_self_hosted_and_the_build_copies_them():
 
 
 def test_every_static_page_declares_its_geist_face():
-    for name in ("404.html", "about.html", "privacy.html", "terms.html", "security.html"):
+    for name in ("404.html", "about.html", "privacy.html", "terms.html", "security.html", "safety.html"):
         for page in (LANDING_SRC / "public" / name, ROOT / "landing" / name):
             html = read(page)
             assert not any(line.startswith("+") for line in html.splitlines()), page

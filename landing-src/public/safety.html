@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#0B0B0A" />
+  <script src="/js/theme.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Safety guide · ShieldBot</title>
+  <meta name="description" content="How wallets get drained through approvals, permits, fake sites, honeypot tokens and look-alike addresses, how to lower the risk, what to do after a bad signature, and where ShieldBot helps." />
+  <link rel="canonical" href="https://shieldbotsecurity.online/safety.html" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://shieldbotsecurity.online/safety.html" />
+  <meta property="og:title" content="Safety guide · ShieldBot" />
+  <meta property="og:description" content="How wallets get drained through approvals, permits, fake sites, honeypot tokens and look-alike addresses, how to lower the risk, what to do after a bad signature, and where ShieldBot helps." />
+  <meta property="og:image" content="https://shieldbotsecurity.online/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:site_name" content="ShieldBot" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@shieldbot_" />
+  <meta name="twitter:image" content="https://shieldbotsecurity.online/og-image.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
+  <link rel="shortcut icon" href="/favicon.png">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <style>
+    @font-face {
+      font-family: "Geist";
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: url("/fonts/geist-latin-400-normal.woff2") format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: "Geist";
+      font-style: normal;
+      font-weight: 500;
+      font-display: swap;
+      src: url("/fonts/geist-latin-500-normal.woff2") format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: "IBM Plex Mono";
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: url("/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: "Geist Fallback";
+      src: local("Arial");
+      size-adjust: 134.8%;
+      ascent-override: 74.56%;
+      descent-override: 21.88%;
+      line-gap-override: 0%;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      min-width: 320px;
+      margin: 0;
+      background: var(--ground);
+      color: var(--ink);
+      font: 400 16px/1.65 "Geist", "Geist Fallback", Arial, Helvetica, sans-serif;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+    a:hover { color: var(--ink); }
+    a:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+    b, strong, th, h1, h2, h3 { font-weight: 500; }
+    code { font: 400 0.92em/1.6 "IBM Plex Mono", ui-monospace, monospace; overflow-wrap: anywhere; }
+    p { margin: 0 0 14px; font-size: 15px; overflow-wrap: anywhere; }
+    ul, ol { margin: 8px 0 16px 20px; padding: 0; }
+    li { margin-bottom: 8px; font-size: 15px; overflow-wrap: anywhere; }
+    li strong { color: var(--ink); }
+    .helps { padding-left: 14px; border-left: 2px solid var(--hairline-strong); color: var(--secondary); }
+    .helps strong { color: var(--ink); }
+    .site-nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid var(--hairline);
+      background: var(--ground);
+    }
+    .nav-inner {
+      width: calc(100% - 32px);
+      max-width: 1152px;
+      height: 64px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .wordmark {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .nav-actions { display: flex; align-items: center; gap: 24px; }
+    .nav-links { display: flex; align-items: center; gap: 24px; }
+    .nav-links a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 500;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .nav-links a:hover { color: var(--accent); }
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .theme-toggle:hover { background: var(--ground-alt); }
+    .theme-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+    .theme-icon-moon { display: none; }
+    .theme-toggle[aria-checked="true"] .theme-icon-sun { display: none; }
+    .theme-toggle[aria-checked="true"] .theme-icon-moon { display: block; }
+    .nav-cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      padding: 0 16px;
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+      background: var(--ground);
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 500;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .nav-cta:hover { background: var(--ground-alt); color: var(--ink); }
+    .mobile-menu { display: none; }
+    .mobile-menu summary { cursor: pointer; list-style: none; }
+    .mobile-menu summary::-webkit-details-marker { display: none; }
+    .mobile-panel { display: none; }
+    .wrap {
+      width: calc(100% - 32px);
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 48px 0 88px;
+    }
+    .hero { margin-bottom: 40px; }
+    .hero h1 {
+      margin: 0 0 12px;
+      color: var(--ink);
+      font-size: clamp(32px, 5vw, 40px);
+      font-weight: 500;
+      letter-spacing: -0.03em;
+      line-height: 1.12;
+      overflow-wrap: anywhere;
+    }
+    .hero p { max-width: 600px; font-size: 16px; }
+    .hero-meta { color: var(--secondary); font-size: 13px; }
+    h2 {
+      margin: 40px 0 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--hairline);
+      color: var(--ink);
+      font-size: 21px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+    h3 { margin: 24px 0 8px; color: var(--ink); font-size: 17px; }
+    .callout {
+      margin: 20px 0;
+      padding: 14px 16px;
+      border: 1px solid var(--edge);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px;
+      background: var(--accent-tint);
+      color: var(--ink);
+      font-size: 14px;
+      overflow-wrap: anywhere;
+    }
+    .callout p:last-child { margin-bottom: 0; }
+    .score-table {
+      width: 100%;
+      margin: 16px 0;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    .score-table th {
+      color: var(--secondary);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-align: left;
+      text-transform: uppercase;
+    }
+    .score-table th:first-child, .score-table td:first-child { width: 19%; }
+    .score-table th:nth-child(2), .score-table td:nth-child(2) { width: 30%; }
+    .score-table th:nth-child(3), .score-table td:nth-child(3) { width: 51%; }
+    .score-table th, .score-table td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--hairline);
+      color: var(--ink);
+      font-size: 13px;
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+    .score-table th { color: var(--secondary); }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 4px;
+      max-width: 100%;
+      padding: 3px 8px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      line-height: 1.35;
+      text-align: center;
+      overflow-wrap: normal;
+      word-break: normal;
+      white-space: normal;
+      vertical-align: middle;
+    }
+    .badge-glyph { flex: none; }
+    .badge.block { border-color: var(--block); background: var(--block); color: var(--on-accent); }
+    .badge.high { border: 2px solid var(--block-edge); background: var(--ground); color: var(--block-text); }
+    .badge.caution { border-color: var(--edge); background: var(--ground); color: var(--ink); }
+    .badge.safe { border-color: var(--safe); background: var(--ground); color: var(--safe-text); }
+    .badge.unknown { border: 1px dashed var(--on-unknown); background: var(--unknown); color: var(--on-unknown); }
+    .compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+    .compare-card { min-width: 0; padding: 18px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--ground-alt); }
+    .compare-card.shield { border-color: var(--hairline-strong); }
+    .compare-card ul { margin-left: 16px; }
+    .compare-card li { font-size: 13px; margin-bottom: 6px; }
+    .error-page { max-width: 680px; min-height: 360px; }
+    .error-page .hero { margin-bottom: 0; }
+    .error-state { margin-top: 24px; }
+    .not-found-links { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 32px 0 0; padding: 0; list-style: none; }
+    .not-found-links li { margin: 0; }
+    .footer { width: 100%; border-top: 1px solid var(--hairline-strong); background: var(--ground-alt); color: var(--ink); }
+    .footer-inner {
+      width: calc(100% - 32px);
+      max-width: 1152px;
+      margin: 0 auto;
+      padding: 56px 0 0;
+    }
+    .footer-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; }
+    .footer-wordmark { color: var(--ink); font-size: 20px; font-weight: 500; text-decoration: none; }
+    .footer-wordmark span:last-child { color: var(--ink); }
+    .footer-brand p { max-width: 26em; margin: 12px 0 0; color: var(--secondary); font-size: 14px; }
+    .footer-brand .founder { color: var(--secondary); font-size: 13px; }
+    .footer-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+    .footer-cols section { min-width: 0; }
+    .footer-cols h2 {
+      margin: 0 0 12px;
+      padding: 0;
+      border: 0;
+      color: var(--secondary);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .footer-cols a {
+      display: flex;
+      align-items: center;
+      min-height: 40px;
+      color: var(--ink);
+      font-size: 14px;
+      text-decoration: none;
+      overflow-wrap: anywhere;
+    }
+    .footer-cols a:hover { color: var(--accent); }
+    .footer-cols a.footer-email { overflow-wrap: normal; white-space: normal; }
+    .footer-cols a.footer-email span { min-width: 0; }
+    .footer a:focus-visible { outline-color: var(--accent); }
+    .footer-bottom {
+      margin-top: 48px;
+      padding: 20px 0;
+      border-top: 1px solid var(--hairline-strong);
+      color: var(--secondary);
+      font-size: 12px;
+    }
+    @media (max-width: 1080px) {
+      .nav-links, .nav-cta { display: none; }
+      .mobile-menu { display: block; }
+      .mobile-menu summary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--ink);
+      }
+      .mobile-menu summary:hover { background: var(--ground-alt); }
+      .menu-icon-close { display: none; }
+      .mobile-menu[open] .menu-icon-bars { display: none; }
+      .mobile-menu[open] .menu-icon-close { display: block; }
+      .mobile-panel {
+        position: fixed;
+        top: 64px;
+        right: 0;
+        left: 0;
+        z-index: 21;
+        padding: 8px 16px 16px;
+        border-bottom: 1px solid var(--hairline);
+        background: var(--ground);
+      }
+      .mobile-menu[open] .mobile-panel { display: flex; flex-direction: column; }
+      .mobile-panel a:not(.nav-cta) {
+        display: flex;
+        align-items: center;
+        min-height: 48px;
+        border-bottom: 1px solid var(--hairline);
+        color: var(--ink);
+        font-size: 15px;
+        font-weight: 500;
+        text-decoration: none;
+      }
+      .mobile-panel .nav-cta { display: inline-flex; justify-content: center; margin-top: 14px; }
+      .footer-grid { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+    }
+    @media (max-width: 600px) {
+      .wrap { padding: 36px 0 64px; }
+      .hero { margin-bottom: 32px; }
+      .hero h1 { font-size: 32px; }
+      .score-table th, .score-table td { padding: 8px 4px; font-size: 12px; }
+      .score-table th:nth-child(2), .score-table td:nth-child(2) { padding-left: 3px; padding-right: 3px; }
+      .compare-grid { grid-template-columns: minmax(0, 1fr); }
+      .compare-card { padding: 16px; }
+      .footer-inner { padding-top: 40px; }
+      .footer-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 16px; }
+      .footer-bottom { margin-top: 36px; }
+    }
+  </style>
+    <script src="/js/plausible-init.js"></script>
+    <script async src="/js/script.js"></script>
+    <script src="/js/theme-toggle.js" defer></script>
+    <script src="/js/static-nav.js" defer></script>
+</head>
+<body>
+
+  <nav class="site-nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="wordmark" href="/">ShieldBot</a>
+      <div class="nav-actions">
+        <div class="nav-links">
+          <a href="/#how-it-works">How it works</a>
+          <a href="/#chains">Coverage</a>
+          <a href="/#on-chain">On-chain registry</a>
+          <a href="/#telegram">Telegram</a>
+          <a href="/safety.html">Safety guide</a>
+          <a href="/#agent-security">For builders</a>
+          <a href="/dashboard">Dashboard</a>
+        </div>
+        <button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Light theme" title="Light theme">
+          <svg class="theme-icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+          </svg>
+          <svg class="theme-icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+            <path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z" />
+          </svg>
+        </button>
+        <a class="nav-cta" href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Add to Chrome</a>
+        <details class="mobile-menu">
+          <summary aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu">
+            <svg viewBox="0 0 32 32" width="24" height="24" fill="currentColor" aria-hidden="true">
+              <g class="menu-icon-bars">
+                <path d="M4 6H28V8H4z" />
+                <path d="M4 24H28V26H4z" />
+                <path d="M4 12H28V14H4z" />
+                <path d="M4 18H28V20H4z" />
+              </g>
+              <path class="menu-icon-close" d="M17.4141 16 24 9.4141 22.5859 8 16 14.5859 9.4143 8 8 9.4141 14.5859 16 8 22.5859 9.4143 24 16 17.4141 22.5859 24 24 22.5859 17.4141 16z" />
+            </svg>
+          </summary>
+          <div class="mobile-panel" id="mobile-menu">
+            <a href="/#how-it-works">How it works</a>
+            <a href="/#chains">Coverage</a>
+            <a href="/#on-chain">On-chain registry</a>
+            <a href="/#telegram">Telegram</a>
+            <a href="/safety.html">Safety guide</a>
+            <a href="/#agent-security">For builders</a>
+            <a href="/dashboard">Dashboard</a>
+            <a class="nav-cta" href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Add to Chrome</a>
+          </div>
+        </details>
+      </div>
+    </div>
+  </nav>
+
+  <main class="wrap">
+
+    <div class="hero">
+      <h1>Safety guide</h1>
+      <p>The usual wallet loss is not a break-in. It is a signature the owner gave to the wrong contract or site. This guide covers how that happens, how to lower the risk, and where ShieldBot helps. Nothing removes the risk; this lowers it.</p>
+    </div>
+
+    <h2>1. How drains happen</h2>
+
+    <h3>Unlimited approvals</h3>
+    <p>An approval lets a contract, the spender, move a token out of your wallet. Many sites ask for an unlimited amount so you never approve again. A malicious or later-compromised spender can then take the whole balance at any time.</p>
+    <p class="helps"><strong>ShieldBot:</strong> the extension overlay names the spender and what it grants before you sign, marks an unlimited grant as a danger, and flags one to an unverified spender.</p>
+
+    <h3>Permit and Permit2 signatures</h3>
+    <p>A Permit is an approval given as a signature: no transaction, no gas, and it looks like a harmless sign-in. Once signed, the spender named in it can pull your tokens later. Permit2, a shared contract many apps use, can cover several tokens in one permit.</p>
+    <p class="helps"><strong>ShieldBot:</strong> the signature overlay labels Permit-style typed data as an approval and shows the fields you are signing, spender included, with the API's verdict.</p>
+
+    <h3>setApprovalForAll</h3>
+    <p>For NFTs, one call lets a contract move every item in a collection. A fake mint or claim button often asks for exactly this.</p>
+    <p class="helps"><strong>ShieldBot:</strong> the overlay shows the grant before you sign. <a href="/#telegram"><code>/rescue</code></a> does not list NFT approvals; use your wallet's approval settings or <a href="https://revoke.cash/" target="_blank" rel="noopener noreferrer">revoke.cash</a> for those.</p>
+
+    <h3>Fake front-ends and phishing links</h3>
+    <p>A copy of a real site, reached from a search ad, a direct message or a look-alike domain, asks for a drain behind the real interface. Urgency is the tell: claim within 24 hours, verify now. So is a raw hash to sign (<code>eth_sign</code>), which can be a transaction.</p>
+    <p class="helps"><strong>ShieldBot:</strong> on a known phishing domain the extension shows a red banner, and a Sign-In with Ethereum message whose domain does not match the site is flagged. <code>eth_sign</code> and an unreadable 32-byte message read Block Recommended; unreadable typed data is at least High Risk. A domain not on the phishing lists gets no banner.</p>
+
+    <h3>Honeypot tokens</h3>
+    <p>A token you can buy but not sell, or sell at a tax that takes most of the value. The chart looks healthy because nobody can exit.</p>
+    <p class="helps"><strong>ShieldBot:</strong> <a href="/#telegram"><code>/token</code></a> and the extension run a buy and sell simulation where the chain has one, GoPlus flags elsewhere. When the simulation cannot run, the answer is Unknown, not Safe.</p>
+
+    <h3>Address poisoning</h3>
+    <p>Someone sends dust from an address whose first and last characters match one you use, so you copy theirs from your history next time.</p>
+    <p class="helps"><strong>ShieldBot:</strong> the extension remembers addresses you have sent to through it and warns when a new recipient matches one at both ends but differs in the middle. It cannot know addresses you sent to without it.</p>
+
+    <h2>2. How to protect yourself</h2>
+
+    <h3>Before you sign</h3>
+    <ul>
+      <li>Read the spender and the amount. Approve what you are spending now.</li>
+      <li>A message with a spender, an allowed field or a Permit type is an approval. Treat it as one.</li>
+      <li>Do not sign a message that is a hash or cannot be read.</li>
+      <li>Check the domain in the address bar character by character, and which chain the wallet is on.</li>
+      <li>Unknown is not Safe. If a check did not run, wait, or do not sign.</li>
+    </ul>
+
+    <h3>Wallet hygiene</h3>
+    <ul>
+      <li>Hold on a hardware wallet; use a separate hot wallet with small amounts for new sites and mints.</li>
+      <li>Revoke allowances you no longer use; they do not expire on their own.</li>
+      <li>Bookmark the sites you use and reach them from the bookmark.</li>
+      <li>Verify a contract address against the project's own documentation before you interact.</li>
+      <li>Turn on <a href="/#faq">Strict mode</a> in the extension to hold Block Recommended and Unknown results instead of offering Sign Anyway.</li>
+    </ul>
+
+    <h2>3. If you think you signed something bad</h2>
+    <ol>
+      <li>Revoke first, in your wallet's approval settings or at <a href="https://revoke.cash/" target="_blank" rel="noopener noreferrer">revoke.cash</a>. Even after a loss, a revoke stops the next pull. <a href="/#telegram"><code>/rescue &lt;wallet&gt;</code></a> in Telegram counts ERC-20 allowances on a chain and lists the risky ones; it never revokes for you.</li>
+      <li>Move what is left to a fresh wallet with a new seed phrase. If you typed your seed phrase into a site, do this now; that wallet is gone.</li>
+      <li>Do not sign anything offered as a refund or recovery; follow-up scams target the same people.</li>
+      <li>Report it: <a href="/#telegram"><code>/report &lt;address&gt; &lt;reason&gt;</code></a> in Telegram. Three independent reports mark the address as community-reported in scans. Tell the real project about the fake domain.</li>
+    </ol>
+
+    <h2>4. What ShieldBot does not do</h2>
+    <ul>
+      <li>It warns and lets you decide; outside Strict mode, Sign Anyway stays available.</li>
+      <li>It does not revoke, move funds or send transactions.</li>
+      <li>The overlay sees requests only while installed; <code>/rescue</code> reads ERC-20 allowances from the chain and says when its history window left the scan incomplete.</li>
+      <li>A verified spender can still be malicious; a site not on the phishing lists is not flagged.</li>
+      <li>When a check times out or a source is down, the result is Unknown, never Safe.</li>
+      <li>On Robinhood Chain, <a href="/#on-chain">a guard contract allows only a fresh LOW or MEDIUM record; everything else is denied</a>. Permission is not a safety guarantee: the guard accepts MEDIUM risk.</li>
+    </ul>
+
+    <p>Questions: <a href="mailto:support@shieldbotsecurity.online">support@shieldbotsecurity.online</a>.</p>
+
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="footer-wordmark" href="/"><span>Shield</span><span>Bot</span></a>
+          <p>The security layer that says what it checked.</p>
+          <p class="founder">Built by Ridwan Nurudeen, founder and solo builder.</p>
+        </div>
+        <div class="footer-cols">
+          <section>
+            <h2>Product</h2>
+            <a href="/#how-it-works">How it works</a>
+            <a href="/safety.html">Safety guide</a>
+            <a href="/#on-chain">On-chain check</a>
+            <a href="/#chains">Coverage</a>
+            <a href="/#agent-security">For builders</a>
+            <a href="/dashboard">Threat dashboard</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/about.html">About</a>
+            <a href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Chrome extension</a>
+            <a href="https://api.shieldbotsecurity.online/docs" target="_blank" rel="noopener noreferrer">API docs</a>
+          </section>
+          <section>
+            <h2>Legal</h2>
+            <a href="/privacy.html">Privacy Policy</a>
+            <a href="/terms.html">Terms of Service</a>
+            <a href="/security.html">Security</a>
+          </section>
+          <section>
+            <h2>Community</h2>
+            <a href="https://github.com/Ridwannurudeen/shieldbot" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href="https://t.me/shieldbot_bnb_bot" target="_blank" rel="noopener noreferrer">Telegram bot</a>
+            <a href="https://x.com/shieldbot_" target="_blank" rel="noopener noreferrer">@shieldbot_</a>
+            <a class="footer-email" href="mailto:support@shieldbotsecurity.online"><span>support@<wbr>shieldbotsecurity.online</span></a>
+          </section>
+        </div>
+      </div>
+      <div class="footer-bottom">&#169; 2026 ShieldBot.</div>
+    </div>
+  </footer>
+
+</body>
+</html>
