@@ -1,17 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta name="theme-color" content="#0B0B0A" />
   <meta charset="UTF-8" />
+  <!-- theme.js -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ShieldBot Threat Dashboard</title>
   <meta name="description" content="ShieldBot's public threat dashboard: the token launches blocked on Robinhood Chain with their published verdicts, how often each data provider answered, the newest firewall detections and mempool alerts, and the window each count covers." />
+  <meta name="color-scheme" content="dark light" />
   <link rel="canonical" href="https://api.shieldbotsecurity.online/dashboard" />
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBGMTcyQSIvPjxwYXRoIGQ9Ik0xNiAzTDI3IDcuNVYxNUMyNyAyMS41IDE2IDI5IDE2IDI5QzE2IDI5IDUgMjEuNSA1IDE1VjcuNUwxNiAzWiIgZmlsbD0iIzM0RDM5OSIvPjxwYXRoIGQ9Ik0xNiA3TDIzIDEwVjE1QzIzIDE5IDE2IDI0IDE2IDI0QzE2IDI0IDkgMTkgOSAxNVYxMEwxNiA3WiIgZmlsbD0iIzBGMTcyQSIvPjxwb2x5bGluZSBwb2ludHM9IjEyLDE1IDE1LDE4IDIwLDEzIiBmaWxsPSJub25lIiBzdHJva2U9IiMzNEQzOTkiIHN0cm9rZS13aWR0aD0iMi4yIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBCMEIwQSIvPjxwYXRoIGQ9Ik0xNiA0IDI2IDh2N2MwIDYtNC40IDEwLjctMTAgMTMtNS42LTIuMy0xMC03LTEwLTEzVjhsMTAtNFoiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI0Y3RjZGMiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHBhdGggZD0ibTExIDE2IDMuMiAzLjJMMjEgMTIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI0Y3RjZGMiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" />
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
   <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -20,8 +23,8 @@
       theme: {
         extend: {
           fontFamily: {
-            sans: ['Inter', 'system-ui', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
+            sans: ['Geist', 'system-ui', 'sans-serif'],
+            mono: ['IBM Plex Mono', 'monospace'],
           },
         },
       },
@@ -42,31 +45,83 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
+    :root {
+      color-scheme: dark;
+      --ground: #0B0B0A;
+      --ground-alt: #171716;
+      --panel: #1F1F1E;
+      --ink: #F7F6F2;
+      --on-ink: #0B0B0A;
+      --secondary: #A3A39E;
+      --hairline: #232322;
+      --hairline-strong: #343433;
+      --edge: #767671;
+      --accent: #EA66D8;
+      --accent-fill: #A3168F;
+      --accent-fill-hover: #8A1279;
+      --on-accent: #FFFFFF;
+      --accent-tint: #2B1227;
+      --on-panel: #F7F6F2;
+      --on-panel-2: #A3A39E;
+      --accent-on-panel: #EA66D8;
+      --block-on-panel: #F0756A;
+      --paper: #FFFFFF;
+      --on-paper: #141414;
+      --on-paper-2: #6B6B66;
+      --focus: #EA66D8;
+      --block: #C21F30;
+      --block-edge: #E04556;
+      --block-text: #F0756A;
+      --safe: #2DB47C;
+      --safe-text: #4FCF95;
+      --unknown: #8B8B86;
+      --on-unknown: #141414;
+      --block-on-paper: #A81A29;
+      --shadow: #000000;
+    }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --ground: #FFFFFF;
+      --ground-alt: #F7F6F2;
+      --panel: #141414;
+      --ink: #141414;
+      --on-ink: #FFFFFF;
+      --secondary: #6B6B66;
+      --hairline: #E6E5E1;
+      --hairline-strong: #D6D5D0;
+      --edge: #8B8B86;
+      --accent: #A3168F;
+      --accent-fill: #A3168F;
+      --accent-fill-hover: #8A1279;
+      --on-accent: #FFFFFF;
+      --accent-tint: #FBEFF9;
+      --on-panel: #F7F6F2;
+      --on-panel-2: #8B8B86;
+      --accent-on-panel: #EA66D8;
+      --block-on-panel: #F0756A;
+      --paper: #FFFFFF;
+      --on-paper: #141414;
+      --on-paper-2: #6B6B66;
+      --focus: #A3168F;
+      --block: #C21F30;
+      --block-edge: #C21F30;
+      --block-text: #A81A29;
+      --safe: #1D8A5A;
+      --safe-text: #176E48;
+      --unknown: #8B8B86;
+      --on-unknown: #141414;
+      --block-on-paper: #A81A29;
+      --shadow: #141414;
+    }
+
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      background: #0F172A;
-      font-family: 'Inter', system-ui, sans-serif;
-      color: #F8FAFC;
+      background: var(--ground);
+      font-family: 'Geist', system-ui, sans-serif;
+      color: var(--ink);
       min-height: 100vh;
-    }
-
-    .glass {
-      background: rgba(30, 41, 59, 0.75);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-    }
-
-    /* Skeleton shimmer */
-    @keyframes shimmer {
-      0%   { background-position: -400px 0; }
-      100% { background-position: 400px 0; }
-    }
-    .skeleton {
-      background: linear-gradient(90deg, #1E293B 25%, #2D3F55 50%, #1E293B 75%);
-      background-size: 400px 100%;
-      animation: shimmer 1.4s infinite linear;
-      border-radius: 6px;
     }
 
     /* Toast slide-in */
@@ -83,29 +138,27 @@
     }
     .fade-up { animation: fadeUp 0.2s ease both; }
 
-    /* CRITICAL badge pulse glow */
-    @keyframes critPulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(248,113,113,0.5); }
-      50%       { box-shadow: 0 0 0 5px rgba(248,113,113,0); }
-    }
-    .badge-critical { animation: critPulse 2s infinite; }
-
     /* Reduced motion */
     @media (prefers-reduced-motion: reduce) {
-      .skeleton    { animation: none; background: #1E293B; }
       .toast-anim  { animation: none; }
       .fade-up     { animation: none; }
-      .badge-critical { animation: none; }
       *, *::before, *::after { transition: none !important; }
     }
 
-    :focus-visible { outline: 2px solid #34D399; outline-offset: 2px; }
+    .theme-switch {
+      display:grid; width:36px; height:36px; place-items:center; padding:0;
+      border:1px solid transparent; border-radius:8px; background:transparent; color:var(--ink); cursor:pointer;
+    }
+    .theme-switch:hover { background:var(--ground-alt); }
+    .theme-switch svg { width:16px; height:16px; }
+
+    :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
     /* Scrollbar */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: #1E293B; }
-    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    ::-webkit-scrollbar-track { background: var(--ground-alt); }
+    ::-webkit-scrollbar-thumb { background: var(--hairline-strong); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--edge); }
   </style>
 </head>
 <body>
@@ -141,16 +194,16 @@
 
     // Mirrors utils/chain_info.py.
     const CHAIN_NAMES  = { 56:'BNB', 1:'ETH', 8453:'Base', 42161:'ARB', 137:'Polygon', 10:'OP', 204:'opBNB', 4663:'Robinhood' };
-    const CHAIN_COLORS = { 56:'#F0B90B', 1:'#627EEA', 8453:'#0052FF', 42161:'#28A0F0', 137:'#8247E5', 10:'#FF0420', 204:'#F0B90B', 4663:'#84CC16' };
+    const CHAIN_COLORS = { 56:'secondary', 1:'secondary', 8453:'secondary', 42161:'secondary', 137:'secondary', 10:'secondary', 204:'secondary', 4663:'secondary' };
     const EXPLORERS    = { 56:'https://bscscan.com', 1:'https://etherscan.io', 8453:'https://basescan.org', 42161:'https://arbiscan.io', 137:'https://polygonscan.com', 10:'https://optimistic.etherscan.io', 204:'https://opbnbscan.com', 4663:'https://robinhoodchain.blockscout.com' };
 
     // Opaque badge backgrounds, so a hovered row cannot lower the text's contrast (each is at least 4.5:1).
     const SEV = {
-      CRITICAL: { bg:'#3A1418', text:'#F87171', border:'1px solid #B91C1C' },
-      HIGH:     { bg:'#351A0B', text:'#FB923C', border:'1px solid #9A3412' },
-      MEDIUM:   { bg:'#302708', text:'#FACC15', border:'1px solid #854D0E' },
-      LOW:      { bg:'#0F2E1D', text:'#4ADE80', border:'1px solid #166534' },
-      UNKNOWN:  { bg:'repeating-linear-gradient(135deg, #1E293B 0 6px, #283447 6px 12px)', text:'#E2E8F0', border:'1px dashed #94A3B8' },
+      CRITICAL: { bg:'var(--block)', text:'var(--on-accent)', border:'1px solid var(--block)' },
+      HIGH:     { bg:'var(--ground-alt)', text:'var(--block-text)', border:'2px solid var(--block-edge)' },
+      MEDIUM:   { bg:'var(--ground-alt)', text:'var(--secondary)', border:'1px solid var(--edge)' },
+      LOW:      { bg:'var(--ground-alt)', text:'var(--safe-text)', border:'1px solid var(--safe)' },
+      UNKNOWN:  { bg:'var(--unknown)', text:'var(--on-unknown)', border:'1px dashed var(--on-unknown)' },
     };
 
     // A chart with nothing in it has no peak, so naming an hour or a chain would state a
@@ -199,39 +252,26 @@
     }
 
     function chainDist(threats) {
-      const m = {};
+      const counts = {};
       threats.forEach(t => {
-        const n = CHAIN_NAMES[t.chain_id] || (t.chain_id ? `Chain ${t.chain_id}` : 'Unknown');
-        m[n] = (m[n] || 0) + 1;
+        const id = t.chain_id || 'unknown';
+        const name = CHAIN_NAMES[id] || (id === 'unknown' ? 'Unknown' : `Chain ${id}`);
+        if (!counts[id]) counts[id] = { name, count:0, color:CHAIN_COLORS[id] || 'secondary' };
+        counts[id].count++;
       });
-      return Object.entries(m).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count);
+      return Object.values(counts).sort((a,b) => b.count - a.count);
     }
 
-    // ─── Skeletons ────────────────────────────────────────────────────────────
-    function SkeletonRow() {
-      return (
-        <div className="flex items-center gap-4 p-4 rounded-xl"
-             style={{ background:'#1E293B', border:'1px solid #334155' }}>
-          <div className="skeleton" style={{ height:24, width:64, borderRadius:20 }} />
-          <div className="flex-1 flex flex-col gap-2">
-            <div className="skeleton" style={{ height:14, width:160 }} />
-            <div className="skeleton" style={{ height:11, width:220 }} />
-          </div>
-          <div className="skeleton" style={{ height:12, width:72 }} />
-          <div className="skeleton" style={{ height:12, width:52 }} />
-        </div>
-      );
+    function Loading() {
+      return <div className="text-sm text-secondary">Loading</div>;
     }
 
-    // ─── Toast ────────────────────────────────────────────────────────────────
     function Toast({ msg, type = 'success', onDone }) {
       useEffect(() => { const t = setTimeout(onDone, 2200); return () => clearTimeout(t); }, []);
       const isErr = type === 'error';
-      // On the body, like the Flag dialog: inside the feed's glass panel it was placed against that panel.
       return ReactDOM.createPortal(
-        <div role="status" className="toast-anim fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl"
-              style={{ background:'#1E293B', border:`1px solid ${isErr ? 'rgba(248,113,113,0.35)' : '#334155'}`,
-                       color: isErr ? '#F87171' : '#4ADE80', fontSize:13 }}>
+        <div role="status" className="toast-anim fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-lg"
+             style={{ background:'var(--ground-alt)', border:'1px solid var(--edge)', color:'var(--ink)', fontSize:13 }}>
           {isErr
             ? <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
@@ -308,49 +348,48 @@
           setSending(false);
         }
       }
-      // Rendered on the body: inside the feed's glass panel, whose backdrop-filter contains fixed
-      // elements, the backdrop covered only that panel and the dialog could sit off screen.
+      // Render on the body so the backdrop and dialog cover the full dashboard.
       return ReactDOM.createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center"
-             style={{ background:'rgba(15,23,42,0.85)', backdropFilter:'blur(6px)' }}
+             style={{ background:'color-mix(in srgb, var(--shadow) 72%, transparent)' }}
              onClick={onClose}>
           <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="flag-title"
-               className="glass rounded-2xl p-6 w-full max-w-md mx-4 fade-up"
-               style={{ border:'1px solid #334155' }}
+               className="bg-ground-alt border border-hairline rounded-lg p-6 w-full max-w-md mx-4 fade-up"
+               style={{ border:'1px solid var(--hairline)' }}
                onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <h2 id="flag-title" className="font-semibold text-base" style={{ color:'#F8FAFC' }}>Flag False Positive</h2>
+              <h2 id="flag-title" className="font-semibold text-base" style={{ color:'var(--ink)' }}>Flag False Positive</h2>
               <button onClick={onClose} aria-label="Close"
-                      className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors hover:text-white"
-                      style={{ color:'#94A3B8', fontSize:18, lineHeight:1 }}>✕</button>
+                      className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-ground"
+                      style={{ color:'var(--secondary)', fontSize:18, lineHeight:1 }}>✕</button>
             </div>
 
             <div className="space-y-2 mb-4">
-              <div className="rounded-lg p-3" style={{ background:'#0F172A' }}>
-                <div className="text-xs mb-1" style={{ color:'#94A3B8' }}>Threat Type</div>
-                <div className="text-sm font-medium" style={{ color:'#F8FAFC' }}>{type}</div>
+              <div className="rounded-lg p-3" style={{ background:'var(--ground)' }}>
+                <div className="text-xs mb-1" style={{ color:'var(--secondary)' }}>Threat Type</div>
+                <div className="text-sm font-medium" style={{ color:'var(--ink)' }}>{type}</div>
               </div>
-              <div className="rounded-lg p-3" style={{ background:'#0F172A' }}>
-                <div className="text-xs mb-1" style={{ color:'#94A3B8' }}>{role ? `${role} Address` : 'Address'}</div>
-                 <div className="text-xs font-mono break-all" style={{ color:'#34D399', fontFamily:'JetBrains Mono,monospace' }}>
+              <div className="rounded-lg p-3" style={{ background:'var(--ground)' }}>
+                <div className="text-xs mb-1" style={{ color:'var(--secondary)' }}>{role ? `${role} Address` : 'Address'}</div>
+                 <div className="text-xs font-mono break-all" style={{ color:'var(--ink)', fontFamily:'IBM Plex Mono,monospace' }}>
                   {addr || '—'}
                 </div>
               </div>
             </div>
 
             <textarea className="w-full rounded-lg p-3 text-sm resize-none"
-                      style={{ background:'#0F172A', border:'1px solid #334155', color:'#F8FAFC',
+                      style={{ background:'var(--ground)', border:'1px solid var(--edge)', color:'var(--ink)',
                                height:80, fontFamily:'inherit' }}
                       maxLength={1000} value={reason} onChange={e => setReason(e.target.value)}
                       aria-label="Why is this a false positive?" placeholder="Why is this a false positive?" />
 
-             {failure && <div role="alert" className="text-sm mt-3" style={{ color:'#F87171' }}>{failure}</div>}
+             {failure && <div role="alert" className="text-sm mt-3" style={{ color:'var(--secondary)' }}>{failure}</div>}
 
             <div className="flex gap-2 mt-4">
               <button onClick={onClose} className="flex-1 py-2.5 min-h-[44px] md:min-h-0 rounded-lg text-sm font-medium transition-colors"
-                      style={{ background:'#334155', color:'#E2E8F0' }}>Cancel</button>
+                      style={{ background:'var(--ground-alt)', color:'var(--ink)', border:'1px solid var(--edge)' }}>Cancel</button>
               <button onClick={submit} disabled={!canSend} className="flex-1 py-2.5 min-h-[44px] md:min-h-0 rounded-lg text-sm font-medium transition-colors"
-                      style={{ background:'#34D399', color:'#0F172A', opacity: canSend ? 1 : 0.5 }}>
+                      style={{ background:'var(--accent-fill)', color:'var(--on-accent)', opacity: canSend ? 1 : 0.5 }}>
                 {sending ? 'Sending…' : 'Submit Report'}
               </button>
             </div>
@@ -363,8 +402,8 @@
     // ─── Error Banner ──────────────────────────────────────────────────────────
     function ErrorBanner({ msg, onRetry }) {
       return (
-        <div className="flex items-center justify-between px-4 py-3 rounded-xl mb-3 text-sm"
-             style={{ background:'rgba(248,113,113,0.08)', border:'1px solid rgba(248,113,113,0.25)', color:'#F87171' }}>
+        <div className="flex items-center justify-between px-4 py-3 rounded-lg mb-3 text-sm"
+             style={{ background:'var(--ground-alt)', border:'1px solid var(--edge)', color:'var(--ink)' }}>
           <span className="flex items-center gap-2">
             <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
@@ -372,7 +411,7 @@
             {msg}
           </span>
           <button onClick={onRetry} className="ml-4 px-3 py-1 min-h-[44px] md:min-h-0 rounded-lg text-xs font-semibold transition-colors"
-                  style={{ background:'rgba(248,113,113,0.18)', color:'#F87171' }}>Retry</button>
+                  style={{ background:'var(--ground)', color:'var(--ink)', border:'1px solid var(--edge)' }}>Retry</button>
         </div>
       );
     }
@@ -386,25 +425,22 @@
       const type    = (t.type || t.alert_type || 'unknown').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
       const { addr, role } = threatAddress(t);
       const chain   = CHAIN_NAMES[t.chain_id] || (t.chain_id ? `Chain ${t.chain_id}` : 'Unknown');
-      const cColor  = CHAIN_COLORS[t.chain_id] || '#64748B';
       const exp     = EXPLORERS[t.chain_id] || '';
       const ts      = t.detected_at || t.created_at || 0;
       const note    = (Array.isArray(t.flags) ? t.flags : []).slice(0,2).join(', ') || t.description || '';
 
       return (
-        <div className="rounded-xl p-4 transition-all duration-150"
+        <div className="rounded-lg p-4 transition-all duration-150"
              style={{
-               background: hov ? '#253349' : '#1E293B',
-               border: `1px solid ${hov ? '#475569' : '#334155'}`,
-               transform: hov ? 'translateY(-1px)' : 'translateY(0)',
-               boxShadow: hov ? '0 6px 24px rgba(0,0,0,0.35)' : 'none',
-             }}
+               background: hov ? 'var(--panel)' : 'var(--ground-alt)',
+               border: `1px solid ${hov ? 'var(--secondary)' : 'var(--hairline)'}`,
+                            }}
              onMouseEnter={() => setHov(true)}
              onMouseLeave={() => setHov(false)}>
           <div className="flex flex-wrap md:flex-nowrap items-start gap-3">
 
             {/* Severity badge */}
-            <span className={`shrink-0 text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wide text-center ${sev === 'CRITICAL' ? 'badge-critical' : ''}`}
+            <span className="shrink-0 text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wide text-center"
                   style={{ background:sc.bg, color:sc.text, border:sc.border, minWidth:64 }}>
               {sev}
             </span>
@@ -412,23 +448,23 @@
             {/* Content */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-sm" style={{ color:'#F8FAFC' }}>{type}</span>
+                <span className="font-semibold text-sm" style={{ color:'var(--ink)' }}>{type}</span>
                 <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                      style={{ background:`${cColor}20`, color:'#E2E8F0' }}>{chain}</span>
+                      style={{ background:'var(--ground)', color:'var(--secondary)' }}>{chain}</span>
               </div>
-              {note && <div className="text-xs mt-0.5 [overflow-wrap:anywhere]" style={{ color:'#94A3B8' }}>{note}</div>}
-              <div className="text-xs mt-0.5 font-mono" style={{ color:'#34D399', fontFamily:'JetBrains Mono,monospace' }}>
-                {role && <span style={{ color:'#94A3B8' }}>{role} </span>}{addr ? short(addr) : '—'}
+              {note && <div className="text-xs mt-0.5 [overflow-wrap:anywhere]" style={{ color:'var(--secondary)' }}>{note}</div>}
+              <div className="text-xs mt-0.5 font-mono" style={{ color:'var(--ink)', fontFamily:'IBM Plex Mono,monospace' }}>
+                {role && <span style={{ color:'var(--secondary)' }}>{role} </span>}{addr ? short(addr) : '—'}
               </div>
               {role && t.target_token && (
-                <div className="text-xs mt-0.5 font-mono" style={{ color:'#94A3B8', fontFamily:'JetBrains Mono,monospace' }}>
+                <div className="text-xs mt-0.5 font-mono" style={{ color:'var(--secondary)', fontFamily:'IBM Plex Mono,monospace' }}>
                   Target token {short(t.target_token)}
                 </div>
               )}
             </div>
 
             {/* Time */}
-            <div className="text-xs shrink-0" style={{ color:'#94A3B8' }}>{timeAgo(ts)}</div>
+            <div className="text-xs shrink-0" style={{ color:'var(--secondary)' }}>{timeAgo(ts)}</div>
 
             {/* Quick actions */}
             <div className="flex items-center justify-end gap-1 shrink-0 w-full md:w-auto">
@@ -437,7 +473,7 @@
                 <a href={`${exp}/address/${addr}`} target="_blank" rel="noopener noreferrer"
                    title="Investigate on Explorer" aria-label={`Investigate ${short(addr)} on the explorer`}
                    className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors"
-                   style={{ background:'rgba(52,211,153,0.15)', color:'#34D399' }}
+                   style={{ background:'var(--ground-alt)', color:'var(--secondary)' }}
                    onClick={e => e.stopPropagation()}>
                   <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
@@ -448,7 +484,7 @@
               {addr && (
                 <button title="Copy Address" aria-label={`Copy ${short(addr)} to the clipboard`}
                         className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors"
-                        style={{ background:'rgba(16,185,129,0.15)', color:'#34D399' }}
+                        style={{ background:'var(--ground-alt)', color:'var(--secondary)' }}
                         onClick={() => onCopy(addr)}>
                   <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                     <rect x="9" y="9" width="13" height="13" rx="2"/>
@@ -459,7 +495,7 @@
 
               <button title="Flag False Positive" aria-label={`Flag ${addr ? short(addr) : type} as a false positive`}
                       className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors"
-                       style={{ background:'rgba(250,204,21,0.15)', color:'#FACC15' }}
+                       style={{ background:'var(--ground-alt)', color:'var(--secondary)' }}
                       onClick={() => onFlag(t)}>
                 <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
@@ -495,10 +531,10 @@
     // not none, so only a loaded list is counted.
     function RobinhoodFeedNote({ launches }) {
       return (
-        <div className="text-center py-16 text-sm" style={{ color:'#94A3B8' }}>
+        <div className="text-center py-16 text-sm" style={{ color:'var(--secondary)' }}>
           <div>No extension or agent firewall detections on Robinhood Chain in the current window.</div>
           <a href="#robinhood-chain" className="inline-flex items-center mt-3 min-h-[44px] md:min-h-0 font-semibold"
-             style={{ color:'#34D399' }}>
+             style={{ color:'var(--accent)' }}>
             {launches && launches.length
               ? `See the ${launches.length} blocked ${launches.length === 1 ? 'launch' : 'launches'} in the Robinhood Chain panel ↑`
               : 'Open the Robinhood Chain launches panel ↑'}
@@ -529,15 +565,15 @@
                 <button key={f.val} onClick={() => onChain(f.val)} aria-pressed={active}
                         className="px-3 py-1.5 min-h-[44px] md:min-h-0 rounded-lg text-xs font-medium transition-all duration-150"
                         style={{
-                           background: active ? 'rgba(52,211,153,0.18)' : '#1E293B',
-                           border: `1px solid ${active ? '#34D399' : '#334155'}`,
-                           color: active ? '#34D399' : '#94A3B8',
+                           background: active ? 'var(--accent-tint)' : 'var(--ground-alt)',
+                           border: `1px solid ${active ? 'var(--accent)' : 'var(--edge)'}`,
+                           color: active ? 'var(--ink)' : 'var(--secondary)',
                         }}>
                   {f.label}
                 </button>
               );
             })}
-            <span className="self-center text-xs" style={{ color:'#94A3B8' }}>
+            <span className="self-center text-xs" style={{ color:'var(--secondary)' }}>
               {loading ? 'Loading…' : `${filtered.length} ${filtered.length === 1 ? 'threat' : 'threats'}`}
             </span>
           </div>
@@ -545,19 +581,19 @@
           {error && <ErrorBanner msg={error} onRetry={onRetry} />}
 
           {mempoolUnavailable && (
-            <div className="px-4 py-3 rounded-xl mb-3 text-sm"
-                 style={{ background:'rgba(100,116,139,0.12)', border:'1px solid #334155', color:'#CBD5E1' }}>
+            <div className="px-4 py-3 rounded-lg mb-3 text-sm"
+                 style={{ background:'var(--ground-alt)', border:'1px solid var(--hairline)', color:'var(--secondary)' }}>
               Mempool alerts unavailable: {mempoolUnavailable}
             </div>
           )}
 
           <div tabIndex={0} aria-label="Threat feed" className="flex flex-col gap-2 max-h-none md:max-h-[520px]" style={{ overflowY:'auto', paddingRight:2 }}>
             {loading
-              ? Array(6).fill(0).map((_,i) => <SkeletonRow key={i} />)
+              ? <Loading />
               : filtered.length === 0
                 ? !error && chain === String(LAUNCH_CHAIN)
                   ? <RobinhoodFeedNote launches={launches} />
-                  : <div className="text-center py-16 text-sm" style={{ color:'#94A3B8' }}>
+                  : <div className="text-center py-16 text-sm" style={{ color:'var(--secondary)' }}>
                       {error
                         ? 'Threat data unavailable — check the error above.'
                         : mempoolUnavailable
@@ -584,27 +620,14 @@
 
     // ─── Campaigns Grid ────────────────────────────────────────────────────────
     function CampaignsGrid({ campaigns, loading }) {
-      if (loading) {
-        return (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {Array(3).fill(0).map((_,i) => (
-              <div key={i} className="rounded-xl p-4 flex flex-col gap-3"
-                   style={{ background:'#1E293B', border:'1px solid #334155' }}>
-                <div className="skeleton" style={{ height:14, width:140 }} />
-                <div className="skeleton" style={{ height:11, width:190 }} />
-                <div className="skeleton" style={{ height:6, width:'100%' }} />
-              </div>
-            ))}
-          </div>
-        );
-      }
+      if (loading) return <Loading />;
 
       if (campaigns === null) {
-        return <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>Campaign data unavailable.</div>;
+        return <div className="text-center py-8 text-sm" style={{ color:'var(--secondary)' }}>Campaign data unavailable.</div>;
       }
 
       if (!campaigns.length) {
-        return <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>No campaigns detected.</div>;
+        return <div className="text-center py-8 text-sm" style={{ color:'var(--secondary)' }}>No campaigns detected.</div>;
       }
 
       return (
@@ -615,24 +638,24 @@
             const hi  = scored ? (rp.HIGH || 0) + (rp.CRITICAL || 0) : null;
             const tot = c.contract_count || 1;
             const pct = scored ? Math.min(100, (hi / tot) * 100) : 0;
-            const bar = !scored ? '#475569' : pct > 50 ? '#F87171' : pct > 20 ? '#FACC15' : '#4ADE80';
-            const barText = !scored ? '#94A3B8' : pct > 50 ? '#F87171' : pct > 20 ? '#FACC15' : '#4ADE80';
+            const bar = !scored ? 'var(--secondary)' : pct > 50 ? 'var(--block-text)' : pct > 20 ? 'var(--secondary)' : 'var(--safe-text)';
+            const barText = !scored ? 'var(--secondary)' : pct > 50 ? 'var(--block-text)' : pct > 20 ? 'var(--secondary)' : 'var(--safe-text)';
             return (
-              <div key={i} className="rounded-xl p-4 fade-up"
-                   style={{ background:'#1E293B', border:'1px solid #334155' }}>
+              <div key={i} className="rounded-lg p-4 fade-up"
+                   style={{ background:'var(--ground-alt)', border:'1px solid var(--hairline)' }}>
                 <div className="text-sm font-medium font-mono break-all"
-                     style={{ color:'#34D399', fontFamily:'JetBrains Mono,monospace' }}>
+                     style={{ color:'var(--ink)', fontFamily:'IBM Plex Mono,monospace' }}>
                   {(c.deployer || '').slice(0,10)}…{(c.deployer || '').slice(-6)}
                 </div>
-                <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
+                <div className="text-xs mt-2" style={{ color:'var(--secondary)' }}>
                   {c.contract_count} contracts · {c.chain_count} chain(s)
                   {c.funder ? ` · Funder: ${c.funder.slice(0,8)}…` : ''}
                 </div>
-                <div className="mt-3 rounded-full overflow-hidden" style={{ height:5, background:'#334155' }}>
+                <div className="mt-3 rounded-full overflow-hidden" style={{ height:5, background:'var(--hairline)' }}>
                   <div className="h-full rounded-full transition-all duration-700"
                        style={{ width:`${pct}%`, background:bar }} />
                 </div>
-                <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
+                <div className="text-xs mt-2" style={{ color:'var(--secondary)' }}>
                   {scored
                     ? <><span style={{ color:barText }}>{hi} HIGH/CRIT</span> / {tot} total</>
                     : <span style={{ color:barText }}>Contracts not scored yet</span>}
@@ -645,65 +668,59 @@
     }
 
     // ─── Threat Velocity Chart ────────────────────────────────────────────────
-    function ThreatVelocityChart({ data, loading, unavailable, capped }) {
+    function ThreatVelocityChart({ data, loading, unavailable, capped, colors, asOf }) {
       if (loading) {
         return (
-          <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
-            <h3 className="text-[15px] font-semibold mb-4" style={{ color:'#F8FAFC' }}>Threat Velocity</h3>
-            <div className="flex items-center justify-center text-sm" style={{ height:190, color:'#94A3B8' }}>Loading…</div>
+          <div className="bg-ground-alt border border-hairline rounded-lg p-5">
+            <h3 className="text-[15px] font-semibold mb-4" style={{ color:'var(--ink)' }}>Threat Velocity</h3>
+            <div className="flex items-center justify-center text-sm" style={{ height:190, color:'var(--secondary)' }}>Loading</div>
           </div>
         );
       }
-      // A capped source that reaches back less than 24 h, or not knowably far, would show its unloaded
-      // hours as zero.
       const short = capped.filter(c => c.since === null || c.since > Date.now() / 1000 - 86400);
       const shortNames = short.map(c => c.name).join(' and ');
       if (unavailable || short.length) {
         return (
-          <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
-            <h3 className="text-[15px] font-semibold mb-4" style={{ color:'#F8FAFC' }}>Threat Velocity</h3>
-            <div className="flex items-center justify-center text-sm text-center px-4" style={{ height:190, color:'#94A3B8' }}>
+          <div className="bg-ground-alt border border-hairline rounded-lg p-5">
+            <h3 className="text-[15px] font-semibold mb-4" style={{ color:'var(--ink)' }}>Threat Velocity</h3>
+            <div className="flex items-center justify-center text-sm text-center px-4" style={{ height:190, color:'var(--secondary)' }}>
               {unavailable
                 ? 'Threat feed unavailable.'
                 : short.some(c => c.since === null)
-                  ? `Hidden: some of the newest ${FEED_LIMIT} ${shortNames} carry no time, so how far back they `
+                  ? 'Hidden: some of the newest ' + FEED_LIMIT + ' ' + shortNames + ' carry no time, so how far back they '
                     + 'reach is unknown and an hourly count for the last 24 h could show missing hours as zero.'
-                  : `Hidden: the newest ${FEED_LIMIT} ${shortNames} reach back only to `
-                    + `${new Date(Math.max(...short.map(c => c.since)) * 1000).toLocaleString()}, `
+                  : 'Hidden: the newest ' + FEED_LIMIT + ' ' + shortNames + ' reach back only to '
+                    + new Date(Math.max(...short.map(c => c.since)) * 1000).toLocaleString() + ', '
                     + 'so an hourly count for the last 24 h would show the earlier hours as zero.'}
             </div>
           </div>
         );
       }
       return (
-        <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
+        <div className="bg-ground-alt border border-hairline rounded-lg p-5">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <h3 className="text-[15px] font-semibold" style={{ color:'#F8FAFC' }}>Threat Velocity</h3>
-              <div className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Detections per hour · last 24 h</div>
+              <h3 className="text-[15px] font-semibold" style={{ color:'var(--ink)' }}>Threat Velocity</h3>
+              <div className="text-xs mt-0.5" style={{ color:'var(--secondary)' }}>
+                Detections per hour · last 24 h · as of {asOf ? timeAgo(asOf / 1000) : '—'}
+              </div>
             </div>
             <span className="text-xs px-2.5 py-1 rounded-full font-medium"
-                  style={{ background:'rgba(52,211,153,0.15)', color:'#34D399' }}>Hourly</span>
+                  style={{ background:'var(--ground)', color:'var(--secondary)' }}>Hourly</span>
           </div>
           <ResponsiveContainer width="100%" height={190}>
             <AreaChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }} accessibilityLayer
-                       aria-label={`Detections per hour, last 24 hours, ${peakPhrase(data, point => `at ${point.hour}`)}`}>
-              <defs>
-                <linearGradient id="velGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#34D399" stopOpacity={0.35} />
-                  <stop offset="95%" stopColor="#34D399" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#273349" vertical={false} />
-              <XAxis dataKey="hour" tick={{ fill:'#94A3B8', fontSize:10 }}
+                       aria-label={'Detections per hour, last 24 hours, ' + peakPhrase(data, point => 'at ' + point.hour)}>
+              <CartesianGrid strokeDasharray="3 3" stroke={colors.hairlineStrong} vertical={false} />
+              <XAxis dataKey="hour" tick={{ fill:colors.secondary, fontSize:10 }}
                      tickLine={false} axisLine={false} interval={5} />
-              <YAxis tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-              <Tooltip contentStyle={{ background:'#1E293B', border:'1px solid #334155',
-                                       borderRadius:8, color:'#F8FAFC', fontSize:12 }}
-                       cursor={{ stroke:'#334155', strokeWidth:1 }} />
+              <YAxis tick={{ fill:colors.secondary, fontSize:10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+              <Tooltip contentStyle={{ background:colors.groundAlt, border:'1px solid ' + colors.hairline,
+                                       borderRadius:8, color:colors.ink, fontSize:12 }}
+                       cursor={{ stroke:colors.hairline, strokeWidth:1 }} />
               <Area type="monotone" dataKey="count" name="Threats"
-                    stroke="#34D399" strokeWidth={2} fill="url(#velGrad)" dot={false}
-                    isAnimationActive={!REDUCED_MOTION} />
+                    stroke={colors.secondary} strokeWidth={2} fill={colors.secondary} fillOpacity={0.12} dot={false}
+                    isAnimationActive={false} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -711,52 +728,53 @@
     }
 
     // ─── Chain Distribution Chart ─────────────────────────────────────────────
-    const BAR_COLORS = { BNB:'#F0B90B', ETH:'#627EEA', Base:'#0052FF', ARB:'#28A0F0', Polygon:'#8247E5', OP:'#FF0420', opBNB:'#F0B90B', Robinhood:'#84CC16' };
 
-    function ChainDistributionChart({ data, loading, unavailable, capped }) {
+    function ChainDistributionChart({ data, loading, unavailable, capped, colors, asOf }) {
       const haslive = data.length > 0;
       const cappedNote = capped.length
-        ? ` · ${capped.map(c => c.name).join(' and ')} capped at the newest ${FEED_LIMIT}`
+        ? ' · ' + capped.map(c => c.name).join(' and ') + ' capped at the newest ' + FEED_LIMIT
         : '';
       return (
-        <div className="glass rounded-xl p-5" style={{ border:'1px solid #334155' }}>
+        <div className="bg-ground-alt border border-hairline rounded-lg p-5">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <h3 className="text-[15px] font-semibold" style={{ color:'#F8FAFC' }}>Chain Distribution</h3>
-              <div className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Threats in the loaded feed, by network{cappedNote}</div>
+              <h3 className="text-[15px] font-semibold" style={{ color:'var(--ink)' }}>Chain Distribution</h3>
+              <div className="text-xs mt-0.5" style={{ color:'var(--secondary)' }}>
+                Newest {FEED_LIMIT} per source in the loaded feed · as of {asOf ? timeAgo(asOf / 1000) : '—'}{cappedNote}
+              </div>
             </div>
             {haslive
               ? capped.length
                 ? <span className="text-xs px-2.5 py-1 rounded-full font-medium"
-                        style={{ background:'rgba(100,116,139,0.15)', color:'#94A3B8' }}>Capped</span>
+                        style={{ background:'var(--ground)', color:'var(--secondary)' }}>Capped</span>
                 : <span className="text-xs px-2.5 py-1 rounded-full font-medium"
-                        style={{ background:'rgba(240,185,11,0.15)', color:'#F0B90B' }}>Live</span>
+                        style={{ background:'var(--ground)', color:'var(--secondary)' }}>Live</span>
               : !loading && <span className="text-xs px-2.5 py-1 rounded-full font-medium"
-                      style={{ background:'rgba(100,116,139,0.15)', color:'#94A3B8' }}>No data</span>
+                      style={{ background:'var(--ground)', color:'var(--secondary)' }}>No data</span>
             }
           </div>
           {haslive
             ? <ResponsiveContainer width="100%" height={190}>
                 <BarChart data={data} margin={{ top:4, right:4, left:-20, bottom:0 }} accessibilityLayer
-                          aria-label={`Threat detections by chain, ${peakPhrase(data, point => `on ${point.name}`)}`}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#273349" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false}
+                          aria-label={'Threat detections by chain, ' + peakPhrase(data, point => 'on ' + point.name)}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={colors.hairlineStrong} vertical={false} />
+                  <XAxis dataKey="name" tick={{ fill:colors.secondary, fontSize:10 }} tickLine={false}
                             axisLine={false}
                             interval={data.length > 4 ? 0 : 'preserveEnd'}
                             angle={data.length > 4 ? -30 : 0}
                             textAnchor={data.length > 4 ? 'end' : 'middle'}
                             height={data.length > 4 ? 48 : 30} />
-                  <YAxis tick={{ fill:'#94A3B8', fontSize:10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={{ background:'#1E293B', border:'1px solid #334155',
-                                           borderRadius:8, color:'#F8FAFC', fontSize:12 }}
-                           cursor={{ fill:'rgba(255,255,255,0.03)' }} />
-                  <Bar dataKey="count" name="Threats" radius={[4,4,0,0]} isAnimationActive={!REDUCED_MOTION}>
-                    {data.map((e,i) => <Cell key={i} fill={BAR_COLORS[e.name] || '#34D399'} />)}
+                  <YAxis tick={{ fill:colors.secondary, fontSize:10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                  <Tooltip contentStyle={{ background:colors.groundAlt, border:'1px solid ' + colors.hairline,
+                                           borderRadius:8, color:colors.ink, fontSize:12 }}
+                           cursor={{ fill:colors.hairline }} />
+                  <Bar dataKey="count" name="Threats" radius={[4,4,0,0]} isAnimationActive={false}>
+                    {data.map(d => <Cell key={d.name} fill={colors[d.color]} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            : <div className="flex items-center justify-center text-sm" style={{ height:190, color:'#94A3B8' }}>
-                {loading ? 'Loading…' : unavailable ? 'Threat feed unavailable.' : 'No threats in the current feed.'}
+            : <div className="flex items-center justify-center text-sm" style={{ height:190, color:'var(--secondary)' }}>
+                {loading ? 'Loading' : unavailable ? 'Threat feed unavailable.' : 'No threats in the current feed.'}
               </div>
           }
         </div>
@@ -769,13 +787,13 @@
     // /api/stats instead.
     // Mirrors core/telegram_formatter.py describe_impostor_check, without the per-token detail.
     const IMPOSTOR = {
-      impostor:  { color:'#F87171', label:'Impersonates an official Robinhood Chain token' },
-      collision: { color:'#FACC15', label:'Shares a ticker or name with an official Robinhood Chain token' },
-      official:  { color:'#4ADE80', label:'An official Robinhood Chain token' },
-      none:      { color:'#94A3B8', label:'No match among official Robinhood Chain tokens' },
-      unknown:   { color:'#94A3B8', label:'Check against official tokens unknown' },
+      impostor:  { label:'Impersonates an official Robinhood Chain token' },
+      collision: { label:'Shares a ticker or name with an official Robinhood Chain token' },
+      official:  { label:'An official Robinhood Chain token' },
+      none:      { label:'No match among official Robinhood Chain tokens' },
+      unknown:   { label:'Check against official tokens unknown' },
     };
-    const NOT_CHECKED = { color:'#94A3B8', label:'Not checked against official tokens' };
+    const NOT_CHECKED = { label:'Not checked against official tokens' };
     const LAUNCH_FLAGS = 6;
 
     function LaunchRow({ launch }) {
@@ -785,7 +803,7 @@
       const exp     = EXPLORERS[LAUNCH_CHAIN];
       const outcome = String(scan.outcome || 'unknown').replace(/_/g, ' ');
       return (
-        <div className="rounded-xl p-4" style={{ background:'#1E293B', border:'1px solid #334155' }}>
+        <div className="rounded-lg p-4" style={{ background:'var(--ground-alt)', border:'1px solid var(--hairline)' }}>
           <div className="flex flex-wrap md:flex-nowrap items-start gap-3">
             <span className="shrink-0 text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wide text-center"
                   style={{ background:SEV.CRITICAL.bg, color:SEV.CRITICAL.text, border:SEV.CRITICAL.border, minWidth:64 }}>
@@ -793,36 +811,36 @@
             </span>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-sm" style={{ color:'#F8FAFC' }}>
+                <span className="font-semibold text-sm" style={{ color:'var(--ink)' }}>
                   {scan.risk_score == null ? 'Risk score not recorded' : `Risk ${scan.risk_score}`}
                   {scan.risk_level ? ` · ${scan.risk_level}` : ''}
                 </span>
                 <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                      style={{ background:`${CHAIN_COLORS[LAUNCH_CHAIN]}20`, color:'#E2E8F0' }}>
+                      style={{ background:'var(--ground)', color:'var(--secondary)' }}>
                   {launch.launchpad || 'Launchpad unknown'}
                 </span>
-                <span className="text-xs" style={{ color:'#94A3B8' }}>
+                <span className="text-xs" style={{ color:'var(--secondary)' }}>
                   {scan.status === 'ok' ? 'complete scan' : 'partial scan'}
                 </span>
               </div>
               {flags.length > 0 && (
-                <div className="text-xs mt-0.5 [overflow-wrap:anywhere]" style={{ color:'#94A3B8' }}>
+                <div className="text-xs mt-0.5 [overflow-wrap:anywhere]" style={{ color:'var(--secondary)' }}>
                   {flags.slice(0, LAUNCH_FLAGS).join(', ')}
                   {flags.length > LAUNCH_FLAGS ? ` and ${flags.length - LAUNCH_FLAGS} more` : ''}
                 </div>
               )}
-              <div className="text-xs mt-0.5" style={{ color:check.color }}>{check.label}</div>
-              <div className="text-xs mt-0.5 font-mono" style={{ color:'#34D399', fontFamily:'JetBrains Mono,monospace' }}>
+              <div className="text-xs mt-0.5" style={{ color:'var(--secondary)' }}>{check.label}</div>
+              <div className="text-xs mt-0.5 font-mono" style={{ color:'var(--ink)', fontFamily:'IBM Plex Mono,monospace' }}>
                 {short(launch.token_address)}
               </div>
             </div>
-            <div className="text-xs shrink-0" style={{ color:'#94A3B8' }}>{timeAgo(scan.scanned_at)}</div>
+            <div className="text-xs shrink-0" style={{ color:'var(--secondary)' }}>{timeAgo(scan.scanned_at)}</div>
             <div className="flex items-center justify-end gap-1 shrink-0 w-full md:w-auto">
               {launch.token_address && (
                 <a href={`${exp}/address/${launch.token_address}`} target="_blank" rel="noopener noreferrer"
                    title="Investigate on Explorer" aria-label={`Investigate ${short(launch.token_address)} on the explorer`}
                    className="w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-lg transition-colors"
-                   style={{ background:'rgba(52,211,153,0.15)', color:'#34D399' }}>
+                   style={{ background:'var(--ground-alt)', color:'var(--accent)' }}>
                   <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
                   </svg>
@@ -832,7 +850,7 @@
                 <a href={`${API}${launch.verdict_url}`} target="_blank" rel="noopener noreferrer"
                    aria-label={`Open the verdict for ${short(launch.token_address)}`}
                    className="px-3 min-h-[44px] md:min-h-0 md:h-8 flex items-center rounded-lg text-xs font-semibold transition-colors"
-                   style={{ background:'rgba(52,211,153,0.15)', color:'#34D399' }}>
+                   style={{ background:'var(--ground-alt)', color:'var(--accent)' }}>
                   Verdict ↗
                 </a>
               )}
@@ -842,59 +860,35 @@
       );
     }
 
-    function RobinhoodPanel({ launches, launchesLoading, cursor, onLoadOlder, loadingOlder, olderError, stats, loading }) {
+    function RobinhoodPanel({ launches, launchesLoading, cursor, onLoadOlder, loadingOlder, olderError }) {
       const [expanded, setExpanded] = useState(false);
-      // A null count is unknown, never 0: the stats reply may be missing or predate these fields.
-      const discovery = (stats && stats.launch_discovery) || null;
-      const share     = (discovery && discovery.scanned_share) || null;
-      const day       = share ? `last ${share.window_hours} h` : 'last 24 h';
-      const lag       = discovery && discovery.lag_blocks != null ? discovery.lag_blocks : null;
-      const headAt    = discovery ? discovery.confirmed_head_at : null;
-      const evidence  = stats && stats.evidence_documents ? (stats.evidence_documents[LAUNCH_CHAIN] || 0) : null;
-      const confirmed = stats ? stats.registry_records_confirmed : null;
       const registry  = (
         <a href={`${EXPLORERS[LAUNCH_CHAIN]}/address/${REGISTRY_ADDRESS}`} target="_blank" rel="noopener noreferrer"
-           className="inline-flex items-center min-h-[44px] md:min-h-0" style={{ color:'#34D399' }}>
+           className="inline-flex items-center min-h-[44px] md:min-h-0" style={{ color:'var(--accent)' }}>
           Registry contract ↗
         </a>
       );
-      const tiles = [
-        { label:'Launches Discovered', span:day,                                  value: share ? share.launches : null, color:'#F8FAFC' },
-        { label:'Launches Scanned',    span:day,                                  value: share ? share.scanned : null,  color:'#F8FAFC' },
-        { label:'Discovery Lag',       span:'blocks behind the confirmed head',   value: lag,                           color:'#F8FAFC',
-          note: headAt ? `head read ${timeAgo(headAt)}` : null },
-        { label:'Evidence Documents',  span:'stored verdicts · all time',         value: evidence,                      color:'#F8FAFC' },
-        { label:'Registry Records',    span:'confirmed on-chain',                 value: confirmed,                     color:'#34D399', note: registry },
-      ];
       const shown = launches && !expanded ? launches.slice(0, LAUNCH_VISIBLE) : launches;
       const allShown = Boolean(launches) && shown.length === launches.length;
       return (
-        <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mb-4">
-            {tiles.map(t => (
-              <StatCard key={t.label} label={t.label} span={t.span} value={t.value} color={t.color} loading={loading} note={t.note} />
-            ))}
-          </div>
-          <div className="text-xs mb-3 max-w-[72ch]" style={{ color:'#94A3B8' }}>
-            Launch discovery records the token launches it reads on Robinhood Chain; its lag is how far its cursor
-            is behind the confirmed head it last read. Scans share one small RPC budget and only launches seen
-            trading soon after launch are picked, so launches scanned says how many of the last day's launches
-            have any outcome. Below are the launches the hunter blocked, newest block first, each linking its
-            published verdict where one is recorded. These scans are recorded on each launch and in its verdict,
-            not in the firewall counts below. This list refreshes every {SLOW_REFRESH_MS / 60000} minutes.
+        <div className="bg-ground-alt border border-hairline rounded-lg p-4 md:p-5" style={{ border:'1px solid var(--hairline)' }}>
+
+          <div className="text-xs mb-3 max-w-[72ch]" style={{ color:'var(--secondary)' }}>
+            Blocked token launches on Robinhood Chain, newest first. Each row links to its published verdict when one is recorded.
+            This list refreshes every {SLOW_REFRESH_MS / 60000} minutes. {registry}
           </div>
           <div className="flex flex-col gap-2">
             {launchesLoading
-              ? Array(3).fill(0).map((_,i) => <SkeletonRow key={i} />)
+              ? <Loading />
               : launches === null
-                ? <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>Robinhood Chain launches unavailable.</div>
+                ? <div className="text-center py-8 text-sm" style={{ color:'var(--secondary)' }}>Robinhood Chain launches unavailable.</div>
                 : launches.length === 0
-                  ? <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>No blocked launches on record.</div>
+                  ? <div className="text-center py-8 text-sm" style={{ color:'var(--secondary)' }}>No blocked launches on record.</div>
                   : shown.map(l => <LaunchRow key={l.token_address} launch={l} />)
             }
           </div>
           {launches && launches.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-xs" style={{ color:'#94A3B8' }}>
+            <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-xs" style={{ color:'var(--secondary)' }}>
               <span>
                 {cursor
                   ? `Showing ${shown.length} of the ${launches.length} loaded; more blocked launches are on record.`
@@ -906,21 +900,21 @@
                 {launches.length > LAUNCH_VISIBLE && (
                   <button onClick={() => setExpanded(v => !v)} aria-expanded={expanded}
                           className="px-3 py-1.5 min-h-[44px] md:min-h-0 rounded-lg text-xs font-semibold transition-colors"
-                          style={{ background:'rgba(52,211,153,0.15)', color:'#34D399' }}>
+                          style={{ background:'var(--ground-alt)', color:'var(--ink)' }}>
                     {expanded ? `Show the newest ${LAUNCH_VISIBLE} only` : `Show ${launches.length - LAUNCH_VISIBLE} more`}
                   </button>
                 )}
                 {allShown && cursor && (
                   <button onClick={onLoadOlder} disabled={loadingOlder}
                           className="px-3 py-1.5 min-h-[44px] md:min-h-0 rounded-lg text-xs font-semibold transition-colors"
-                          style={{ background:'rgba(52,211,153,0.15)', color:'#34D399', opacity: loadingOlder ? 0.5 : 1 }}>
+                          style={{ background:'var(--ground-alt)', color:'var(--ink)', opacity: loadingOlder ? 0.5 : 1 }}>
                     {loadingOlder ? 'Loading…' : 'Load older blocked launches'}
                   </button>
                 )}
               </span>
             </div>
           )}
-          {olderError && <div role="alert" className="text-xs mt-2" style={{ color:'#F87171' }}>{olderError}</div>}
+          {olderError && <div role="alert" className="text-xs mt-2" style={{ color:'var(--secondary)' }}>{olderError}</div>}
         </div>
       );
     }
@@ -929,9 +923,9 @@
     // The Unknown ledger (core/unknown_ledger.py) as /api/stats carries it: one count per lookup sent
     // to a data provider. The rows come with the stats reply, so this panel sends no request of its own.
     const LEDGER_OUTCOMES = [
-      { key:'answered', label:'Answered', color:'#4ADE80' },
-      { key:'unknown',  label:'Unknown',  color:SEV.UNKNOWN.text },
-      { key:'failed',   label:'Failed',   color:'#F87171' },
+      { key:'answered', label:'Answered', color:'var(--secondary)' },
+      { key:'unknown',  label:'Unknown',  color:'var(--secondary)' },
+      { key:'failed',   label:'Failed',   color:'var(--secondary)' },
     ];
 
     function ledgerRows(table, name) {
@@ -940,18 +934,18 @@
         .sort((a, b) => b.total - a.total);
     }
 
-    function ProviderAnswersPanel({ stats, loading }) {
+    function ProviderAnswersPanel({ stats, loading, asOf }) {
       const ledger = stats ? stats.unknown_ledger : null;
       if (loading) {
         return (
-          <div className="glass rounded-xl p-4 md:p-5 flex flex-col gap-2" style={{ border:'1px solid #334155' }}>
-            {Array(3).fill(0).map((_,i) => <SkeletonRow key={i} />)}
+          <div className="bg-ground-alt border border-hairline rounded-lg p-4 md:p-5">
+            <Loading />
           </div>
         );
       }
       if (!ledger) {
         return (
-          <div className="glass rounded-xl p-4 md:p-5 text-center py-8 text-sm" style={{ border:'1px solid #334155', color:'#94A3B8' }}>
+          <div className="bg-ground-alt border border-hairline rounded-lg p-4 md:p-5 text-center py-8 text-sm" style={{ border:'1px solid var(--hairline)', color:'var(--secondary)' }}>
             Provider answers unavailable.
           </div>
         );
@@ -960,20 +954,20 @@
       const providers = ledgerRows(ledger.by_provider, key => key);
       const chains    = ledgerRows(ledger.by_chain, key => CHAIN_NAMES[key] || `Chain ${key}`);
       return (
-        <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
-          <div className="text-xs mb-3 max-w-[72ch]" style={{ color:'#94A3B8' }}>
-            Every lookup ShieldBot sent a data provider since {since}, when this count began. Answered is the data
+        <div className="bg-ground-alt border border-hairline rounded-lg p-4 md:p-5" style={{ border:'1px solid var(--hairline)' }}>
+          <div className="text-xs mb-3 max-w-[72ch]" style={{ color:'var(--secondary)' }}>
+            Every lookup ShieldBot sent a data provider since {since}, as of {asOf ? timeAgo(asOf / 1000) : '—'}. Answered is the data
             asked for; unknown is the provider saying it has none for that subject; failed is no usable reply. A
             scan missing an answer reports what it could not check as unknown, never as safe.
             {stats.background_workers_note
               && ' This API process counts its own lookups only; the hunter and the launch watch count in the workers process.'}
           </div>
           {providers.length === 0
-            ? <div className="text-center py-8 text-sm" style={{ color:'#94A3B8' }}>No provider lookups since {since}.</div>
+            ? <div className="text-center py-8 text-sm" style={{ color:'var(--secondary)' }}>No provider lookups since {since}.</div>
             : <div style={{ overflowX:'auto' }}>
                 <table className="w-full text-xs" style={{ borderCollapse:'collapse' }}>
                   <thead>
-                    <tr style={{ color:'#94A3B8' }}>
+                    <tr style={{ color:'var(--secondary)' }}>
                       <th scope="col" className="text-left font-medium py-2 pr-3">Provider</th>
                       {LEDGER_OUTCOMES.map(o => (
                         <th key={o.key} scope="col" className="text-right font-medium py-2 pl-3">{o.label}</th>
@@ -982,12 +976,12 @@
                   </thead>
                   <tbody>
                     {providers.map(row => (
-                      <tr key={row.name} style={{ borderTop:'1px solid #334155' }}>
+                      <tr key={row.name} style={{ borderTop:'1px solid var(--hairline)' }}>
                         <th scope="row" className="text-left font-mono font-medium py-2 pr-3"
-                            style={{ color:'#E2E8F0', fontFamily:'JetBrains Mono,monospace' }}>{row.name}</th>
+                            style={{ color:'var(--ink)', fontFamily:'IBM Plex Mono,monospace' }}>{row.name}</th>
                         {LEDGER_OUTCOMES.map(o => (
                           <td key={o.key} className="text-right tabular-nums py-2 pl-3"
-                              style={{ color: row[o.key] ? o.color : '#64748B' }}>{row[o.key].toLocaleString()}</td>
+                              style={{ color:'var(--secondary)' }}>{row[o.key].toLocaleString()}</td>
                         ))}
                       </tr>
                     ))}
@@ -996,7 +990,7 @@
               </div>
           }
           {chains.length > 0 && (
-            <div className="text-xs mt-3" style={{ color:'#94A3B8' }}>
+            <div className="text-xs mt-3" style={{ color:'var(--secondary)' }}>
               By chain: {chains.map(row =>
                 `${row.name} ${row.answered.toLocaleString()} answered · ${row.unknown.toLocaleString()} unknown · ${row.failed.toLocaleString()} failed`
               ).join('; ')}.
@@ -1009,10 +1003,10 @@
     // ─── Section Label ────────────────────────────────────────────────────────
     function BaseAttestationsPanel({ data }) {
       const riskColor = (label) => {
-        if (label === 'DANGER' || label === 'HIGH') return '#F87171';
-        if (label === 'WARNING' || label === 'MEDIUM') return '#FACC15';
-        if (label === 'SAFE' || label === 'LOW') return '#4ADE80';
-        return '#E2E8F0';
+        if (label === 'DANGER' || label === 'HIGH') return 'var(--block-text)';
+        if (label === 'WARNING' || label === 'MEDIUM') return 'var(--secondary)';
+        if (label === 'SAFE' || label === 'LOW') return 'var(--safe-text)';
+        return 'var(--ink)';
       };
       const chainName = (id) => CHAIN_NAMES[id] || `chain ${id}`;
       const list = data.attestations || [];
@@ -1021,48 +1015,48 @@
       // day and toUTCString is locale-independent, so '2026-09-26' reads '26 Sep 2026' for every viewer.
       const retired = data.retired_on ? new Date(data.retired_on).toUTCString().slice(5, 16) : null;
       return (
-        <div className="glass rounded-xl p-4 md:p-5" style={{ border: '1px solid #334155' }}>
+        <div className="bg-ground-alt border border-hairline rounded-lg p-4 md:p-5" style={{ border: '1px solid var(--hairline)' }}>
           {retired && (
-            <div className="text-xs mb-4" style={{ color: '#CBD5E1' }}>
+            <div className="text-xs mb-4" style={{ color: 'var(--secondary)' }}>
               Retired on {retired}: no new attestations are written; past ones stay on chain.
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-x-3 mb-4 text-xs" style={{ color: '#94A3B8' }}>
+          <div className="flex flex-wrap items-center gap-x-3 mb-4 text-xs" style={{ color: 'var(--secondary)' }}>
             <span>Attestor:&nbsp;
               <a href={`https://basescan.org/address/${data.attestor}`} target="_blank" rel="noreferrer"
                  className="inline-flex items-center min-h-[44px] md:min-h-0"
-                 style={{ color: '#34D399', fontFamily: 'JetBrains Mono,monospace' }}>
+                 style={{ color: 'var(--accent)', fontFamily: 'IBM Plex Mono,monospace' }}>
                 {(data.attestor || '').slice(0, 10)}…{(data.attestor || '').slice(-6)}
               </a>
             </span>
-            <span>Total recent: <strong style={{ color: '#E2E8F0' }}>{summary.total_recent || 0}</strong></span>
+            <span>Total recent: <strong style={{ color: 'var(--ink)' }}>{summary.total_recent || 0}</strong></span>
             <a href={data.explorer || '#'} target="_blank" rel="noreferrer"
-               className="inline-flex items-center min-h-[44px] md:min-h-0" style={{ color: '#34D399' }}>View on EAS Scan ↗</a>
+               className="inline-flex items-center min-h-[44px] md:min-h-0" style={{ color: 'var(--accent)' }}>View on EAS Scan ↗</a>
           </div>
           {list.length === 0 ? (
-            <div className="text-center py-8 text-sm" style={{ color: '#94A3B8' }}>
+            <div className="text-center py-8 text-sm" style={{ color: 'var(--secondary)' }}>
               {retired ? 'No attestations on record.' : 'No attestations yet.'}
             </div>
           ) : (
             <div className="space-y-2">
               {list.map((a) => (
                 <div key={a.uid} className="flex flex-wrap md:flex-nowrap items-center gap-x-3 py-2 px-3 rounded-lg"
-                     style={{ background: '#1E293B', border: '1px solid #334155' }}>
+                     style={{ background: 'var(--ground-alt)', border: '1px solid var(--hairline)' }}>
                   <span className="text-xs font-bold px-2 py-1 rounded"
                         style={{ background: riskColor(a.risk_label) + '22', color: riskColor(a.risk_label) }}>
                     {a.risk_label}
                   </span>
-                  <span className="text-xs" style={{ color: '#94A3B8' }}>{a.scan_type}</span>
-                  <span className="text-xs font-mono" style={{ color: '#E2E8F0' }}>
+                  <span className="text-xs" style={{ color: 'var(--secondary)' }}>{a.scan_type}</span>
+                  <span className="text-xs font-mono" style={{ color: 'var(--ink)' }}>
                     {(a.scanned_address || '').slice(0, 8)}…{(a.scanned_address || '').slice(-6)}
                   </span>
-                  <span className="text-xs" style={{ color: '#94A3B8' }}>via {chainName(a.source_chain_id)}</span>
-                  <span className="text-xs ml-auto" style={{ color: '#94A3B8' }}>
+                  <span className="text-xs" style={{ color: 'var(--secondary)' }}>via {chainName(a.source_chain_id)}</span>
+                  <span className="text-xs ml-auto" style={{ color: 'var(--secondary)' }}>
                     {a.timestamp ? new Date(a.timestamp * 1000).toLocaleString() : ''}
                   </span>
                   <a href={`https://base.easscan.org/attestation/view/${a.uid}`} target="_blank" rel="noreferrer"
                      className="text-xs inline-flex items-center justify-center min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0"
-                     style={{ color: '#34D399' }}>EAS ↗</a>
+                     style={{ color: 'var(--accent)' }}>EAS ↗</a>
                 </div>
               ))}
             </div>
@@ -1076,7 +1070,7 @@
       return (
         <section id={id} style={id ? { scrollMarginTop:96 } : undefined}>
           <h2 className="text-sm font-semibold uppercase tracking-widest mb-3"
-              style={{ color:'#94A3B8' }}>{title}</h2>
+              style={{ color:'var(--secondary)' }}>{title}</h2>
           {children}
         </section>
       );
@@ -1084,196 +1078,122 @@
 
     // ─── Header ───────────────────────────────────────────────────────────────
     const HEALTH = {
-      connecting: { color:'#94A3B8', label:'CONNECTING' },
-      live:       { color:'#4ADE80', label:'LIVE' },
-      degraded:   { color:'#FACC15', label:'PARTIAL DATA' },
-      contracts:  { color:'#FB923C', label:'CONTRACTS ONLY' },
-      offline:    { color:'#F87171', label:'OFFLINE' },
+      connecting: { color:'var(--secondary)', label:'CONNECTING' },
+      live:       { color:'var(--secondary)', label:'LIVE' },
+      degraded:   { color:'var(--secondary)', label:'PARTIAL DATA' },
+      contracts:  { color:'var(--secondary)', label:'CONTRACTS ONLY' },
+      offline:    { color:'var(--secondary)', label:'OFFLINE' },
     };
 
-    function Header({ lastUpdated, health }) {
-      const [glow, setGlow] = useState(true);
-      useEffect(() => {
-        if (REDUCED_MOTION) return;
-        const t = setInterval(() => setGlow(v => !v), 900);
-        return () => clearInterval(t);
-      }, []);
+    function Header({ lastUpdated, health, isLight, onToggleTheme }) {
       const h = HEALTH[health];
 
       return (
-        <header className="glass border-b px-5 md:px-8 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-3 md:sticky md:top-0"
-                style={{ borderColor:'#1E293B', zIndex:40 }}>
+        <header className="bg-ground-alt border border-hairline border-b px-5 md:px-8 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-3 md:sticky md:top-0"
+                style={{ borderColor:'var(--hairline)', zIndex:40 }}>
           <div>
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="flex items-center gap-3">
-                <span className="text-lg font-bold" style={{ color:'#F8FAFC' }}>
-                  <span style={{ color:'#34D399' }}>Shield</span>Bot
-                </span>{' '}
-                <span className="text-sm" style={{ color:'#94A3B8' }}>Threat Dashboard</span>
+                <span className="text-lg font-bold" style={{ color:'var(--ink)' }}>ShieldBot</span>
+                <span className="text-sm" style={{ color:'var(--secondary)' }}>Threat Dashboard</span>
               </h1>
               <div className="flex items-center gap-1.5">
-                <div style={{
-                  width:8, height:8, borderRadius:'50%', background:h.color,
-                  boxShadow: glow && health === 'live' ? `0 0 8px ${h.color}` : 'none',
-                  transition:'box-shadow 0.4s',
-                }} />
+                <div style={{ width:8, height:8, borderRadius:'50%', background:h.color }} />
                 <span className="text-xs font-semibold" style={{ color:h.color }}>{h.label}</span>
               </div>
             </div>
-            <div className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>
+            <div className="text-xs mt-0.5" style={{ color:'var(--secondary)' }}>
               Robinhood Chain launch scans, firewall detections and mempool alerts · refreshes every {REFRESH_MS / 1000} seconds, launches and campaigns every {SLOW_REFRESH_MS / 60000} minutes
             </div>
           </div>
           <div className="flex items-center gap-4">
             <a href="https://shieldbotsecurity.online" className="flex items-center min-h-[44px] md:min-h-0"
-               style={{ color:'#94A3B8', fontSize:'0.75rem', textDecoration:'none', gap:'0.25rem' }}
-               onMouseOver={e => e.currentTarget.style.color='#E2E8F0'}
-               onMouseOut={e => e.currentTarget.style.color='#94A3B8'}>
+               style={{ color:'var(--secondary)', fontSize:'0.75rem', textDecoration:'none', gap:'0.25rem' }}
+               onMouseOver={e => e.currentTarget.style.color='var(--ink)'}
+               onMouseOut={e => e.currentTarget.style.color='var(--secondary)'}>
               ← Home
             </a>
             <a href="mailto:support@shieldbotsecurity.online" className="flex items-center min-h-[44px] md:min-h-0"
-               style={{ color:'#94A3B8', fontSize:'0.75rem', textDecoration:'none' }}
-               onMouseOver={e => e.currentTarget.style.color='#E2E8F0'}
-               onMouseOut={e => e.currentTarget.style.color='#94A3B8'}>
+               style={{ color:'var(--secondary)', fontSize:'0.75rem', textDecoration:'none' }}
+               onMouseOver={e => e.currentTarget.style.color='var(--ink)'}
+               onMouseOut={e => e.currentTarget.style.color='var(--secondary)'}>
               Support
             </a>
-            <div className="text-xs font-mono" style={{ color:'#94A3B8', fontFamily:'JetBrains Mono,monospace' }}>
-              {lastUpdated ? `↻ ${timeAgo(lastUpdated / 1000)}` : 'Connecting…'}
+            <div className="text-xs font-mono" style={{ color:'var(--secondary)', fontFamily:'IBM Plex Mono,monospace' }}>
+              {lastUpdated ? '↻ ' + timeAgo(lastUpdated / 1000) : 'Connecting…'}
             </div>
+            <button className="theme-switch" type="button" role="switch" aria-checked={isLight}
+                    aria-label="Light theme" title="Light theme" onClick={onToggleTheme}>
+              {isLight
+                ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z" />
+                  </svg>
+                : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4" />
+                    <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l-1.42-1.42m11.3-11.3 1.42-1.42" />
+                  </svg>
+              }
+            </button>
           </div>
         </header>
       );
     }
 
-    // ─── Firewall and Mempool Stats ────────────────────────────────────────────
-    // Every count on the page comes from /api/stats; each says the window it covers. The firewall
-    // counts read the contract scores the extension and agent firewalls write; the mempool counts are
-    // the monitor's in-memory counters.
-    const FIREWALL_ITEMS = [
-      { key:'contracts_scanned',        label:'Contracts Scanned',    span:'all time · extension and agent firewalls',  color:'#F8FAFC' },
-      { key:'contracts_scanned_24h',    label:'Contracts Scanned',    span:'last 24 h · extension and agent firewalls', color:'#F8FAFC' },
-      { key:'threats_detected',         label:'Contract Threats',     span:'on record', color:'#F87171' },
-      { key:'threats_detected_24h',     label:'Contract Threats',     span:'last 24 h', color:'#F87171' },
-      { key:'transactions_blocked',     label:'Transactions Blocked', span:'all time',  color:'#F87171' },
-      { key:'transactions_blocked_24h', label:'Transactions Blocked', span:'last 24 h', color:'#F87171' },
+    // Overview counters keep their windows and sources together.
+    const OVERVIEW_ITEMS = [
+      { key:'contracts_scanned_24h', label:'Contracts Scanned', span:'last 24 h - extension and agent firewalls' },
+      { key:'threats_detected_24h', label:'Contract Threats', span:'last 24 h' },
+      { key:'transactions_blocked_24h', label:'Transactions Blocked', span:'last 24 h' },
+      { key:'transactions_monitored', label:'Transactions Monitored', span:'since monitor start' },
     ];
 
-    const MEMPOOL_ITEMS = [
-      { key:'transactions_monitored', label:'Transactions Monitored', span:'since monitor start', color:'#F8FAFC' },
-      { key:'sandwiches_caught',      label:'Sandwich Attacks Caught',span:'since monitor start', color:'#FB923C' },
-      { key:'suspicious_approvals',   label:'Suspicious Approvals',   span:'since monitor start', color:'#FACC15' },
-      { key:'chains_protected',       label:'Mempool Chains Watched', span:'last poll',           color:'#34D399' },
-    ];
-
-    function useCountUp(target, duration = 1200) {
-      const [display, setDisplay] = useState(0);
-      const shown = useRef(0);
-      useEffect(() => {
-        if (!target || REDUCED_MOTION) { shown.current = target; setDisplay(target); return; }
-        const start = Date.now();
-        const from = shown.current;
-        let frame;
-        const tick = () => {
-          const elapsed = Date.now() - start;
-          const progress = Math.min(elapsed / duration, 1);
-          const eased = 1 - Math.pow(1 - progress, 3);
-          const next = Math.round(from + (target - from) * eased);
-          shown.current = next;
-          setDisplay(next);
-          if (progress < 1) frame = requestAnimationFrame(tick);
-        };
-        frame = requestAnimationFrame(tick);
-        return () => cancelAnimationFrame(frame);
-      }, [target]);
-      return display;
-    }
-
-    // The counts the mempool monitor keeps in memory.
-    const MEMPOOL_KEYS = ['transactions_monitored', 'sandwiches_caught', 'suspicious_approvals', 'chains_protected'];
-
-    // A null count is unknown, never 0. A background_workers_note says the mempool monitor runs in a separate
-    // process this API does not read, so its counts are Unavailable; any other null count is a dash.
-    function missingText(stats, key) {
-      return stats && stats.background_workers_note && MEMPOOL_KEYS.includes(key) ? 'Unavailable' : '—';
-    }
-
-    function StatCard({ label, span, value, color, loading, note, missing = '—' }) {
-      const display = useCountUp(loading || value == null ? 0 : value);
+    function StatCard({ label, span, value, color, loading, asOf, missing = '—' }) {
+      const display = value == null ? 0 : value;
       return (
-        <div className="glass rounded-xl p-4 fade-up flex flex-col gap-1 text-center"
-             style={{ border:'1px solid #1E293B', minWidth:0 }}>
+        <div className="bg-ground-alt border border-hairline rounded-lg p-4 fade-up flex flex-col gap-1 text-center"
+             style={{ border:'1px solid var(--hairline)', minWidth:0 }}>
           {loading
-            ? <div className="skeleton mx-auto" style={{ height:28, width:72 }} />
+            ? <div className="text-sm text-secondary">Loading</div>
              : <div className={`${value == null ? 'text-base' : 'text-2xl'} font-bold leading-none tabular-nums`}
-                   style={{ color: value == null ? '#94A3B8' : color }}>
+                   style={{ color: value == null ? 'var(--secondary)' : color }}>
                 {value == null ? missing : display.toLocaleString()}
               </div>
           }
-          <div className="text-xs font-medium mt-1" style={{ color:'#CBD5E1' }}>{label}</div>
-          <div className="text-xs" style={{ color:'#94A3B8' }}>{span}</div>
-          {note && <div className="text-xs" style={{ color:'#94A3B8' }}>{note}</div>}
+          <div className="text-xs font-medium mt-1" style={{ color:'var(--secondary)' }}>{label}</div>
+          <div className="text-xs" style={{ color:'var(--secondary)' }}>{span}</div>
+          <div className="text-xs" style={{ color:'var(--secondary)' }}>as of {asOf ? timeAgo(asOf / 1000) : '—'}</div>
         </div>
       );
     }
 
-    function FirewallStatsBar({ stats, loading }) {
-      const dashed = stats && FIREWALL_ITEMS.some(s => stats[s.key] == null);
-      const footnote = stats === null
-        ? 'Firewall statistics are unavailable right now.'
-        : 'Both contracts scanned counts cover the extension and agent firewalls only; Telegram, /api/scan and '
-          + 'Robinhood Chain launch scans are not in them. A contract threat is a contract those firewalls scored '
-          + 'high risk. On record means its latest score, since a rescan replaces it; it counts in the last 24 h '
-          + 'when that scan falls in the window.'
-          + (dashed ? ' A dash means that source is not reporting right now.' : '');
-      return (
-        <div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-            {FIREWALL_ITEMS.map(s => (
-              <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
-                        color={s.color} loading={loading} />
-            ))}
-          </div>
-          {!loading && (
-            <div className="text-xs mt-2 max-w-[72ch]" style={{ color:'#94A3B8' }}>{footnote}</div>
-          )}
-        </div>
-      );
-    }
-
-    function MempoolStatsBar({ stats, loading }) {
+    function OverviewStats({ stats, loading, asOf }) {
       const since = stats && stats.mempool_counting_since;
-      const dashed = stats && MEMPOOL_ITEMS.some(s => stats[s.key] == null && missingText(stats, s.key) === '—');
-      const footnote = stats === null
-        ? 'Mempool statistics are unavailable right now.'
-        : [
-            stats.background_workers_note
-              && 'Unavailable: the mempool monitor runs in a separate process that this API does not read, so its counts are unknown here, not zero.',
-            since
-              ? `Transactions monitored, sandwich attacks and suspicious approvals are counted since ${new Date(since * 1000).toLocaleString()}, when the mempool monitor last started.`
-              : dashed && 'A dash means that source is not reporting right now.',
-          ].filter(Boolean).join(' ');
-      // A monitored chain whose mempool could not be read is Unknown; it is not counted as watched.
-      const unobservable = (stats && stats.mempool_chains_unobservable) || [];
-      const mempoolNote = unobservable.length
-        ? 'Unknown: ' + unobservable.map(id => CHAIN_NAMES[id] || `Chain ${id}`).join(', ')
-        : null;
+      const unavailable = Boolean(stats && stats.background_workers_note);
+      const missing = key => key === 'transactions_monitored' && unavailable ? 'Unavailable' : '—';
       return (
         <div>
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-            {MEMPOOL_ITEMS.map(s => (
-              <StatCard key={s.key} label={s.label} span={s.span} value={stats ? stats[s.key] : null}
-                        color={s.color} loading={loading} missing={missingText(stats, s.key)}
-                        note={s.key === 'chains_protected' ? mempoolNote : null} />
+            {OVERVIEW_ITEMS.map(item => (
+              <StatCard key={item.key} label={item.label} span={item.span}
+                        value={stats ? stats[item.key] : null} color="var(--ink)"
+                        loading={loading} asOf={asOf} missing={missing(item.key)} />
             ))}
           </div>
-          {!loading && footnote && (
-            <div className="text-xs mt-2 max-w-[72ch]" style={{ color:'#94A3B8' }}>{footnote}</div>
+          {!loading && (
+            <div className="text-xs mt-3 max-w-[80ch]" style={{ color:'var(--secondary)' }}>
+              Contracts scanned covers the extension and agent firewalls only; Telegram, /api/scan and Robinhood Chain launch scans are not included.
+              A contract threat is its latest high-risk score; a rescan replaces the previous score. A last-24-hour count uses the scan time.
+              {since && ` Transactions monitored are counted since ${new Date(since * 1000).toLocaleString()}.`}
+              {unavailable && ' The mempool monitor runs in a separate process this API cannot read, so its count is unavailable, not zero.'}
+              {stats === null && ' Statistics are unavailable right now.'}
+            </div>
           )}
         </div>
       );
     }
 
-    // ─── App ──────────────────────────────────────────────────────────────────
+    // Application root follows.
+
     const NO_ATTESTATIONS = { available: false, attestations: [], summary: {} };
 
     // Rejects on any non-2xx status, so an error body is never shown as data.
@@ -1292,6 +1212,19 @@
     function mergeLaunches(newer, older) {
       const seen = new Set(newer.map(l => l.token_address));
       return newer.concat(older.filter(l => !seen.has(l.token_address)));
+    }
+
+    function readChartColors() {
+      const root = getComputedStyle(document.documentElement);
+      return {
+        accent: root.getPropertyValue('--accent').trim(),
+        accentTint: root.getPropertyValue('--accent-tint').trim(),
+        groundAlt: root.getPropertyValue('--ground-alt').trim(),
+        hairline: root.getPropertyValue('--hairline').trim(),
+        hairlineStrong: root.getPropertyValue('--hairline-strong').trim(),
+        ink: root.getPropertyValue('--ink').trim(),
+        secondary: root.getPropertyValue('--secondary').trim(),
+      };
     }
 
     function App() {
@@ -1314,6 +1247,19 @@
       const [updated,   setUpdated]   = useState(null);
       const [health,    setHealth]    = useState('connecting');
       const [chain,     setChain]     = useState('');
+      const [isLight, setIsLight] = useState(() => document.documentElement.dataset.theme === 'light');
+      const [chartColors, setChartColors] = useState(readChartColors);
+      const [statsUpdated, setStatsUpdated] = useState(null);
+
+      const toggleTheme = () => {
+        const light = !isLight;
+        if (light) document.documentElement.setAttribute('data-theme', 'light');
+        else document.documentElement.removeAttribute('data-theme');
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', light ? '#FFFFFF' : '#0B0B0A');
+        localStorage.setItem('sb-theme', light ? 'light' : 'dark');
+        setIsLight(light);
+        setChartColors(readChartColors());
+      };
 
       const [baseAttestations, setBaseAttestations] = useState(NO_ATTESTATIONS);
 
@@ -1353,6 +1299,7 @@
           setMempoolUnavailable(mempoolReason);
 
           setStats(p.status === 'fulfilled' ? p.value : null);
+          if (p.status === 'fulfilled') setStatsUpdated(Date.now());
           setBaseAttestations(b.status === 'fulfilled' ? b.value : NO_ATTESTATIONS);
 
           // A mempool the API runs in a separate process on purpose (background_workers_note) is a steady
@@ -1433,36 +1380,31 @@
       const chainData    = useMemo(() => chainDist(threats),        [threats]);
 
       return (
-        <div style={{ minHeight:'100vh', background:'#0F172A' }}>
-          <Header lastUpdated={updated} health={shownHealth} />
+        <div style={{ minHeight:'100vh', background:'var(--ground)' }}>
+          <Header lastUpdated={updated} health={shownHealth} isLight={isLight} onToggleTheme={toggleTheme} />
 
           <main className="px-4 md:px-8 py-6 space-y-8 mx-auto" style={{ maxWidth:1600 }}>
 
             <Section id="robinhood-chain" title="Robinhood Chain">
               <RobinhoodPanel launches={launches} launchesLoading={slowLoading} cursor={launchCursor}
-                              onLoadOlder={loadOlder} loadingOlder={loadingOlder} olderError={olderError}
-                              stats={stats} loading={loading} />
+                              onLoadOlder={loadOlder} loadingOlder={loadingOlder} olderError={olderError} />
+            </Section>
+
+            <Section title="Overview">
+              <OverviewStats stats={stats} loading={loading} asOf={statsUpdated} />
             </Section>
 
             <Section title="Provider Answers">
-              <ProviderAnswersPanel stats={stats} loading={loading} />
-            </Section>
-
-            <Section title="Firewall Scans">
-              <FirewallStatsBar stats={stats} loading={loading} />
-            </Section>
-
-            <Section title="Mempool Monitor">
-              <MempoolStatsBar stats={stats} loading={loading} />
+              <ProviderAnswersPanel stats={stats} loading={loading} asOf={statsUpdated} />
             </Section>
 
             <Section title="Live Threat Feed">
-              <div className="glass rounded-xl p-4 md:p-5" style={{ border:'1px solid #334155' }}>
-                <div className="text-xs mb-3" style={{ color:'#94A3B8' }}>
+              <div className="bg-ground-alt border border-hairline rounded-lg p-4 md:p-5" style={{ border:'1px solid var(--hairline)' }}>
+                <div className="text-xs mb-3" style={{ color:'var(--secondary)' }}>
                   The newest {FEED_LIMIT} contract detections and the newest {FEED_LIMIT} mempool alerts, so the
                   feed and the charts below it are not counts. Contract detections come from the extension and
                   agent firewalls; Robinhood Chain launch scans are in the{' '}
-                  <a href="#robinhood-chain" style={{ color:'#34D399' }}>Robinhood Chain panel</a>.
+                  <a href="#robinhood-chain" style={{ color:'var(--accent)' }}>Robinhood Chain panel</a>.
                 </div>
                 <ThreatLogTable
                   threats={threats} launches={launches} loading={loading} error={error} mempoolUnavailable={mempoolUnavailable}
@@ -1473,15 +1415,15 @@
 
             <Section title="Feed Analytics">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <ThreatVelocityChart data={velocityData} loading={loading} unavailable={!feedOk} capped={capped} />
-                <ChainDistributionChart data={chainData} loading={loading} unavailable={!feedOk} capped={capped} />
+                <ThreatVelocityChart data={velocityData} loading={loading} unavailable={!feedOk} capped={capped} colors={chartColors} asOf={updated} />
+                <ChainDistributionChart data={chainData} loading={loading} unavailable={!feedOk} capped={capped} colors={chartColors} asOf={updated} />
               </div>
             </Section>
 
             <Section title="Top Campaigns">
               <CampaignsGrid campaigns={campaigns} loading={slowLoading} />
               {!slowLoading && (
-                <div className="text-xs mt-2" style={{ color:'#94A3B8' }}>
+                <div className="text-xs mt-2" style={{ color:'var(--secondary)' }}>
                   Deployers with the most contracts on record. This list refreshes every {SLOW_REFRESH_MS / 60000} minutes.
                 </div>
               )}

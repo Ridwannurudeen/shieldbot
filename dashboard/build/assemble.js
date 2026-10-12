@@ -19,6 +19,15 @@ const vendor = (p) => path.join(here, "node_modules", p);
 
 let html = fs.readFileSync(SRC, "utf8");
 
+const themeMarker = "<!-- theme.js -->";
+if (!html.includes(themeMarker))
+  throw new Error("theme.js marker not found in index.src.html");
+const themeJs = fs.readFileSync(
+  path.join(here, "..", "..", "landing-src", "public", "js", "theme.js"),
+  "utf8",
+);
+html = html.replace(themeMarker, () => `<script>${themeJs}</script>`);
+
 // 1. Extract the inline JSX body and transpile (preset-react only — matches text/babel).
 const babelMatch = html.match(
   /<script type="text\/babel">([\s\S]*?)<\/script>/,
