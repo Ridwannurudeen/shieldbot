@@ -430,7 +430,7 @@ async function handleAnalyze(tx, sender) {
 
   const value = weiHex(tx.value || "0x0");
   if (value === null) {
-    throw new Error("The transaction's value is not an amount ShieldAI can read, so it was not analyzed.");
+    throw new Error("The transaction's value is not an amount ShieldBot can read, so it was not analyzed.");
   }
 
   // A message or hash to sign, and its signer, stay in the browser: the API
