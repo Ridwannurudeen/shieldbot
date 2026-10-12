@@ -19,8 +19,9 @@ import { short, useFeed, utc } from "../registryFeed";
 // already fetched (src/registryFeed.ts), labelled as another token's record, never this request's. A record and a
 // capture are only ever shown together for the same reply. The captures stay the real white dialog, on paper
 // plates in both themes.
-// The picks cycle BLOCK, UNKNOWN, SAFE: 10 s after a story started the hero eases to 0.6 (data-out) and the next
-// one mounts, its field fading in over the last one's. A click plays that pick and the cycle continues from it.
+// The picks cycle BLOCK, UNKNOWN, SAFE: 10 s after a story started the next one mounts; in the 400 ms before, the
+// story eases to 0.6 (data-out) while the next field fades in over the last one, so the next story starts on its own
+// field. A click plays that pick, its field fading in as it mounts, and the cycle continues from it.
 // The cycle runs only while the hero is on screen (useAlive: not off screen, not in a hidden tab, not paused, never
 // with reduced motion); whenever it is not, the frame on screen holds (data-paused). The final frame is the base
 // style, so reduced motion shows it at once and the buttons switch picks instantly.
@@ -171,14 +172,17 @@ function Commit() {
 }
 
 export default function HeroRecord() {
-  // pick is on stage; from is the pick before it, whose field stays under the incoming one while it fades in; run
-  // remounts the story, so a click on the pick already shown plays it again.
-  const [{ pick, from, run }, setStage] = useState<{
+  // pick is the story on stage and field the field it stands on (the next pick's for the last 400 ms of a cycle);
+  // from is the field before, which stays under the incoming one while it fades in; run remounts the story, so a click
+  // on the pick already shown plays it again.
+  const [{ pick, field, from, run }, setStage] = useState<{
     pick: Pick;
+    field: Pick;
     from: Pick;
     run: number;
   }>({
     pick: "block",
+    field: "block",
     from: "block",
     run: 0,
   });
@@ -187,24 +191,38 @@ export default function HeroRecord() {
   const { label } = verdictOf(reply);
   const says = saysOf(pick);
   const show = (next: Pick) =>
-    setStage((stage) => ({ pick: next, from: stage.pick, run: stage.run + 1 }));
+    setStage((stage) => ({
+      pick: next,
+      field: next,
+      from: stage.field,
+      run: stage.run + 1,
+    }));
 
-  // While the hero is on screen the story eases to 0.6 opacity (data-out, index.css) and the next pick mounts, 10 s
-  // after the story started.
+  // While the hero is on screen, 9.6 s after the story started it eases to 0.6 opacity (data-out, index.css) as the
+  // next pick's field fades in, and at 10 s the next story mounts on it. Stopped before that (paused, off screen, a
+  // hidden tab), the stage goes back to the current pick's own field.
   useEffect(() => {
     if (!on) return;
     const element = ref.current!;
-    const fade = setTimeout(() => (element.dataset.out = ""), 9_600);
+    const next =
+      picks[(picks.findIndex(({ id }) => id === pick) + 1) % picks.length].id;
+    const fade = setTimeout(() => {
+      element.dataset.out = "";
+      setStage((stage) => ({ ...stage, field: next, from: stage.field }));
+    }, 9_600);
     const advance = setTimeout(() => {
       delete element.dataset.out;
-      show(
-        picks[(picks.findIndex(({ id }) => id === pick) + 1) % picks.length].id,
-      );
+      show(next);
     }, 10_000);
     return () => {
       clearTimeout(fade);
       clearTimeout(advance);
       delete element.dataset.out;
+      setStage((stage) =>
+        stage.field === stage.pick
+          ? stage
+          : { ...stage, field: stage.pick, from: stage.pick },
+      );
     };
   }, [on, run]);
 
@@ -256,14 +274,15 @@ export default function HeroRecord() {
           />
         </div>
         <figure className="min-w-0 max-lg:order-first">
-          <div className="relative h-[684px] overflow-hidden rounded-lg border border-hairline light:border-edge/40 sm:h-[664px] lg:h-[564px]">
+          <div className="relative h-[700px] overflow-hidden rounded-lg border border-hairline light:border-edge/40 sm:h-[680px] lg:h-[580px]">
             <div
               aria-hidden="true"
               className={`field-${from} absolute inset-0`}
             />
             <div
+              key={field}
               aria-hidden="true"
-              className={`hero-field field-${pick} absolute inset-0`}
+              className={`hero-field field-${field} absolute inset-0`}
             />
             <div aria-hidden="true" className="hero-light absolute inset-0" />
             <div className="hero-dim absolute inset-0">
@@ -271,14 +290,14 @@ export default function HeroRecord() {
                 <Badge verdict={label.verdict} size="lg" field>
                   {label.text}
                 </Badge>
-                <p className="mt-3 text-[22px] font-medium leading-[26px] tracking-[-0.01em]">
+                <p className="mt-3 text-[22px] font-medium leading-[26px] tracking-[-0.01em] max-[359px]:text-[19px] max-[359px]:leading-[23px]">
                   {says.sentence}
                 </p>
                 <p className="mt-2 font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-paper/80">
                   {says.measure}
                 </p>
               </div>
-              <div className="hero-card absolute inset-x-4 top-[160px] rounded-lg bg-paper p-4 text-on-paper shadow-lg">
+              <div className="hero-card absolute inset-x-4 top-[176px] rounded-lg bg-paper p-4 text-on-paper shadow-lg">
                 <p className="flex justify-between font-mono text-[11px] leading-4 text-on-paper-2">
                   <span>app.example</span>
                   <span>Signature request</span>
@@ -308,7 +327,7 @@ export default function HeroRecord() {
                   </span>
                 </p>
               </div>
-              <div className="absolute inset-x-6 top-[208px] h-[330px]">
+              <div className="absolute inset-x-6 top-[224px] h-[330px]">
                 <div className="hero-loading absolute inset-x-0 top-0 overflow-hidden rounded-lg bg-paper shadow-lg">
                   <img
                     src="/hero-overlay-loading.webp"

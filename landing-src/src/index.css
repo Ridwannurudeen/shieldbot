@@ -292,7 +292,8 @@
    the next pick (BLOCK, UNKNOWN, SAFE) mounts while on screen.
    The final frame is the base style: the signing card receded behind the overlay's verdict dialog, the record read,
    the commit card at the stage's foot. Depth is 2D only: scale and shadow, no tilt, nothing dims the page.
-     0     the field is already on (the incoming one fades in over the last one, 400 ms, opacity only); what the reply
+     0     the field is already on (it faded in over the last one, 400 ms, opacity only, while the last story eased
+           out; after a click it fades in now); what the reply
            says wipes in at the top of the field with the request line
      0     1. the signing card rises into the stage (from 0.6, 28 px, scale .97), the request line wipes in
      1100  2. the loading dialog slides up over it (48 px, scale .94); the card recedes (scale .96, -8 px). The two
