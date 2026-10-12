@@ -5,6 +5,7 @@ the facts they state (chain counts, tool counts, score bands, chain tables, per-
 fail when a source changes without the site, or when the committed builds fall behind their sources.
 """
 
+import gzip
 import json
 import re
 from html.parser import HTMLParser
@@ -610,6 +611,17 @@ def test_built_landing_bundle_contains_the_current_faq():
     # Every mempool chain count the built site shows (FAQ, chains section, roadmap) is the monitor's.
     stated = re.findall(r"\b(\d+)[ -]chains?\s+(?:with a public\s+mempool|mempool)", bundle)
     assert stated and {int(n) for n in stated} == {mempool_chain_count()}
+
+
+def test_built_landing_bundle_stays_inside_its_budget():
+    # The budget the audits hold the landing script to (landing-src/vite.config.ts): 320,000 B raw and 100,000 B
+    # gzipped at level 9. A section that pushes past it has to cut something or argue for a new budget.
+    bundles = list((ROOT / "landing" / "assets").glob("index-*.js"))
+    assert len(bundles) == 1
+    raw = bundles[0].read_bytes()
+    assert len(raw) <= 320_000, f"landing JS is {len(raw):,} B raw, over the 320,000 B budget"
+    packed = len(gzip.compress(raw, compresslevel=9))
+    assert packed <= 100_000, f"landing JS is {packed:,} B gzipped, over the 100,000 B budget"
 
 
 @pytest.mark.parametrize("component", ["HowItWorks.tsx", "AgentSecurity.tsx", "FeatureTabs.tsx"])
