@@ -506,7 +506,7 @@ class RiskEngine:
             if result.name == 'structural':
                 fields = dict(fields) if isinstance(fields, dict) else {}
                 for field in ('is_verified', 'contract_age_days') if data.get('is_contract') is not False else ():
-                    fields[field] = data.get(field) is not None
+                    fields[field] = data.get(field) is not None or field in data.get('coverage_exemptions', {})
                     if not fields[field]:
                         structural_missing.append(field)
             simulation_failed = result.name == 'honeypot' and data.get('simulation_failed')

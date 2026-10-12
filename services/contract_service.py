@@ -25,6 +25,14 @@ BYTECODE_PATTERNS = {
 
 # Small delay between BscScan API calls to avoid free-tier rate limit (5/sec)
 BSCSCAN_DELAY = 0.25
+# An interactive scan's explorer lookups (verification and contract creation: on Robinhood Chain one
+# Blockscout addresses/{address} reply serves both) are used when they answer this long before the
+# analyzers' deadline, so the analyzer returns before the registry cancels it, with only the fields
+# still unanswered named as gaps. Its work after that wait is local.
+EXPLORER_RESULT_RESERVE_SECONDS = 0.5
+# A cached official Robinhood token list answers within a few event-loop turns. A cold one (a fetch
+# of up to 10 s) does not hold up the explorer lookups, which start beside it.
+OFFICIAL_LIST_WAIT_SECONDS = 0.05
 
 # Words the source line reports, each attributed to a function the deployed code dispatches to
 SOURCE_PATTERNS = [
@@ -171,7 +179,19 @@ class ContractService:
         self.web3_client = web3_client
         self.scam_db = scam_db
 
-    async def fetch_contract_data(self, address: str, chain_id: int = 56) -> dict:
+    async def fetch_contract_data(
+        self, address: str, chain_id: int = 56, robinhood_assets=None, deadline: Optional[float] = None,
+    ) -> dict:
+        """The contract's structural facts.
+
+        The explorer lookups (verification and creation) start first and run beside the scam
+        database, ownership and bytecode checks. With ``deadline`` (a time.monotonic() value: the
+        analyzers' deadline of an interactive scan) a lookup still running
+        EXPLORER_RESULT_RESERVE_SECONDS before it leaves only its own field unknown, with a named
+        reason, and runs on to fill the explorer caches for the next scan. Without one (background
+        scans) both are awaited, as before. An exact Robinhood Chain address ``robinhood_assets``
+        knows has no explorer lookup: its verification and age are reported as exemptions.
+        """
         from utils.web3_client import UnsupportedChainError
 
         defaults = {
@@ -205,18 +225,35 @@ class ContractService:
                     'has_destroy': False,
                 }
 
-            results = {'is_contract': True}
+            results = {'is_contract': True, 'is_verified': None, 'contract_age_days': None}
+            field_reasons = {}
+            source_code = None
 
-            # Verification + source code
-            verified, source_code = await self.web3_client.is_verified_contract(address, chain_id=chain_id)
-            results['is_verified'] = verified
+            exemption = None
+            official = None
+            if robinhood_assets is not None:
+                exemption = robinhood_assets.static_explorer_exemption(address, chain_id)
+                if exemption is None and chain_id == 4663:
+                    official = asyncio.create_task(robinhood_assets.explorer_exemption(address, chain_id))
+                    await asyncio.wait((official,), timeout=OFFICIAL_LIST_WAIT_SECONDS)
+                    if official.done():
+                        exemption = official.result()
+                        official = None
 
-            await asyncio.sleep(BSCSCAN_DELAY)
+            async def creation_lookup():
+                await asyncio.sleep(BSCSCAN_DELAY)
+                return await self.web3_client.get_contract_creation_info(address, chain_id=chain_id)
 
-            # Contract age
-            creation_info = await self.web3_client.get_contract_creation_info(address, chain_id=chain_id)
-            if creation_info:
-                results['contract_age_days'] = creation_info.get('age_days')
+            # Verification + source code, and contract age. Below this call both lookups are shielded
+            # and cached, so one still running at the deadline fills the caches when it ends.
+            lookups = ()
+            if exemption is None:
+                lookups = (
+                    asyncio.create_task(self.web3_client.is_verified_contract(address, chain_id=chain_id)),
+                    asyncio.create_task(creation_lookup()),
+                )
+                for lookup in lookups:
+                    lookup.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
 
             # Scam DB (external APIs, not BscScan — no delay needed)
             scam_matches = await self.scam_db.check_address(address, chain_id=chain_id)
@@ -227,12 +264,7 @@ class ContractService:
                 results['coverage'] = {'scam_database': False}
                 results['reason'] = 'Scam database unavailable: ' + '; '.join(failed_providers)
 
-            # GoPlus's token record, fetched by the scam check. When the explorer did not answer, it
-            # says whether the source is open, which is the same fact.
             goplus = getattr(scam_matches, 'goplus_record', {})
-            if results['is_verified'] is None and goplus.get('is_open_source') in ('0', '1'):
-                results['is_verified'] = goplus['is_open_source'] == '1'
-                results['field_providers'] = {'is_verified': 'goplus'}
 
             # The largest holders' share of supply, from the same record; None when it lists none.
             if goplus.get('holders'):
@@ -289,6 +321,40 @@ class ContractService:
                 logger.warning("Bytecode scan failed for %s: %s", address, type(e).__name__)
                 results['coverage'] = {**results.get('coverage', {}), 'bytecode': False}
                 results['reason'] = '; '.join(filter(None, (results.get('reason'), 'Bytecode scan unavailable')))
+
+            if lookups:
+                timeout = None
+                if deadline is not None:
+                    timeout = max(0.0, deadline - EXPLORER_RESULT_RESERVE_SECONDS - time.monotonic())
+                await asyncio.wait(lookups, timeout=timeout)
+            if official is not None and official.done():
+                exemption = official.result()
+            if exemption is not None:
+                results['coverage_exemptions'] = exemption
+            for field, lookup in zip(('is_verified', 'contract_age_days'), lookups if exemption is None else ()):
+                if not lookup.done():
+                    field_reasons[field] = 'Explorer lookup still running at the request deadline; it continues for the next scan'
+                elif isinstance(lookup.exception(), UnsupportedChainError):
+                    raise lookup.exception()
+                elif lookup.exception() is not None:
+                    logger.warning("Explorer lookup for %s failed: %s", address, type(lookup.exception()).__name__)
+                    field_reasons[field] = f'Explorer lookup failed ({type(lookup.exception()).__name__})'
+                elif field == 'is_verified':
+                    results['is_verified'], source_code = lookup.result()
+                elif lookup.result():
+                    results['contract_age_days'] = lookup.result().get('age_days')
+
+            # GoPlus's token record, fetched by the scam check. When the explorer did not answer, it
+            # says whether the source is open, which is the same fact.
+            if results['is_verified'] is None and exemption is None and goplus.get('is_open_source') in ('0', '1'):
+                results['is_verified'] = goplus['is_open_source'] == '1'
+                results['field_providers'] = {'is_verified': 'goplus'}
+                field_reasons.pop('is_verified', None)
+            if field_reasons:
+                results['coverage_reasons'] = field_reasons
+                results['reason'] = '; '.join(filter(None, (
+                    results.get('reason'), *(f'{field}: {reason}' for field, reason in field_reasons.items()),
+                )))
 
             # GoPlus also finds blacklist functions under names the selector table does not list
             # (USDT's addBlackList); the owner power is the same whoever reports it.

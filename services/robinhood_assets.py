@@ -58,6 +58,14 @@ import aiohttp
 from eth_abi import decode
 from eth_abi.exceptions import DecodingError
 
+from adapters.robinhood import (
+    KNOWN_SPENDERS,
+    PANCAKESWAP_V2_FACTORY,
+    PERMIT2_ADDRESS,
+    POOL_MANAGER_ADDRESS,
+    UNISWAP_V2_FACTORY,
+    WHITELISTED_ROUTERS,
+)
 from core.telegram_formatter import describe_impostor_check
 from services.launch_discovery import CHAIN_ID
 from services.robinhood_simulation import USDG, WETH
@@ -83,6 +91,16 @@ MIN_LIST_FRACTION = 0.8
 SHRUNK_LIST_CONFIRMATIONS = 3
 # Symbol and name as each contract returned them on 2026-09-24.
 CANONICAL_TOKENS = {WETH: ("WETH", "WETH"), USDG: ("USDG", "Global Dollar")}
+# Contracts on this chain the service already names by exact address: the trusted routers, Permit2,
+# the V4 PoolManager and PositionManager, and the V2 factories the routers swap through.
+INFRASTRUCTURE = {
+    *WHITELISTED_ROUTERS,
+    *KNOWN_SPENDERS,
+    PERMIT2_ADDRESS.lower(),
+    POOL_MANAGER_ADDRESS.lower(),
+    UNISWAP_V2_FACTORY.lower(),
+    PANCAKESWAP_V2_FACTORY.lower(),
+}
 AFFIXES = "xwt"
 MIN_TICKER_LENGTH = 3
 CORPORATE_SUFFIXES = (
@@ -598,6 +616,32 @@ class RobinhoodAssets:
     async def check(self, address: str, symbol: Optional[str], name: Optional[str]) -> Dict:
         """Check a token whose symbol and name were already read; None where one could not be."""
         return check_token(address, symbol, name, await self.listed())
+
+    @staticmethod
+    def static_explorer_exemption(address: str, chain_id: int) -> Optional[Dict[str, str]]:
+        """Why a canonical token or an infrastructure contract, each at its exact address, needs no
+        explorer verification or contract age, per field; None for any other address."""
+        if chain_id != CHAIN_ID:
+            return None
+        address = address.lower()
+        if address in CANONICAL_TOKENS:
+            reason = f"canonical Robinhood Chain token {CANONICAL_TOKENS[address][0]} (exact address)"
+        elif address in INFRASTRUCTURE:
+            reason = "known Robinhood Chain infrastructure (exact address)"
+        else:
+            return None
+        return {"is_verified": reason, "contract_age_days": reason}
+
+    async def explorer_exemption(self, address: str, chain_id: int) -> Optional[Dict[str, str]]:
+        """static_explorer_exemption, and an official stock token at its exact address on the list."""
+        exemption = self.static_explorer_exemption(address, chain_id)
+        if exemption is not None or chain_id != CHAIN_ID:
+            return exemption
+        token = (await self.listed() or {}).get(address.lower())
+        if token is None:
+            return None
+        reason = f"official Robinhood token {token[0]} (exact address)"
+        return {"is_verified": reason, "contract_age_days": reason}
 
     async def official(self, address: str, chain_id: int) -> Optional[Dict]:
         """The check of a Robinhood Chain token at an official address, or None for any other token.

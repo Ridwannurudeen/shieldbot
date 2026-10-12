@@ -135,7 +135,9 @@ class ServiceContainer:
         self.calibration = load_calibration(settings.calibration_config_path)
         self.risk_engine = RiskEngine(calibration=self.calibration)
         self.registry = AnalyzerRegistry()
-        self.registry.register(StructuralAnalyzer(self.contract_service, self.token_sniffer))
+        self.registry.register(StructuralAnalyzer(
+            self.contract_service, self.token_sniffer, self.robinhood_assets,
+        ))
         self.registry.register(MarketAnalyzer(self.dex_service, self.robinhood_assets))
         self.registry.register(BehavioralAnalyzer(self.ethos_service))
         self.registry.register(HoneypotAnalyzer(self.honeypot_service, self.robinhood_assets))
