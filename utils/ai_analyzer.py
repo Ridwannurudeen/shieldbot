@@ -26,11 +26,11 @@ class AIEmptyResponse(Exception):
     """The model returned no text."""
 
 
+# A rejected credential stops every model; a missing model or a rejected request affects only that
+# call, so only these switch the assistant off.
 _REJECTED_ERRORS = (
     anthropic.AuthenticationError,
     anthropic.PermissionDeniedError,
-    anthropic.NotFoundError,
-    anthropic.BadRequestError,
 )
 
 
@@ -109,7 +109,7 @@ class AIAnalyzer:
             self.status = "unconfigured"
         else:
             try:
-                await self._retrieve_models(model_ids)
+                missing = await self._retrieve_models(model_ids)
             except asyncio.CancelledError:
                 self.status = "unverified"
                 self._probe_complete = True
@@ -120,14 +120,24 @@ class AIAnalyzer:
             except Exception as error:
                 self.status = f"rejected: {type(error).__name__}"
             else:
-                self.status = "ok"
+                if len(missing) == len(model_ids):
+                    self.status = "rejected: NotFoundError"
+                elif missing:
+                    self.status = f"ok (missing: {', '.join(missing)})"
+                else:
+                    self.status = "ok"
         self._probe_complete = True
         logger.info("AI model probe %s; model ids: %s", self.status, ", ".join(model_ids))
         return self.status
 
-    async def _retrieve_models(self, model_ids: Tuple[str, ...]):
+    async def _retrieve_models(self, model_ids: Tuple[str, ...]) -> list:
+        missing = []
         for model_id in model_ids:
-            await self.client.models.retrieve(model_id)
+            try:
+                await self.client.models.retrieve(model_id)
+            except anthropic.NotFoundError:
+                missing.append(model_id)
+        return missing
 
     async def _create_message(self, **kwargs):
         try:
@@ -459,4 +469,4 @@ Return the explanation JSON now."""
         """Whether Claude can be used based on the key and last probe result."""
         if not self._probe_complete:
             return self.client is not None
-        return self.status in ("ok", "unverified")
+        return self.status == "unverified" or self.status.startswith("ok")

@@ -153,9 +153,9 @@ async def test_probe_without_a_key_is_unconfigured():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error_type,status",
-    [("AuthenticationError", 401), ("NotFoundError", 404)],
+    [("AuthenticationError", 401)],
 )
-async def test_probe_rejects_invalid_credentials_or_models(error_type, status):
+async def test_probe_rejects_invalid_credentials(error_type, status):
     analyzer = _probe_analyzer()
     analyzer.client.models.retrieve = AsyncMock(side_effect=_provider_error(error_type, status))
 
@@ -164,6 +164,38 @@ async def test_probe_rejects_invalid_credentials_or_models(error_type, status):
     assert result == f"rejected: {error_type}"
     assert analyzer.is_available() is False
     analyzer.client.models.retrieve.assert_awaited_once_with(HAIKU_MODEL)
+
+
+@pytest.mark.asyncio
+async def test_probe_rejects_only_when_every_model_is_missing():
+    analyzer = _probe_analyzer()
+    analyzer.client.models.retrieve = AsyncMock(side_effect=_provider_error("NotFoundError", 404))
+
+    assert await analyzer.probe() == "rejected: NotFoundError"
+    assert analyzer.is_available() is False
+
+
+@pytest.mark.asyncio
+async def test_one_missing_model_leaves_the_others_available():
+    analyzer = _probe_analyzer()
+    analyzer.client.models.retrieve = AsyncMock(side_effect=[None, _provider_error("NotFoundError", 404)])
+
+    assert await analyzer.probe() == f"ok (missing: {SONNET_MODEL})"
+    assert analyzer.is_available() is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type,status", [("NotFoundError", 404), ("BadRequestError", 400)])
+async def test_a_rejected_request_does_not_switch_the_assistant_off(error_type, status):
+    analyzer = _probe_analyzer()
+    analyzer.status = "ok"
+    analyzer._probe_complete = True
+    analyzer.client.messages.create = AsyncMock(side_effect=_provider_error(error_type, status))
+
+    with pytest.raises(Exception):
+        await analyzer._create_message(model=HAIKU_MODEL, max_tokens=10, messages=[])
+    assert analyzer.status == "ok"
+    assert analyzer.is_available() is True
 
 
 @pytest.mark.asyncio
