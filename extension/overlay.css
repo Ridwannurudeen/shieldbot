@@ -864,7 +864,7 @@
 .shieldai-delta-out { color: #a81a29; }
 .shieldai-sim-badge {
   font-family: var(--sb-mono);
-  font-size: 10.5px; font-weight: 400; letter-spacing: .08em;
+  font-size: 11px; font-weight: 400; letter-spacing: .08em;
   background: #ffffff; color: #141414; border: 1px solid #8b8b86; border-radius: 0;
   padding: 1px 5px; margin-left: 6px; vertical-align: 1px;
 }

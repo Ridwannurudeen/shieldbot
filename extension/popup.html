@@ -47,7 +47,7 @@
 
     /* Tabs */
     .tabs { display: flex; margin: 10px 16px 14px; border-bottom: 1px solid var(--hairline-strong); }
-    .tab { flex: 1; padding: 10px 0 8px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+    .tab { flex: 1; padding: 10px 0 8px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .04em; white-space: nowrap; text-transform: uppercase; cursor: pointer; }
     .tab:hover { color: var(--ink); }
     .tab.active { border-bottom-color: var(--accent); color: var(--ink); }
     .tab:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -92,7 +92,7 @@
 
     /* Verdict chips: five shapes on three hues (BLOCK solid red; HIGH heavy red edge with "!";
        CAUTION grey hairline with "!"; SAFE green hairline; UNKNOWN grey fill, dashed edge, "?"). */
-    .history-badge, .feed-badge, .health-risk-badge, .wh-appr-badge { flex: 0 0 auto; padding: 2px 6px; border: 1px solid transparent; border-radius: 0; font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em; white-space: nowrap; }
+    .history-badge, .feed-badge, .health-risk-badge, .wh-appr-badge { flex: 0 0 auto; padding: 2px 6px; border: 1px solid transparent; border-radius: 0; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; white-space: nowrap; }
     .badge-safe { border-color: var(--safe); background: transparent; color: var(--safe-text); }
     .badge-caution { border-color: var(--edge); background: transparent; color: var(--ink); }
     .badge-high { border: 2px solid var(--block-edge); background: transparent; color: var(--block-text); }
@@ -165,7 +165,7 @@
     .wh-scorerow { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid var(--hairline-strong); }
     .wh-scorenum { color: var(--ink); font-family: var(--mono); font-size: 40px; line-height: 1; font-variant-numeric: tabular-nums; }
     .wh-scorelbl { color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-align: right; text-transform: uppercase; }
-    .wh-statlbl { display: block; margin-top: 2px; color: var(--secondary); font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
+    .wh-statlbl { display: block; margin-top: 2px; color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
     .wh-statnum { display: block; }
     .wh-input { margin-bottom: 8px; }
     .wh-btn { margin-bottom: 4px; }
@@ -179,7 +179,7 @@
     .dh { display: flex; align-items: center; gap: 14px; padding: 16px 28px; border-bottom: 1px solid var(--hairline-strong); background: var(--ground); }
     .dh-logo { color: var(--ink); font-size: 20px; font-weight: 500; letter-spacing: -0.03em; }
     .dh-title { color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
-    .dh-pill { padding: 3px 7px; border: 1px solid var(--edge); color: var(--ink); font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; }
+    .dh-pill { padding: 3px 7px; border: 1px solid var(--edge); color: var(--ink); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; }
     .dh-sep { flex: 1; }
     .dh-chains { color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
     .dh-chains span { color: var(--ink); }
@@ -201,7 +201,7 @@
     .ctr-chip-num { color: var(--ink); font-family: var(--mono); font-size: 26px; line-height: 1.1; font-variant-numeric: tabular-nums; }
     .ctr-chip-num.c-danger { color: var(--block-text); }
     .ctr-chip-num.c-unknown { color: var(--ink); }
-    .ctr-chip-lbl { margin-top: 4px; color: var(--secondary); font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; }
+    .ctr-chip-lbl { margin-top: 4px; color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
     .ctr-div { display: none; }
     .gauge-wrap { display: flex; justify-content: center; margin: 4px 0 10px; }
     .gauge-svg { overflow: visible; }
@@ -241,7 +241,7 @@
     .rm-info { flex: 1; min-width: 0; }
     .rm-name { color: var(--ink); font-size: 13px; font-weight: 500; }
     .rm-sub { margin-top: 2px; color: var(--secondary); font-size: 12px; }
-    .rm-tag { flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--safe); color: var(--safe-text); font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; }
+    .rm-tag { flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--safe); color: var(--safe-text); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; }
     .s-field { margin-bottom: 12px; }
     .s-footer { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline-strong); }
     .s-footer-link { color: var(--secondary); font-size: 12px; text-decoration: none; }

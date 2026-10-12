@@ -283,7 +283,7 @@ were written without a native speaker and need review by one before release:
 `healthNoApprovals`, `healthNoApprovalsDash`, `healthScanSubtext`, `healthScanning`,
 `dashDeployerBlockSub`, `step1Desc`, `scanInjectionFound`, `scanNoInjectionPatterns`, `coverageNote`,
 `dashFirewallActive`, `dashFirewallOff`, `dashCheckTxFirewall`, `dashTxFirewallSub`, `statUnknown`,
-`welcomeActiveMsg`, `labelChain`.
+`welcomeActiveMsg`, `labelChain`, `overlayMethod`, `overlayElapsed`.
 
 ## Tests
 

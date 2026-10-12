@@ -45,14 +45,14 @@
     #messages::-webkit-scrollbar-thumb, #guardianAlerts::-webkit-scrollbar-thumb, #scannerResults::-webkit-scrollbar-thumb { background: var(--hairline-strong); }
     .chat-bubble { max-width: 100%; font-size: 13.5px; line-height: 1.55; overflow-wrap: anywhere; }
     .chat-bubble.user { align-self: flex-end; max-width: 88%; padding: 9px 12px; border: 1px solid var(--hairline-strong); background: var(--panel); color: var(--ink); white-space: pre-wrap; }
-    .chat-bubble.user::before { content: "YOU"; display: block; margin-bottom: 3px; color: var(--secondary); font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; white-space: normal; }
+    .chat-bubble.user::before { content: "YOU"; display: block; margin-bottom: 3px; color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; white-space: normal; }
     .bubble-wrapper { position: relative; align-self: stretch; padding-left: 12px; border-left: 2px solid var(--accent); }
-    .bubble-wrapper::before { content: "SHIELDBOT AI"; display: block; margin-bottom: 4px; color: var(--accent); font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; }
+    .bubble-wrapper::before { content: "SHIELDBOT AI"; display: block; margin-bottom: 4px; color: var(--accent); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; }
     .bubble-wrapper .chat-bubble { max-width: 100%; }
     .chat-bubble.assistant { padding-right: 52px; color: var(--ink); }
     .chat-bubble.error { color: var(--ink); }
     .bubble-wrapper:has(.chat-bubble.error) { border-left-color: var(--block-edge); }
-    .copy-btn { position: absolute; top: 0; right: 0; height: 22px; padding: 0 7px; border: 1px solid var(--edge); border-radius: 0; background: var(--ground); color: var(--ink); font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; cursor: pointer; opacity: 0; transition: opacity .15s; }
+    .copy-btn { position: absolute; top: 0; right: 0; height: 22px; padding: 0 7px; border: 1px solid var(--edge); border-radius: 0; background: var(--ground); color: var(--ink); font-family: var(--mono); font-size: 11px; letter-spacing: .06em; cursor: pointer; opacity: 0; transition: opacity .15s; }
     .bubble-wrapper:hover .copy-btn, .copy-btn:focus-visible { opacity: 1; }
     .retry-btn { display: inline-block; margin-top: 8px; height: 26px; padding: 0 10px; border: 1px solid var(--block-edge); border-radius: 0; background: transparent; color: var(--block-text); font-family: var(--mono); font-size: 11px; cursor: pointer; }
     .chat-bubble.typing { display: flex; align-items: center; gap: 8px; align-self: stretch; padding: 2px 0 2px 12px; border-left: 2px solid var(--accent); }
@@ -132,7 +132,7 @@
     .health-stat { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; }
     .health-stat + .health-stat { border-left: 1px solid var(--hairline-strong); }
     .health-stat-val { color: var(--ink); font-family: var(--mono); font-size: 17px; font-variant-numeric: tabular-nums; }
-    .health-stat-label { color: var(--secondary); font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
+    .health-stat-label { color: var(--secondary); font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
     .health-components { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; padding: 8px 14px 10px; color: var(--secondary); font-size: 12px; }
     .health-component { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--hairline); }
     .health-component span:last-child { color: var(--ink); font-family: var(--mono); font-variant-numeric: tabular-nums; }
@@ -142,7 +142,7 @@
     .guardian-toolbar { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px 14px; border-top: 1px solid var(--hairline-strong); flex-shrink: 0; }
     .alert-card { display: flow-root; padding: 10px 0; border-bottom: 1px solid var(--hairline-strong); }
     .alert-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-    .severity-badge { flex-shrink: 0; min-width: 64px; padding: 2px 6px; border: 1px solid transparent; color: var(--ink); font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-align: center; text-transform: uppercase; }
+    .severity-badge { flex-shrink: 0; min-width: 64px; padding: 2px 6px; border: 1px solid transparent; color: var(--ink); font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-align: center; text-transform: uppercase; }
     .severity-badge.critical, .severity-badge.high { border: 2px solid var(--block-edge); color: var(--block-text); }
     .severity-badge.medium { border-color: var(--edge); color: var(--ink); }
     .severity-badge.low { border-color: var(--hairline-strong); color: var(--secondary); }
@@ -197,7 +197,7 @@
 
   <!-- Chat Panel -->
   <div id="chatPanel" class="panel active">
-    <div id="messages" aria-live="polite"></div>
+    <div id="messages"></div>
     <div class="input-area">
       <select id="chainSelect" aria-label="Chain">
         <option value="56">BSC</option>
