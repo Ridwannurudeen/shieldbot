@@ -1,9 +1,9 @@
 import { useEffect, useSyncExternalStore } from "react";
 
 // The why-unknown record, the worked example and the recent-records strip read one shared feed:
-// - GET /api/verdicts/recent?chain_id=4663&limit=5, the registry's confirmed records, newest first. Until that
+// - GET /api/verdicts/recent?chain_id=4663&limit=3, the registry's confirmed records, newest first. Until that
 //   route is deployed it answers 404, and the strip falls back to the newest blocked launches below.
-// - GET /api/launches/4663?outcome=blocked&limit=5, the newest launches ShieldBot blocked. The worked example
+// - GET /api/launches/4663?outcome=blocked&limit=3, the newest launches ShieldBot blocked. The worked example
 //   quotes the first one's sell simulation.
 // - GET /api/verdict/4663/{address}, one at a time and once per address (the API allows 10 requests in 5 seconds
 //   and 30 a minute per visitor): the record a section asks for by address (useRecord), the first launch's
@@ -14,7 +14,7 @@ import { useEffect, useSyncExternalStore } from "react";
 // When the last component reading the feed unmounts, its requests are aborted and the feed is cleared, so a
 // later reader fetches it again.
 const API = "https://api.shieldbotsecurity.online";
-const LIMIT = 5;
+const LIMIT = 3;
 
 // Every route above is on Robinhood Chain, so a record's chain line is the route's chain, the same in every
 // section that draws one.
