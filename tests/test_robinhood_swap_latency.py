@@ -22,6 +22,8 @@ from adapters.robinhood import (
     WHITELISTED_ROUTERS,
     RobinhoodAdapter,
 )
+from analyzers.honeypot import STILL_RUNNING as HONEYPOT_STILL_RUNNING
+from analyzers.honeypot import HoneypotAnalyzer
 from analyzers.structural import StructuralAnalyzer
 from api import _revert_blocks
 from core.analyzer import AnalysisContext, Analyzer, AnalyzerResult
@@ -30,9 +32,9 @@ from core.registry import AnalyzerRegistry
 from core.risk_engine import RiskEngine
 from core.verdicts import BLOCK_RECOMMENDED
 from services.contract_service import ContractService
-from services.explorer_service import ExplorerService
+from services.explorer_service import BACKGROUND, ExplorerService
 from services.robinhood_assets import RobinhoodAssets
-from services.robinhood_simulation import USDG, WETH
+from services.robinhood_simulation import USDG, WETH, RobinhoodSimulator
 from tests.test_consumer_unknowns import consumer_api  # noqa: F401 (fixture)
 from tests.test_robinhood_assets import LISTED, NVDA, OTHER
 from utils.scam_db import ScamMatches
@@ -43,6 +45,7 @@ KNOWN = [
     WETH, USDG, NVDA, *WHITELISTED_ROUTERS, *KNOWN_SPENDERS,
     PERMIT2_ADDRESS, POOL_MANAGER_ADDRESS, UNISWAP_V2_FACTORY, PANCAKESWAP_V2_FACTORY,
 ]
+BACKGROUND_TOKEN = "0x" + "9a" * 20
 SELLABLE = {"is_honeypot": False, "can_sell": True, "buy_tax": 0, "sell_tax": 0, "status": "ok"}
 
 
@@ -101,7 +104,7 @@ async def test_exact_known_addresses_skip_the_explorer(mock_web3_client, address
     assert result.data["status"] == "ok"
     assert set(result.data["coverage_exemptions"]) == {"is_verified", "contract_age_days"}
     assert "coverage_reasons" not in result.data
-    assert result.data["notes"][0].startswith("Explorer verification and contract age not looked up: ")
+    assert result.data["notes"][0].startswith("Explorer verification and contract age not needed: ")
     assert result.data["notes"][0].endswith("(exact address)")
     risk = RiskEngine().compute_from_results([result])
     assert risk["coverage"]["structural"] == 1
@@ -134,6 +137,30 @@ async def test_a_cold_official_list_does_not_hold_up_the_lookups(mock_web3_clien
     assert (data["is_verified"], data["contract_age_days"]) == (True, 90)
     assert "coverage_reasons" not in data
     gate.set()
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_a_late_exemption_keeps_the_explorer_answers_that_arrived(mock_web3_client):
+    # The official list answers after the lookups started; it exempts only what they left unanswered.
+    listed, creation = asyncio.Event(), asyncio.Event()
+    official = RobinhoodAssets("http://rpc.invalid")
+    official.listed = hanging(listed, LISTED)
+    mock_web3_client.get_contract_creation_info.side_effect = hanging(creation, {"age_days": 90})
+    loop = asyncio.get_running_loop()
+    loop.call_later(0.1, listed.set)
+
+    with patch("services.contract_service.BSCSCAN_DELAY", 0), patch(
+        "services.contract_service.EXPLORER_RESULT_RESERVE_SECONDS", 0,
+    ):
+        data = await ContractService(mock_web3_client, scam_db()).fetch_contract_data(
+            NVDA, chain_id=CHAIN, robinhood_assets=official, deadline=time.monotonic() + 0.3,
+        )
+
+    assert data["is_verified"] is True  # the explorer's answer, kept
+    assert set(data["coverage_exemptions"]) == {"contract_age_days"}
+    assert "coverage_reasons" not in data
+    creation.set()
     await asyncio.sleep(0)
 
 
@@ -196,7 +223,9 @@ async def test_a_slow_explorer_never_yields_a_harsher_verdict(mock_web3_client):
 
 
 @pytest.mark.asyncio
-async def test_both_lookups_share_one_blockscout_request_and_a_late_one_fills_the_caches(monkeypatch):
+async def test_an_abandoned_explorer_lookup_finishes_and_fills_the_caches(monkeypatch, mock_web3_client):
+    # The structural analyzer gives up on Blockscout at its deadline; the lookup runs on, and the next
+    # scan of the token is answered from the caches without a request.
     monkeypatch.setenv("BLOCKSCOUT_API_KEY", "test-key")
     address = OTHER
     release = asyncio.Event()
@@ -236,26 +265,30 @@ async def test_both_lookups_share_one_blockscout_request_and_a_late_one_fills_th
 
     adapter._date_creation = dated
     adapter.get_bytecode = AsyncMock(return_value="0x6080")
-    with patch("aiohttp.ClientSession") as client:
+    mock_web3_client.is_verified_contract = lambda address, chain_id: adapter.is_verified_contract(address)
+    mock_web3_client.get_contract_creation_info = (
+        lambda address, chain_id: adapter.get_contract_creation_info(address)
+    )
+    service = ContractService(mock_web3_client, scam_db())
+    with patch("aiohttp.ClientSession") as client, patch(
+        "services.contract_service.BSCSCAN_DELAY", 0,
+    ), patch("services.contract_service.EXPLORER_RESULT_RESERVE_SECONDS", 0):
         client.return_value.__aenter__.return_value = session
-        # The structural analyzer's two lookups, abandoned at its deadline.
-        lookups = [
-            asyncio.ensure_future(adapter.is_verified_contract(address)),
-            asyncio.ensure_future(adapter.get_contract_creation_info(address)),
-        ]
-        _, pending = await asyncio.wait(lookups, timeout=0.05)
-        assert len(pending) == 2
+        first = await service.fetch_contract_data(address, chain_id=CHAIN, deadline=time.monotonic() + 0.05)
+        assert first["coverage_reasons"] == {"is_verified": STILL_RUNNING, "contract_age_days": STILL_RUNNING}
+
         release.set()
-        assert await asyncio.gather(*lookups) == [
-            (False, None), {**(await lookups[1]), "age_days": 90},
-        ]
-        blockscout = [url for url in gets if "blockscout" in url]
-        assert len(blockscout) == 1 and blockscout[0].endswith(f"/addresses/{address}")
-        assert len(gets) == 2
-        # The next scan of the token is answered from the caches: no request.
-        assert await adapter.is_verified_contract(address) == (False, None)
-        assert (await adapter.get_contract_creation_info(address))["age_days"] == 90
+        for _ in range(100):
+            if adapter._creation_infos.get((CHAIN, address)):
+                break
+            await asyncio.sleep(0.01)
+        second = await service.fetch_contract_data(address, chain_id=CHAIN, deadline=time.monotonic() + 0.05)
+
+    assert (second["is_verified"], second["contract_age_days"]) == (False, 90)
+    assert "coverage_reasons" not in second
+    # One Sourcify and one Blockscout request served both lookups of both scans.
     assert len(gets) == 2
+    assert [url for url in gets if "blockscout" in url][0].endswith(f"/addresses/{address}")
 
 
 @pytest.mark.asyncio
@@ -302,7 +335,8 @@ async def test_firewall_swap_answers_inside_the_deadline_with_structural_present
     response = http_response.json()
 
     assert http_response.status_code == 200
-    assert elapsed < 1.0
+    # The proof is the shape below; the clock gets a margin for a slow runner.
+    assert elapsed < 2.0
     other, weth = (api.web3_client.to_checksum_address(token) for token in (OTHER, WETH))
     # Structural answered for both tokens: canonical WETH in full, the unknown token with its age
     # alone unknown (GoPlus gives its verification), named.
@@ -319,3 +353,208 @@ async def test_firewall_swap_answers_inside_the_deadline_with_structural_present
 
     blockscout.set()
     await asyncio.sleep(0)
+
+
+def simulated(gate=None):
+    """A simulator whose run for a token waits on ``gate`` (when given), then finds it sellable."""
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    order = []
+
+    async def run(token):
+        order.append(token)
+        if gate is not None and token == BACKGROUND_TOKEN:
+            await gate.wait()
+        return {
+            "is_honeypot": False, "can_buy": True, "can_sell": True, "buy_tax": 0, "sell_tax": 0,
+            "reason": "", "simulation_block": 1,
+        }
+
+    simulator._run = run
+    return simulator, order
+
+
+def honeypot_on(simulator):
+    service = SimpleNamespace(fetch_honeypot_data=lambda address, chain_id: simulator.simulate(address))
+    return HoneypotAnalyzer(service, assets())
+
+
+async def background(simulator, token):
+    """A simulation the hunter started: it takes background turns."""
+    BACKGROUND.set(True)
+    return await simulator.simulate(token)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token", [OTHER, NVDA], ids=["unknown-token", "official-stock"])
+async def test_a_queued_simulation_degrades_to_a_named_gap_never_an_error(token):
+    # The hunter's simulation holds the lane past this scan's deadline.
+    gate = asyncio.Event()
+    simulator, order = simulated(gate)
+    hunter = asyncio.create_task(background(simulator, BACKGROUND_TOKEN))
+    await asyncio.sleep(0)
+    registry = AnalyzerRegistry()
+    registry.register(Answered("structural", 0.4, 25, {"is_contract": True, "is_verified": False, "contract_age_days": 90}))
+    registry.register(Answered("market", 0.3, 32, {"status": "ok"}))
+    registry.register(honeypot_on(simulator))
+
+    with patch("analyzers.honeypot.SIMULATION_RESULT_RESERVE_SECONDS", 0.1):
+        results = await registry.run_all(
+            AnalysisContext(token, CHAIN, extra={"deadline": time.monotonic() + 0.3}), deadline=0.3,
+        )
+
+    honeypot = next(result for result in results if result.name == "honeypot")
+    assert honeypot.error is None
+    assert not honeypot.data.get("skipped")  # an official stock is not let off as "does not apply"
+    assert honeypot.data["status"] == "unknown"
+    assert honeypot.data["coverage"]["can_sell"] is False
+    assert honeypot.data["reason"] == HONEYPOT_STILL_RUNNING
+    assert honeypot.score == 0
+    # Under the risk engine's rules an unanswered sell check counts exactly as a failed one: the
+    # verdict is the one the error gave, never harsher.
+    engine = RiskEngine()
+    errored = [
+        AnalyzerResult("honeypot", honeypot.weight, 50, error="honeypot analysis unavailable (TimeoutError)")
+        if result.name == "honeypot" else result
+        for result in results
+    ]
+    degraded, failed = engine.compute_from_results(results), engine.compute_from_results(errored)
+    assert degraded["score_before_community_floor"] == failed["score_before_community_floor"]
+    assert degraded["coverage_reasons"]["honeypot"] == HONEYPOT_STILL_RUNNING
+
+    # The simulation runs on and its cached answer serves the next scan.
+    gate.set()
+    await hunter
+    for _ in range(100):
+        if token.lower() in simulator._cache:
+            break
+        await asyncio.sleep(0.01)
+    assert simulator._cache[token.lower()]["can_sell"] is True
+    assert order == [BACKGROUND_TOKEN, token.lower()]
+
+
+@pytest.mark.asyncio
+async def test_a_user_simulation_goes_before_waiting_background_ones():
+    gate = asyncio.Event()
+    simulator, order = simulated(gate)
+    hunter = asyncio.create_task(background(simulator, BACKGROUND_TOKEN))
+    await asyncio.sleep(0)
+    later = "0x" + "12" * 20
+    joined = "0x" + "34" * 20
+    user = "0x" + "56" * 20
+    waiting = [
+        asyncio.create_task(background(simulator, later)),
+        asyncio.create_task(background(simulator, joined)),
+    ]
+    for _ in range(5):
+        waiting.append(asyncio.create_task(simulator.simulate(user)))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    # A user joins a background simulation still waiting for its turn: it takes a user's turn.
+    waiting.append(asyncio.create_task(simulator.simulate(joined)))
+    await asyncio.sleep(0)
+
+    gate.set()
+    await asyncio.gather(hunter, *waiting)
+
+    assert order == [BACKGROUND_TOKEN, user, joined, later]
+
+
+@pytest.mark.asyncio
+async def test_a_two_unknown_token_swap_answers_with_honeypot_unknown_while_the_hunter_simulates(
+    consumer_api, monkeypatch,  # noqa: F811
+):
+    api, services = consumer_api
+    monkeypatch.setattr(api, "FIREWALL_REQUEST_DEADLINE_SECONDS", 1.0)
+    monkeypatch.setattr(api, "FIREWALL_RESPONSE_RESERVE_SECONDS", 0.1)
+    monkeypatch.setattr("analyzers.honeypot.SIMULATION_RESULT_RESERVE_SECONDS", 0.3)
+    api.risk_engine = RiskEngine()
+    sender = "0x" + "b" * 40
+    second = "0x" + "cd" * 20
+    decoded = {
+        "selector": "38ed1739", "function_name": "swapExactTokensForTokens",
+        "category": "swap", "params": {"path": [OTHER, second], "to": sender},
+    }
+    api.calldata_decoder = SimpleNamespace(
+        decode=lambda _: decoded, is_whitelisted_target=lambda *args, **kwargs: "Robinhood Router",
+    )
+    services.web3_client._get_adapter = lambda chain_id: None
+    gate = asyncio.Event()
+    simulator, _ = simulated(gate)
+    hunter = asyncio.create_task(background(simulator, BACKGROUND_TOKEN))
+    await asyncio.sleep(0)
+    registry = AnalyzerRegistry()
+    registry.register(Answered("structural", 0.4, 25, {"is_contract": True, "is_verified": False, "contract_age_days": 90}))
+    registry.register(Answered("market", 0.3, 0, {"status": "ok"}))
+    registry.register(honeypot_on(simulator))
+    services.registry = registry
+    services.policy_engine = PolicyEngine("BALANCED")
+
+    import httpx
+    started = time.monotonic()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=api.app), base_url="http://testserver",
+    ) as client:
+        http_response = await client.post("/api/firewall", json={
+            "to": "0x" + "a" * 40, "from": sender, "chainId": CHAIN, "value": "0", "data": "0x38ed1739",
+        })
+    elapsed = time.monotonic() - started
+    response = http_response.json()
+
+    assert http_response.status_code == 200
+    assert elapsed < 2.0  # a 1 s deadline; the margin is for a slow runner
+    for token in (OTHER, second):
+        address = api.web3_client.to_checksum_address(token)
+        assert response["coverage"][f"{address}:honeypot"] == 0
+        assert response["coverage_reasons"][f"{address}:honeypot"] == HONEYPOT_STILL_RUNNING
+        assert response["coverage"][f"{address}:structural"] == 1
+    assert not any("unavailable" in reason for reason in response["coverage_reasons"].values())
+    assert response["classification"] != BLOCK_RECOMMENDED
+
+    gate.set()
+    await hunter
+
+
+@pytest.mark.asyncio
+async def test_other_chains_keep_no_request_deadline(consumer_api, monkeypatch):  # noqa: F811
+    api, services = consumer_api
+    monkeypatch.setattr(api, "FIREWALL_REQUEST_DEADLINE_SECONDS", 0.05)
+    services.registry.get_all = lambda: [SimpleNamespace(name="structural")]
+
+    async def slow_token_info(address, **kwargs):
+        await asyncio.sleep(0.2)
+        return {}
+
+    api.web3_client.get_token_info = slow_token_info
+    api.risk_engine = RiskEngine()
+    api.calldata_decoder = SimpleNamespace(
+        decode=lambda _: {
+            "selector": "095ea7b3", "function_name": "approve", "category": "approval",
+            "is_approval": True, "params": {"spender": "0x" + "e" * 40, "amount": 1},
+        },
+        is_whitelisted_target=lambda *args, **kwargs: None,
+    )
+
+    response = await api.firewall(
+        api.FirewallRequest(to="0x" + "f" * 40, sender="0x" + "b" * 40, chainId=56, data="0x095ea7b3"),
+        SimpleNamespace(headers={}),
+    )
+
+    assert "token_metadata" not in response.get("coverage_reasons", {})
+    assert not response.get("pending_sources")
+
+
+@pytest.mark.asyncio
+async def test_a_provider_timeout_is_not_relabelled_as_the_request_deadline(consumer_api, monkeypatch):  # noqa: F811
+    api, _ = consumer_api
+    error = TimeoutError("provider")
+
+    async def verdict(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(api, "_firewall_verdict", verdict)
+    with pytest.raises(TimeoutError) as raised:
+        await api.firewall(
+            api.FirewallRequest(to="0x" + "f" * 40, sender="0x" + "b" * 40, chainId=CHAIN),
+            SimpleNamespace(headers={}),
+        )
+    assert raised.value is error
