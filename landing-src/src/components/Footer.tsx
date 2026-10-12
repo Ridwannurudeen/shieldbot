@@ -140,13 +140,10 @@ export default function Footer() {
               <h2 className={headingClass}>Product</h2>
               <div className="mt-4 flex flex-col gap-1">
                 <a href="#how-it-works" className={linkClass}>How it works</a>
-                <a href="#on-chain" className={linkClass}>On-chain check</a>
                 <a href="#chains" className={linkClass}>Coverage</a>
+                <a href="#on-chain" className={linkClass}>On-chain registry</a>
                 <a href="#agent-security" className={linkClass}>For builders</a>
-                <a href="/dashboard" className={linkClass}>Threat dashboard</a>
-                <a href="#faq" className={linkClass}>FAQ</a>
-                <a href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer" className={linkClass}>Chrome extension</a>
-                <a href="https://api.shieldbotsecurity.online/docs" target="_blank" rel="noopener noreferrer" className={linkClass}>API docs</a>
+                <a href="/dashboard" className={linkClass}>Dashboard</a>
               </div>
             </div>
             <div className="min-w-0">
@@ -163,9 +160,7 @@ export default function Footer() {
                 <a href="https://github.com/Ridwannurudeen/shieldbot" target="_blank" rel="noopener noreferrer" className={linkClass}>GitHub</a>
                 <a href="https://t.me/shieldbot_bnb_bot" target="_blank" rel="noopener noreferrer" className={linkClass}>Telegram bot</a>
                 <a href="https://x.com/shieldbot_" target="_blank" rel="noopener noreferrer" className={linkClass}>@shieldbot_</a>
-                <a href="https://x.com/Ggudman1" target="_blank" rel="noopener noreferrer" className={linkClass}>Founder on X, @Ggudman1</a>
-                <a href="https://github.com/Ridwannurudeen" target="_blank" rel="noopener noreferrer" className={linkClass}>Founder on GitHub</a>
-                <a href="https://t.me/Ggudman" target="_blank" rel="noopener noreferrer" className={linkClass}>Founder on Telegram</a>
+                <a href="https://x.com/Ggudman1" target="_blank" rel="noopener noreferrer" className={linkClass}>Founder: @Ggudman1</a>
                 <a href="mailto:support@shieldbotsecurity.online" className={`${linkClass} [overflow-wrap:anywhere]`}>support@shieldbotsecurity.online</a>
               </div>
             </div>

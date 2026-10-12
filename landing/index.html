@@ -54,7 +54,7 @@
           "name": "What is ShieldBot?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "ShieldBot is a transaction security tool for EVM chains. Its browser extension, listed on the Chrome Web Store as ShieldAI Transaction Firewall, checks transactions before you sign them. The Telegram bot, API and MCP server scan contracts and tokens on 8 chains, including Robinhood Chain."
+            "text": "A transaction security tool for EVM chains. The browser extension, listed on the Chrome Web Store as ShieldAI Transaction Firewall, checks transactions before you sign; the Telegram bot, API and MCP server scan contracts on 8 chains, including Robinhood Chain."
           }
         },
         {
@@ -62,7 +62,7 @@
           "name": "How does ShieldBot detect rug pulls and scams?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "It combines contract code checks (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, honeypot checks (a buy and sell simulation where the chain has one, GoPlus's honeypot flags elsewhere) and scam databases. Optional AI analysis adds a written summary. If one of these checks cannot run, the result says Unknown instead of Safe."
+            "text": "Contract code checks (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, honeypot checks (a buy and sell simulation where the chain has one, GoPlus flags elsewhere) and scam databases. If one of these cannot run, the result says Unknown instead of Safe."
           }
         },
         {
@@ -70,7 +70,7 @@
           "name": "Which blockchains does ShieldBot support?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Contract scans work on all 8. Mempool monitoring covers the 4 chains with a public mempool: Ethereum, BNB Chain, opBNB and Polygon. Base, Arbitrum, Optimism and Robinhood Chain have none, so contract scans cover them, and ShieldBot also scans new Robinhood Chain launches. Coverage depends on each chain's data providers, and missing data is reported as Unknown."
+            "text": "Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Contract scans run on all 8 chains. Mempool monitoring covers the 4 chains with a public mempool: Ethereum, BNB Chain, opBNB and Polygon. Missing data is reported as Unknown."
           }
         },
         {
@@ -78,15 +78,15 @@
           "name": "What does ShieldBot do on Robinhood Chain?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "It scans Robinhood Chain tokens, including a buy and sell simulation on supported pool routes, finds new launches and sends launch alerts in Telegram. An on-chain verdict registry and a freshness guard were deployed on Robinhood Chain on 27 September 2026, along with a guarded transfer contract that checks the guard. Version 3.1.0 of the browser extension, on the Chrome Web Store, asks the wallet which chain it is on and sends Robinhood Chain requests to the API for analysis. It has been tested with Rabby; MetaMask testing is still outstanding."
+            "text": "It scans Robinhood Chain tokens with a buy and sell simulation on supported pool routes, finds new launches and sends alerts in Telegram. A verdict registry, a freshness guard and a guarded transfer contract were deployed on Robinhood Chain on 27 September 2026."
           }
         },
         {
           "@type": "Question",
-          "name": "Is ShieldBot free to use?",
+          "name": "How do I install ShieldBot, and what does it cost?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Yes. The Chrome extension and the Telegram bot are free to install and use, and neither needs an account."
+            "text": "Install the extension from the Chrome Web Store, where it is listed as ShieldAI Transaction Firewall. It is free and needs no account, and so is the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report."
           }
         },
         {
@@ -103,14 +103,6 @@
           "acceptedAnswer": {
             "@type": "Answer",
             "text": "The extension shows a safety score out of 100, where higher is safer. It is 100 minus ShieldBot's risk score. 70 or above is SAFE, 51 to 69 is CAUTION, 30 to 50 is HIGH RISK, and 29 or below is BLOCK RECOMMENDED. If a check could not run, the score shows as Unknown instead of a number."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "How do I install ShieldBot?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Install the extension from the Chrome Web Store, where it is listed as ShieldAI Transaction Firewall. It is free and needs no account. You can also use the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report."
           }
         }
       ]
@@ -146,8 +138,8 @@
     </script>
     <script src="/js/plausible-init.js"></script>
     <script async src="/js/script.js"></script>
-    <script type="module" crossorigin src="/assets/index-BGGz3_xk.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Cmxxl5yW.css">
+    <script type="module" crossorigin src="/assets/index-CWBxdpwD.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DX4nMOqZ.css">
   </head>
   <body>
     <div id="root"></div>

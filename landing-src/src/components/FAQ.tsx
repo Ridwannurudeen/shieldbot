@@ -4,23 +4,23 @@ import Icon from "./Icon";
 const faqs = [
   {
     q: "What is ShieldBot?",
-    a: "ShieldBot is a transaction security tool for EVM chains. Its browser extension, listed on the Chrome Web Store as ShieldAI Transaction Firewall, checks transactions before you sign them. The Telegram bot, API and MCP server scan contracts and tokens on 8 chains, including Robinhood Chain.",
+    a: "A transaction security tool for EVM chains. The browser extension, listed on the Chrome Web Store as ShieldAI Transaction Firewall, checks transactions before you sign; the Telegram bot, API and MCP server scan contracts on 8 chains, including Robinhood Chain.",
   },
   {
     q: "How does ShieldBot detect rug pulls and scams?",
-    a: "It combines contract code checks (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, honeypot checks (a buy and sell simulation where the chain has one, GoPlus's honeypot flags elsewhere) and scam databases. Optional AI analysis adds a written summary. If one of these checks cannot run, the result says Unknown instead of Safe.",
+    a: "Contract code checks (including bytecode patterns for unverified contracts), market and liquidity data, on-chain reputation, honeypot checks (a buy and sell simulation where the chain has one, GoPlus flags elsewhere) and scam databases. If one of these cannot run, the result says Unknown instead of Safe.",
   },
   {
     q: "Which blockchains does ShieldBot support?",
-    a: "Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Contract scans work on all 8. Mempool monitoring covers the 4 chains with a public mempool: Ethereum, BNB Chain, opBNB and Polygon. Base, Arbitrum, Optimism and Robinhood Chain have none, so contract scans cover them, and ShieldBot also scans new Robinhood Chain launches. Coverage depends on each chain's data providers, and missing data is reported as Unknown.",
+    a: "Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Contract scans run on all 8 chains. Mempool monitoring covers the 4 chains with a public mempool: Ethereum, BNB Chain, opBNB and Polygon. Missing data is reported as Unknown.",
   },
   {
     q: "What does ShieldBot do on Robinhood Chain?",
-    a: "It scans Robinhood Chain tokens, including a buy and sell simulation on supported pool routes, finds new launches and sends launch alerts in Telegram. An on-chain verdict registry and a freshness guard were deployed on Robinhood Chain on 27 September 2026, along with a guarded transfer contract that checks the guard. Version 3.1.0 of the browser extension, on the Chrome Web Store, asks the wallet which chain it is on and sends Robinhood Chain requests to the API for analysis. It has been tested with Rabby; MetaMask testing is still outstanding.",
+    a: "It scans Robinhood Chain tokens with a buy and sell simulation on supported pool routes, finds new launches and sends alerts in Telegram. A verdict registry, a freshness guard and a guarded transfer contract were deployed on Robinhood Chain on 27 September 2026.",
   },
   {
-    q: "Is ShieldBot free to use?",
-    a: "Yes. The Chrome extension and the Telegram bot are free to install and use, and neither needs an account.",
+    q: "How do I install ShieldBot, and what does it cost?",
+    a: "Install the extension from the Chrome Web Store, where it is listed as ShieldAI Transaction Firewall. It is free and needs no account, and so is the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report.",
   },
   {
     q: "Does ShieldBot have a token?",
@@ -32,31 +32,15 @@ const faqs = [
   },
   {
     q: "What happens when ShieldBot detects a threat?",
-    a: "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation of what it found. On a known phishing site, a red banner appears on the page. For a warning, you choose whether to cancel or sign anyway; Strict mode takes that choice away for Block Recommended and Unknown results and when the check could not run. The extension also refuses a request on its own when the check times out after 60 seconds, when your wallet's chain is unknown, unsupported, different from the transaction's or changes during the check (including a wallet_sendCalls batch with a call on another chain), when the request comes from a frame or popup the page can script, or when the site uses the older send or sendAsync methods.",
+    a: "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation. On a known phishing site a red banner appears. For a warning you choose to cancel or sign; Strict mode takes that choice away for Block Recommended and Unknown results and when the check could not run. The extension also refuses a request on its own when the check times out after 60 seconds, when your wallet's chain is unknown, unsupported or changes during the check (including a wallet_sendCalls batch with a call on another chain), when the request comes from a frame or popup the page can script, or when the site uses the older send or sendAsync methods.",
   },
   {
     q: "What is the safety score?",
     a: "The extension shows a safety score out of 100, where higher is safer. It is 100 minus ShieldBot's risk score. 70 or above is SAFE, 51 to 69 is CAUTION, 30 to 50 is HIGH RISK, and 29 or below is BLOCK RECOMMENDED. If a check could not run, the score shows as Unknown instead of a number.",
   },
   {
-    q: "How is ShieldBot different from other crypto security tools?",
-    a: "ShieldBot checks the actual transaction before you sign, simulates buys and sells to catch honeypots where the chain allows it, and tells you plainly when it could not check something. It also works through Telegram, an API and an MCP server for AI agents.",
-  },
-  {
-    q: "How do I install ShieldBot?",
-    a: "Install the extension from the Chrome Web Store, where it is listed as ShieldAI Transaction Firewall. It is free and needs no account. You can also use the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report.",
-  },
-  {
-    q: "What is a wallet drainer and how does ShieldBot help?",
-    a: "A wallet drainer tricks you into approving a contract, or signing a permit, that can then move your tokens. ShieldBot catches the approval or signature request before you sign, explains it, and flags unlimited approvals to risky contracts. When transaction simulation is enabled, it also shows which assets would leave your wallet. You decide whether to cancel or sign.",
-  },
-  {
     q: "Does ShieldBot work with MetaMask?",
-    a: "ShieldBot hooks the browser's window.ethereum provider when a page loads and listens for EIP-6963 wallet announcements, so it is designed for MetaMask and other injected wallets. Testing across every wallet is still in progress.",
-  },
-  {
-    q: "Will ShieldBot slow down my transactions?",
-    a: "A check usually takes a few seconds before your wallet's signature window opens. Every check shows its verdict: after a SAFE result you continue straight away, and after a warning you can review, cancel or sign anyway.",
+    a: "It hooks window.ethereum and listens for EIP-6963 wallet announcements, so it is designed for MetaMask and other injected wallets. Testing across every wallet is still in progress.",
   },
 ];
 
@@ -75,7 +59,7 @@ export default function FAQ() {
             Questions people ask
           </h2>
           <p className="mt-4 text-[17px] md:text-lg leading-relaxed text-secondary">
-            What ShieldBot checks, what it cannot, and what it does with your data. Something else?{" "}
+            Something else?{" "}
             <a
               href="mailto:support@shieldbotsecurity.online"
               className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-accent-hover"
