@@ -224,7 +224,7 @@ function Orbits() {
             <div className="orbit-arm">
               <div className="orbit-up flex flex-col items-center gap-1 whitespace-nowrap font-mono text-[11px] text-secondary">
                 {chain.logo}
-                {chain.name}
+                <span className="max-sm:hidden">{chain.name}</span>
               </div>
             </div>
           </div>

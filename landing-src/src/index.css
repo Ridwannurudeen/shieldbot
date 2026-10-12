@@ -385,7 +385,7 @@
 }
 .orbit-up svg { width: 32px; height: 32px; }
 @media (max-width: 639px) {
-  .orbits { aspect-ratio: 1; --k: 0.85; --r0: 0.38; --dr: 0.075; }
+  .orbits { aspect-ratio: 1; --k: 0.85; --r0: 0.34; --dr: 0.08; }
   .orbit-up svg { width: 26px; height: 26px; }
 }
 @media (prefers-reduced-motion: no-preference) {
