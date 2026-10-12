@@ -235,6 +235,7 @@ class ContractService:
                 exemption = robinhood_assets.static_explorer_exemption(address, chain_id)
                 if exemption is None and chain_id == 4663:
                     official = asyncio.create_task(robinhood_assets.explorer_exemption(address, chain_id))
+                    official.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
                     await asyncio.wait((official,), timeout=OFFICIAL_LIST_WAIT_SECONDS)
                     if official.done():
                         exemption = official.result()
@@ -327,15 +328,22 @@ class ContractService:
                 if deadline is not None:
                     timeout = max(0.0, deadline - EXPLORER_RESULT_RESERVE_SECONDS - time.monotonic())
                 await asyncio.wait(lookups, timeout=timeout)
-            if official is not None and official.done():
-                exemption = official.result()
             if exemption is not None:
                 results['coverage_exemptions'] = exemption
-            for field, lookup in zip(('is_verified', 'contract_age_days'), lookups if exemption is None else ()):
-                if not lookup.done():
-                    field_reasons[field] = 'Explorer lookup still running at the request deadline; it continues for the next scan'
-                elif isinstance(lookup.exception(), UnsupportedChainError):
+            # The official list answered after the lookups started: it exempts only the fields they
+            # left unanswered.
+            late = official.result() if official is not None and official.done() else None
+            for field, lookup in zip(('is_verified', 'contract_age_days'), lookups):
+                if lookup.done() and isinstance(lookup.exception(), UnsupportedChainError):
                     raise lookup.exception()
+                if late is not None and not (
+                    lookup.done() and lookup.exception() is None
+                    and (lookup.result()[0] if field == 'is_verified' else (lookup.result() or {}).get('age_days'))
+                    is not None
+                ):
+                    results.setdefault('coverage_exemptions', {})[field] = late[field]
+                elif not lookup.done():
+                    field_reasons[field] = 'Explorer lookup still running at the request deadline; it continues for the next scan'
                 elif lookup.exception() is not None:
                     logger.warning("Explorer lookup for %s failed: %s", address, type(lookup.exception()).__name__)
                     field_reasons[field] = f'Explorer lookup failed ({type(lookup.exception()).__name__})'
@@ -346,7 +354,7 @@ class ContractService:
 
             # GoPlus's token record, fetched by the scam check. When the explorer did not answer, it
             # says whether the source is open, which is the same fact.
-            if results['is_verified'] is None and exemption is None and goplus.get('is_open_source') in ('0', '1'):
+            if results['is_verified'] is None and 'is_verified' not in results.get('coverage_exemptions', {}) and goplus.get('is_open_source') in ('0', '1'):
                 results['is_verified'] = goplus['is_open_source'] == '1'
                 results['field_providers'] = {'is_verified': 'goplus'}
                 field_reasons.pop('is_verified', None)

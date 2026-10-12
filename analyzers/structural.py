@@ -58,8 +58,10 @@ class StructuralAnalyzer(Analyzer):
             )
         notes = []
         if exemptions:
+            named = {'is_verified': 'verification', 'contract_age_days': 'contract age'}
             notes.append(
-                f"Explorer verification and contract age not looked up: {exemptions['is_verified']}"
+                f"Explorer {' and '.join(named[field] for field in exemptions)} not needed: "
+                f"{next(iter(exemptions.values()))}"
             )
 
         sniffer_data = {}
