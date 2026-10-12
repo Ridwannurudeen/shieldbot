@@ -213,7 +213,7 @@ export default function HeroRecord() {
           />
         </div>
         <figure className="min-w-0 max-lg:order-first">
-          <div className="relative h-[540px] overflow-hidden rounded-lg border border-hairline bg-ground-alt sm:h-[520px]">
+          <div className="relative h-[540px] overflow-hidden rounded-lg border border-hairline bg-ground-alt sm:h-[520px] lg:h-[420px]">
             <div className="hero-card absolute inset-x-4 top-4 rounded-lg border border-hairline bg-ground p-4 shadow-sm">
               <p className="flex justify-between font-mono text-[11px] leading-4 text-secondary">
                 <span>app.example</span>

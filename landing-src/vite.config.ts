@@ -6,7 +6,7 @@ export default defineConfig({
   build: {
     outDir: "../landing",
     emptyOutDir: true,
-    // Terser, three passes: about 6 KB smaller than esbuild's minifier, which keeps the bundle inside its 320,000 B budget.
+    // Terser, three passes: about 4 KB smaller than esbuild's minifier, which keeps the bundle inside its 320,000 B budget.
     minify: "terser",
     terserOptions: { compress: { passes: 3, ecma: 2020 }, format: { comments: false } },
   },

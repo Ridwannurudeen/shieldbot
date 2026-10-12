@@ -243,7 +243,7 @@ function Orbits() {
 
 export default function Chains() {
   const { stats, fetchedAt } = useStats();
-  // The matrix takes its reading on view: a magenta marker walks down the rows and each row's cells resolve
+  // The matrix takes its reading on view: a magenta needle sweeps across each row and the row's cells resolve
   // behind it, left to right (index.css).
   const matrix = useReading<HTMLDivElement>();
   // A /api/stats reply that lands after the matrix has started its reading switches the mempool squares in place:

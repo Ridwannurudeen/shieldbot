@@ -69,7 +69,7 @@
    cell resolves behind it: a check that ran fills in the reading direction, one that did not draws only its dashed
    edge (a partial one then raises its grey level) and its served reason settles beside it. The evidence rule then
    draws down, the chip lands as it passes, and the evidence lines settle out of the rule one by one, the evidence
-   hash last; the source line closes the record. Hero: about 3 s. The base style is the final frame and every rule
+   hash last; the source line closes the record (in the hero, scene 3 and 4 of the story below). The base style is the final frame and every rule
    below exists only when motion is allowed, so reduced motion shows the final frame at once. Every animation fills
    backwards only: it holds its first frame through its delay, and once it ends the base style takes over, so settled
    text is not left on a compositor layer and renders as it does with reduced motion.

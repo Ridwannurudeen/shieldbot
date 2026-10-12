@@ -3,7 +3,7 @@ import HeroRecord from "./HeroRecord";
 
 export default function Hero() {
   return (
-    <section className="relative border-b border-hairline bg-ground-alt pt-28 pb-14 md:pt-32 md:pb-20">
+    <section className="relative border-b border-hairline bg-ground-alt pt-24 pb-14 md:pb-20">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <p className="font-mono text-xs uppercase tracking-[0.08em] text-secondary">
           Transaction firewall for wallets, contracts and agents
@@ -62,7 +62,7 @@ export default function Hero() {
             </p>
           </div>
         </div>
-        <div className="mt-12 md:mt-14">
+        <div className="mt-8">
           <HeroRecord />
         </div>
       </div>
