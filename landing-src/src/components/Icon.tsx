@@ -15,10 +15,12 @@ export type IconName =
   | "pause"
   | "play"
   | "menu"
-  | "close";
+  | "close"
+  | "sun"
+  | "moon";
 
 // Path data from @carbon/icons 11.90.0 (Apache-2.0), svg/32. "shield" draws Carbon's report glyph: no
-// shield imagery on the site.
+// shield imagery on the site. "sun" and "moon" (the theme switch) are drawn here: 2 px strokes at 16 px.
 const PATHS: Record<IconName, ReactNode> = {
   shield: (
     <>
@@ -95,6 +97,21 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   close: (
     <path d="M17.4141 16 24 9.4141 22.5859 8 16 14.5859 9.4143 8 8 9.4141 14.5859 16 8 22.5859 9.4143 24 16 17.4141 22.5859 24 24 22.5859 17.4141 16z" />
+  ),
+  sun: (
+    <g fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round">
+      <circle cx="16" cy="16" r="8" />
+      <path d="M16 2v2M16 28v2M2 16h2M28 16h2M6.1 6.1l1.4 1.4M24.5 24.5l1.4 1.4M6.1 25.9l1.4-1.4M24.5 7.5l1.4-1.4" />
+    </g>
+  ),
+  moon: (
+    <path
+      d="M27 19.5A11.5 11.5 0 1 1 12.5 5a9 9 0 0 0 14.5 14.5z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="4"
+      strokeLinejoin="round"
+    />
   ),
 };
 

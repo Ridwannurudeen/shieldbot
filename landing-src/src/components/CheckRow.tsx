@@ -115,7 +115,7 @@ export default function CheckRow({
                 // over a hairline.
                 state === "absent"
                   ? "border-ink bg-ground"
-                  : "border-hairline-strong",
+                  : "border-edge",
                 full ? "h-7 w-7 sm:h-8 sm:w-8" : "h-3 w-3",
               ].join(" ")}
             >

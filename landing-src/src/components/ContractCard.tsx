@@ -54,7 +54,7 @@ export default function ContractCard({
         {links.map((link) => (
           <a
             key={link.href}
-            className="inline-flex min-h-[44px] items-center gap-1.5 self-start text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover"
+            className="inline-flex min-h-[44px] items-center gap-1.5 self-start text-sm font-medium text-accent underline underline-offset-4 hover:text-ink"
             href={link.href}
             target="_blank"
             rel="noopener noreferrer"

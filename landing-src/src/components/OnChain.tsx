@@ -107,7 +107,7 @@ function RecordRow({ subject, record, index, again, live }: Row & { index: numbe
             target="_blank"
             rel="noopener noreferrer"
             aria-label={`Record for token ${subject}`}
-            className="mt-1 inline-block font-mono text-[13px] text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
+            className="mt-1 inline-block font-mono text-[13px] text-accent underline underline-offset-2 transition-colors duration-150 hover:text-ink"
           >
             {short(subject)}
           </a>
@@ -133,7 +133,7 @@ function RecordRow({ subject, record, index, again, live }: Row & { index: numbe
                     href={`https://robin.etherscan.io/tx/${record.tx_hash}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
+                    className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-ink"
                   >
                     {short(record.tx_hash)}
                   </a>
@@ -212,7 +212,7 @@ function RecentRecords() {
           </h3>
           <a
             href="/dashboard"
-            className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-accent transition-colors duration-150 hover:text-accent-hover"
+            className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-accent transition-colors duration-150 hover:text-ink"
           >
             Every record on the dashboard
             <Icon name="chevron" size={16} className="-rotate-90" />
@@ -331,7 +331,7 @@ export default function OnChain() {
                 guide, section 3) and run its Python block.
               </p>
               <a
-                className="mt-2 inline-flex min-h-[44px] items-center gap-1.5 self-start text-sm font-medium text-accent underline underline-offset-4 transition-colors duration-150 hover:text-accent-hover"
+                className="mt-2 inline-flex min-h-[44px] items-center gap-1.5 self-start text-sm font-medium text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink"
                 href="https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/JUDGE_GUIDE.md#3-verify-a-verdict-without-trusting-the-api"
                 target="_blank"
                 rel="noopener noreferrer"

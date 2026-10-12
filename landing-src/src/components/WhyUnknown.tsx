@@ -96,7 +96,7 @@ export default function WhyUnknown() {
                         href={`https://robin.etherscan.io/tx/${record.tx_hash}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
+                        className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-ink"
                       >
                         {short(record.tx_hash)}
                       </a>

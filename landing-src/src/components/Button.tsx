@@ -5,8 +5,8 @@ export default function Button(props: { variant?: "primary" | "secondary" | "gho
   const classes = [
     "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors duration-150 ease-out disabled:opacity-50 disabled:cursor-not-allowed",
     size === "md" ? "h-11 px-5 text-[15px]" : "h-10 px-4 text-sm",
-    variant === "primary" && "bg-accent text-on-accent shadow-button hover:bg-accent-hover active:bg-accent-hover",
-    variant === "secondary" && "bg-ground text-ink border border-hairline-strong shadow-sm hover:bg-ground-alt",
+    variant === "primary" && "bg-accent-fill text-on-accent shadow-button hover:bg-accent-fill-hover active:bg-accent-fill-hover",
+    variant === "secondary" && "bg-ground text-ink border border-edge shadow-sm hover:bg-ground-alt",
     variant === "ghost" && "bg-transparent text-secondary hover:bg-ground-alt hover:text-ink",
     className,
   ].filter(Boolean).join(" ");

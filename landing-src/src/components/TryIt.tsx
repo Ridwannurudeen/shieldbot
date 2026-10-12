@@ -90,7 +90,7 @@ function Result({ state }: { state: State }) {
           href={reply.evidence_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-3 inline-flex min-h-[44px] items-center text-sm font-medium text-accent underline underline-offset-4 transition-colors duration-150 hover:text-accent-hover"
+          className="mt-3 inline-flex min-h-[44px] items-center text-sm font-medium text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink"
         >
           Evidence
         </a>
@@ -203,7 +203,7 @@ export default function TryIt() {
             <button
               type="submit"
               disabled={state.kind === "loading"}
-              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-ink px-[18px] text-sm font-medium text-white shadow-button transition-colors duration-150 hover:bg-[#000] disabled:cursor-wait disabled:bg-secondary sm:w-auto"
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-ink px-[18px] text-sm font-medium text-on-ink shadow-button transition-colors duration-150 hover:bg-ink/85 disabled:cursor-wait disabled:bg-secondary sm:w-auto"
             >
               Check now
               <svg

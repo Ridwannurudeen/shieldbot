@@ -88,20 +88,20 @@ export default function HowItWorks() {
             href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-accent-hover"
+            className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink"
           >
             Chrome extension
           </a>
           , a{" "}
-          <a href="https://t.me/shieldbot_bnb_bot" target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-accent-hover">
+          <a href="https://t.me/shieldbot_bnb_bot" target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink">
             Telegram bot
           </a>
           , a{" "}
-          <a href="https://api.shieldbotsecurity.online/docs" target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-accent-hover">
+          <a href="https://api.shieldbotsecurity.online/docs" target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink">
             REST API
           </a>{" "}
           and an{" "}
-          <a href="#agent-security" className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-accent-hover">
+          <a href="#agent-security" className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink">
             MCP server
           </a>{" "}
           for agents.

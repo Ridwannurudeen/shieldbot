@@ -119,12 +119,12 @@ export default function Footer() {
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="you@example.com"
                   required
-                  className="h-11 min-w-0 flex-1 rounded-lg border border-unknown bg-ground px-3 text-[15px] text-ink placeholder:text-secondary transition-colors duration-150 ease-out focus:border-accent"
+                  className="h-11 min-w-0 flex-1 rounded-lg border border-edge bg-ground px-3 text-[15px] text-ink placeholder:text-secondary transition-colors duration-150 ease-out focus:border-accent"
                 />
                 <button
                   type="submit"
                   disabled={status === "loading"}
-                  className="h-11 whitespace-nowrap rounded-lg bg-accent px-5 text-[15px] font-medium text-on-accent shadow-button transition-colors duration-150 ease-out hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-11 whitespace-nowrap rounded-lg bg-accent-fill px-5 text-[15px] font-medium text-on-accent shadow-button transition-colors duration-150 ease-out hover:bg-accent-fill-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {status === "loading" ? "Sending…" : "Get updates"}
                 </button>

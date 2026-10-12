@@ -86,7 +86,7 @@ function Capture({
 }) {
   return (
     <figure className="min-w-0">
-      <div className="flex justify-center rounded-xl border border-hairline bg-[#26262A] px-4 pt-5 sm:px-10 sm:pt-8">
+      <div className="flex justify-center rounded-xl border border-hairline bg-panel px-4 pt-5 sm:px-10 sm:pt-8">
         <img
           src={src}
           width={490}
@@ -146,7 +146,7 @@ function Media({ id }: { id: string }) {
   if (id === "registry")
     return (
       <figure className="min-w-0">
-        <div className="overflow-x-auto rounded-xl bg-panel p-5 font-mono text-[12.5px] leading-[1.7] text-on-panel sm:p-7 sm:text-[13.5px]">
+        <div className="overflow-x-auto rounded-xl border border-hairline bg-panel p-5 font-mono text-[12.5px] leading-[1.7] text-on-panel sm:p-7 sm:text-[13.5px]">
           <pre>
             <span className="text-on-panel-2">// Ask before moving funds.</span>
             {
@@ -173,7 +173,7 @@ function Media({ id }: { id: string }) {
             href={`https://robin.etherscan.io/address/${VIRTUAL}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
+            className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-ink"
           >
             VIRTUAL
           </a>{" "}
@@ -182,7 +182,7 @@ function Media({ id }: { id: string }) {
             href={SUBMISSION}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-accent-hover"
+            className="text-accent underline underline-offset-2 transition-colors duration-150 hover:text-ink"
           >
             docs/SUBMISSION.md
           </a>

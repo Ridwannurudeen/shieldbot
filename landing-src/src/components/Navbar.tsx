@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Button from "./Button";
 import Icon from "./Icon";
+import ThemeToggle from "./ThemeToggle";
 
 const links = [
   { label: "How it works", href: "#how-it-works" },
@@ -45,6 +46,7 @@ export default function Navbar() {
               </a>
             ))}
           </div>
+          <ThemeToggle />
           <Button href={chromeStoreUrl} variant="secondary" size="sm" className="hidden lg:inline-flex">Add to Chrome</Button>
           <Button variant="ghost" size="sm" className="lg:hidden h-11 w-11 min-w-11 !px-0" onClick={() => setOpen(!open)} ariaLabel="Menu" ariaExpanded={open} ariaControls="mobile-menu">
             <Icon name={open ? "close" : "menu"} size={24} />

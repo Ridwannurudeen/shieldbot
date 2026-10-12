@@ -64,7 +64,7 @@ export default function AgentSecurity() {
                 href="https://robin.etherscan.io/address/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-accent underline underline-offset-4 transition-colors duration-150 hover:text-accent-hover"
+                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink"
               >
                 The guard on the explorer
                 <Icon name="external" size={16} />
@@ -73,7 +73,7 @@ export default function AgentSecurity() {
                 href="https://github.com/Ridwannurudeen/shieldbot/blob/main/contracts/base/GUARDED_TRANSFER.md"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-accent underline underline-offset-4 transition-colors duration-150 hover:text-accent-hover"
+                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink"
               >
                 The guarded transfer, a worked consumer
                 <Icon name="external" size={16} />
@@ -93,7 +93,7 @@ export default function AgentSecurity() {
               <p className="mt-2 text-sm leading-relaxed text-secondary">{feature.desc}</p>
               {feature.link && (
                 <a
-                  className="mt-auto inline-flex min-h-[44px] items-center gap-1.5 self-start pt-2 text-sm font-medium text-accent underline underline-offset-4 transition-colors duration-150 hover:text-accent-hover"
+                  className="mt-auto inline-flex min-h-[44px] items-center gap-1.5 self-start pt-2 text-sm font-medium text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink"
                   href={feature.link.href}
                   target="_blank"
                   rel="noopener noreferrer"

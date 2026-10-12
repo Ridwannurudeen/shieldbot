@@ -62,7 +62,7 @@ export default function FAQ() {
             Something else?{" "}
             <a
               href="mailto:support@shieldbotsecurity.online"
-              className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-accent-hover"
+              className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink"
             >
               Write to support
             </a>
