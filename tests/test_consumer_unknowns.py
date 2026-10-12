@@ -423,6 +423,135 @@ def test_covered_cache_keeps_safe(consumer_api):
 
 
 @pytest.mark.asyncio
+async def test_firewall_robinhood_swap_deadline_returns_unknown_with_each_pending_check_named(
+    consumer_api, monkeypatch,
+):
+    api, services = consumer_api
+    monkeypatch.setattr(api, 'FIREWALL_REQUEST_DEADLINE_SECONDS', 0.2, raising=False)
+    monkeypatch.setattr(api, 'FIREWALL_RESPONSE_RESERVE_SECONDS', 0.04, raising=False)
+    token_a, token_b = '0x' + 'c' * 40, '0x' + 'd' * 40
+    api.risk_engine = RiskEngine()
+    sender = '0x' + 'b' * 40
+    decoded = {
+        'selector': '38ed1739', 'function_name': 'swapExactTokensForTokens',
+        'category': 'swap', 'params': {'path': [token_a, token_b], 'to': sender},
+    }
+    names = ['structural', 'market', 'behavioral', 'honeypot', 'intent', 'signature']
+    services.registry.get_all = lambda: [SimpleNamespace(name=name, weight=1 / len(names)) for name in names]
+    services.web3_client._get_adapter = lambda chain_id: None
+    api.calldata_decoder = SimpleNamespace(
+        decode=lambda _: decoded,
+        is_whitelisted_target=lambda *args, **kwargs: 'Robinhood Router',
+    )
+
+    verification_started = asyncio.Event()
+    scans_started = asyncio.Event()
+    simulation_started = asyncio.Event()
+    release = asyncio.Event()
+    verification_calls = []
+    verification_tasks = []
+    scanned_tokens = []
+
+    async def verification(address, **kwargs):
+        verification_calls.append(address.lower())
+        verification_tasks.append(asyncio.current_task())
+        if len(verification_calls) == 2:
+            verification_started.set()
+        await verification_started.wait()
+        await release.wait()
+        return True, None
+
+    async def run_all(ctx, **kwargs):
+        scanned_tokens.append(ctx.address.lower())
+        if len(scanned_tokens) == 2:
+            scans_started.set()
+        await release.wait()
+        return []
+
+    async def simulate_transaction(**kwargs):
+        simulation_started.set()
+        await scans_started.wait()
+        await release.wait()
+        return {'success': True}
+
+    api.web3_client.is_verified_contract = verification
+    services.registry.run_all = run_all
+    api.tenderly_simulator = SimpleNamespace(
+        is_enabled=lambda: True, simulate_transaction=simulate_transaction,
+    )
+
+    import httpx
+    request_started = asyncio.get_running_loop().time()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=api.app), base_url='http://testserver',
+    ) as client:
+        http_response = await asyncio.wait_for(client.post(
+            '/api/firewall',
+            json={
+                'to': '0x' + 'a' * 40, 'from': sender, 'chainId': 4663,
+                'value': '0', 'data': '0x38ed1739',
+            },
+        ), timeout=0.8)
+    assert http_response.status_code == 200
+    response = http_response.json()
+    assert asyncio.get_running_loop().time() - request_started < 0.8
+
+    assert response['status'] == 'unknown'
+    assert response['classification'] != 'SAFE'
+    assert response['partial'] is True
+    assert len(verification_calls) == 2
+    assert len(scanned_tokens) == 2
+    assert simulation_started.is_set()
+    assert scans_started.is_set()
+    assert response['coverage_reasons']['transaction_simulation']
+    for token in (token_a, token_b):
+        assert f'{token}:structural' in response['coverage_reasons']
+        assert f'{token}:honeypot' in response['coverage_reasons']
+
+    release.set()
+    await asyncio.gather(*verification_tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_firewall_approval_metadata_wait_is_inside_request_deadline(consumer_api, monkeypatch):
+    api, services = consumer_api
+    monkeypatch.setattr(api, 'FIREWALL_REQUEST_DEADLINE_SECONDS', 0.2, raising=False)
+    monkeypatch.setattr(api, 'FIREWALL_RESPONSE_RESERVE_SECONDS', 0.04, raising=False)
+    services.registry.get_all = lambda: [SimpleNamespace(name='structural')]
+    release = asyncio.Event()
+    lookup_started = asyncio.Event()
+
+    async def token_info(address, **kwargs):
+        lookup_started.set()
+        await release.wait()
+        return {}
+
+    api.web3_client.get_token_info = token_info
+    api.calldata_decoder = SimpleNamespace(
+        decode=lambda _: {
+            'selector': '095ea7b3', 'function_name': 'approve', 'category': 'approval',
+            'is_approval': True, 'is_unlimited_approval': True,
+            'params': {'spender': '0x' + 'e' * 40, 'amount': 2**256 - 1},
+        },
+        is_whitelisted_target=lambda *args, **kwargs: None,
+    )
+
+    response = await asyncio.wait_for(api.firewall(
+        api.FirewallRequest(
+            to='0x' + 'f' * 40, sender='0x' + 'b' * 40,
+            chainId=4663, data='0x095ea7b3',
+        ),
+        SimpleNamespace(headers={}),
+    ), timeout=0.8)
+
+    assert lookup_started.is_set()
+    assert response['status'] == 'unknown'
+    assert response['coverage_reasons']['token_metadata']
+
+    release.set()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('surface', ['fresh', 'swap'])
 async def test_failed_transaction_simulation_is_incomplete(consumer_api, surface):
     api, services = consumer_api

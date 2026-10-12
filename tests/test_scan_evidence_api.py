@@ -92,7 +92,7 @@ async def evidence_api(monkeypatch, mock_web3_client):
     services = SimpleNamespace(
         web3_client=mock_web3_client,
         db=database,
-        registry=SimpleNamespace(run_all=AsyncMock(side_effect=lambda ctx: _results())),
+        registry=SimpleNamespace(run_all=AsyncMock(side_effect=lambda ctx, **kwargs: _results())),
         policy_engine=None,
         indexer=None,
         counterparty_service=None,
@@ -344,7 +344,7 @@ def test_a_router_swap_records_the_analyzers_of_every_path_token(evidence_api, m
         ),
     )
 
-    def results(ctx):
+    def results(ctx, **kwargs):
         # GoPlus lists no holders for the second token.
         found = _results()
         if ctx.address == PATH[1]:
@@ -500,7 +500,7 @@ def test_a_clean_launch_with_no_holder_list_has_no_danger_signal_and_one_note(
     mock_web3_client.get_contract_creation_info.return_value = {"age_days": 10}
     structural = StructuralAnalyzer(ContractService(mock_web3_client, ScamDatabase()))
 
-    async def run_all(ctx):
+    async def run_all(ctx, **kwargs):
         with (
             patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock(return_value=NO_RECORD)),
             patch("services.contract_service.BSCSCAN_DELAY", 0),

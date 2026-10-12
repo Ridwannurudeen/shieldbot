@@ -42,6 +42,7 @@ class FirstVerdictProgress:
         self.results: List[Tuple[Optional[str], AnalyzerResult]] = []
         self.local_matches = []
         self.pending = set(pending)
+        self.deadline_pending = set()
         self.policy_mode = policy_mode
         self.block_known = asyncio.Event()
         self.describe: Optional[Callable[[], Dict]] = None
