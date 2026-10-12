@@ -1893,7 +1893,7 @@ def test_a_refused_send_or_send_async_call_brings_one_notice():
   const notices = body.children.filter(el => el.shadow && el.shadow.children.some(child => child.className === 'shieldai-notice'));
   assert.equal(notices.length, 1, 'expected one notice however many calls were refused');
   const notice = notices[0].shadow.children.find(child => child.className === 'shieldai-notice');
-  assert.match(notice.textContent, /older wallet method ShieldAI cannot check/);
+  assert.match(notice.textContent, /older wallet method ShieldBot cannot check/);
   assert.equal(notice.attrs.role, 'status');
   // An unchecked call brings none.
   legacy.sendAsync({method: 'eth_chainId'}, () => {});

@@ -98,9 +98,10 @@ def test_manifest_messages_exist_in_every_locale():
             assert messages[key]["message"].strip(), (code, key)
 
 
-def test_name_is_unchanged_in_every_language():
+def test_name_is_the_same_in_every_language():
+    # The product is ShieldBot; 3.3.0 renamed the listing from "ShieldAI Transaction Firewall".
     for messages in store_locales().values():
-        assert messages["extName"]["message"] == "ShieldAI Transaction Firewall"
+        assert messages["extName"]["message"] == "ShieldBot Transaction Firewall"
 
 
 def test_description_is_short_and_honest():
