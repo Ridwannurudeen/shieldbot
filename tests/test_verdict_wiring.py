@@ -84,11 +84,11 @@ async def verdict_api(monkeypatch):
     await database.close()
 
 
-async def publish(database, scan, honeypot=None):
+async def publish(database, scan, honeypot=None, subject=TOKEN):
     publisher = VerdictPublisher(
         database, rpc_url="https://rpc.invalid", registry_address=""
     )
-    return await publisher.publish(4663, TOKEN, scan, honeypot_data=honeypot)
+    return await publisher.publish(4663, subject, scan, honeypot_data=honeypot)
 
 
 @pytest.mark.asyncio
@@ -166,6 +166,19 @@ async def test_permalink_rejects_bad_input(verdict_api, path, status):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path,status",
+    [
+        ("/api/verdicts/recent?chain_id=4663&limit=abc", 422),
+        ("/api/verdicts/recent?limit=10", 422),
+    ],
+)
+async def test_recent_verdicts_rejects_bad_input(verdict_api, path, status):
+    _, client, _ = verdict_api
+    assert client.get(path).status_code == status
+
+
+@pytest.mark.asyncio
 async def test_permalink_is_503_without_a_database(verdict_api, monkeypatch):
     api, client, _ = verdict_api
     monkeypatch.setattr(api.container, "db", None)
@@ -192,7 +205,109 @@ def test_permalink_is_placed_right_after_the_base_attestations_handler():
     ]
     index = routes.index("/api/base/attestations")
     assert routes[index + 1] == "/api/verdict/{chain_id}/{address}"
+    assert routes[index + 2] == "/api/verdicts/recent"
     assert routes.count("/api/verdict/{chain_id}/{address}") == 1
+    assert routes.count("/api/verdicts") == 1
+
+
+@pytest.mark.asyncio
+async def test_recent_verdicts_returns_confirmed_records_newest_first(verdict_api):
+    _, client, database = verdict_api
+    oldest = await publish(
+        database, {**COMPLETE_HIGH, "status": "unknown"}, subject="0x" + "1" * 40
+    )
+    newest = await publish(database, COMPLETE_HIGH, subject="0x" + "2" * 40)
+    pending = await publish(
+        database, {**COMPLETE_HIGH, "rug_probability": 70}, subject="0x" + "3" * 40
+    )
+    failed = await publish(
+        database, {**COMPLETE_HIGH, "rug_probability": 60}, subject="0x" + "4" * 40
+    )
+    await database.update_verdict_onchain(
+        oldest["evidence_id"], "confirmed", tx_hash="old-tx", registry="registry"
+    )
+    await database.update_verdict_onchain(
+        newest["evidence_id"], "confirmed", tx_hash="new-tx", registry="registry"
+    )
+    await database.update_verdict_onchain(pending["evidence_id"], "pending")
+    await database.update_verdict_onchain(failed["evidence_id"], "failed")
+
+    response = client.get("/api/verdicts/recent?chain_id=4663&limit=50")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["chain_id"] == 4663
+    assert body["count"] == 2
+    records = body["records"]
+    assert [record["evidence_hash"] for record in records] == [
+        newest["evidence_hash"], oldest["evidence_hash"]
+    ]
+    fields = {
+        "subject", "verdict", "verdict_code", "evidence_hash", "observed_block",
+        "published_at", "onchain_status", "registry", "tx_hash", "verdict_url",
+    }
+    for record in records:
+        assert set(record) == fields
+        assert "canonical" not in record
+        assert record["onchain_status"] == "confirmed"
+        assert record["verdict_url"] == f"/api/verdict/4663/{record['subject']}"
+    assert records[0]["verdict"] == "HIGH"
+    assert records[0]["verdict_code"] == 3
+    assert records[0]["tx_hash"] == "new-tx"
+    stored = await database.get_verdict_evidence(newest["evidence_id"])
+    assert records[0]["published_at"] == stored["created_at"]
+
+
+@pytest.mark.asyncio
+async def test_recent_verdicts_defaults_to_ten_and_caps_at_fifty(verdict_api):
+    _, client, database = verdict_api
+    for index in range(55):
+        await database.insert_verdict_evidence(
+            4663, f"0x{index:040x}", "HIGH", f"hash-{index}", "{}", index, "confirmed",
+            registry="registry",
+        )
+
+    default = client.get("/api/verdicts/recent?chain_id=4663").json()
+    capped = client.get("/api/verdicts/recent?chain_id=4663&limit=500").json()
+
+    assert default["count"] == 10
+    assert [record["observed_block"] for record in default["records"]] == list(range(54, 44, -1))
+    assert capped["count"] == 50
+    assert [record["observed_block"] for record in capped["records"]] == list(range(54, 4, -1))
+
+
+@pytest.mark.asyncio
+async def test_recent_verdicts_clamps_limit_to_at_least_one(verdict_api):
+    _, client, database = verdict_api
+    await database.insert_verdict_evidence(
+        4663, TOKEN, "HIGH", "hash", "{}", 1, "confirmed", registry="registry"
+    )
+    response = client.get("/api/verdicts/recent?chain_id=4663&limit=0")
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_recent_verdicts_rejects_unsupported_chain(verdict_api):
+    _, client, _ = verdict_api
+    assert client.get("/api/verdicts/recent?chain_id=999999").status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_recent_verdicts_is_503_without_a_database(verdict_api, monkeypatch):
+    api, client, _ = verdict_api
+    monkeypatch.setattr(api.container, "db", None)
+    assert client.get("/api/verdicts/recent?chain_id=4663").status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_recent_verdicts_does_not_shadow_the_verdict_vocabulary(verdict_api, monkeypatch):
+    api, client, _ = verdict_api
+    monkeypatch.setattr(api.verdicts, "describe", lambda calibration: {})
+    assert client.get("/api/verdicts").status_code == 200
+    response = client.get("/api/verdicts/recent?chain_id=4663")
+    assert response.status_code == 200
+    assert response.json()["records"] == []
 
 
 # ---------------------------------------------------------------------------

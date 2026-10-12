@@ -3316,6 +3316,21 @@ class Database:
             for chain_id, documents, confirmed in await cursor.fetchall()
         }
 
+    async def get_recent_confirmed_verdicts(self, chain_id: int, limit: int) -> List[Dict]:
+        """Confirmed on-chain verdict records for one chain, newest first."""
+        cursor = await self._db.execute("""
+            SELECT subject, verdict, evidence_hash, observed_block, created_at, onchain_status, registry, tx_hash
+            FROM verdict_evidence
+            WHERE chain_id = ? AND onchain_status = 'confirmed'
+            ORDER BY id DESC
+            LIMIT ?
+        """, (chain_id, limit))
+        keys = (
+            "subject", "verdict", "evidence_hash", "observed_block", "created_at", "onchain_status",
+            "registry", "tx_hash",
+        )
+        return [dict(zip(keys, row)) for row in await cursor.fetchall()]
+
     async def get_newest_verdict_observation(
         self, chain_id: int, subject: str, include_deduplicated: bool = True,
         registry: Optional[str] = None,
