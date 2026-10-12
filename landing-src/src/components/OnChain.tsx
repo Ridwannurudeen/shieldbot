@@ -89,7 +89,8 @@ type Row = { subject: string; record: RegistryRecord | null | undefined };
 
 // Each record reads itself as it arrives, once the list is in view, 120 ms after the row above it (index.css). Then,
 // while the strip is on screen, one record at a time reads itself again (again counts its turns; live marks the row
-// whose turn it is): the records already fetched, never a new request.
+// whose turn it is): the records already fetched, never a new request. Off screen, in a hidden tab or paused, the
+// strip holds its frame (data-paused).
 
 function RecordRow({ subject, record, index, again, live }: Row & { index: number; again: number; live: boolean }) {
   const loading = record === undefined;
@@ -202,61 +203,63 @@ function RecentRecords() {
       data-read="wait"
       className="mt-10 overflow-hidden rounded-[14px] border border-hairline bg-ground shadow-md"
     >
-      <div ref={alive} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 px-5 py-4">
-        <h3 className="text-lg font-medium text-ink">
-          {fallback
-            ? "Records of the newest launches ShieldBot blocked"
-            : "Newest confirmed records in the registry"}
-        </h3>
-        <a
-          href="/dashboard"
-          className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-accent transition-colors duration-150 hover:text-accent-hover"
-        >
-          Every record on the dashboard
-          <Icon name="chevron" size={16} className="-rotate-90" />
-        </a>
-        <PauseButton paused={paused} setPaused={setPaused} />
-      </div>
-      {rows === undefined ? (
-        <ol aria-busy="true">
-          {Array.from({ length: 3 }, (_, i) => (
-            <li
-              key={i}
-              className="border-t border-hairline px-5 py-4 font-mono text-[13px] text-secondary"
-            >
-              …
-            </li>
-          ))}
-        </ol>
-      ) : rows === null || rows.length === 0 ? (
-        <p className="border-t border-hairline px-5 py-5 text-sm text-secondary">
-          <span className="font-medium text-ink">Unavailable. </span>
-          {rows === null
-            ? "The registry feed did not answer, so no record is shown."
-            : "No record has been published yet."}
+      <div ref={alive} data-paused={on ? undefined : ""}>
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 px-5 py-4">
+          <h3 className="text-lg font-medium text-ink">
+            {fallback
+              ? "Records of the newest launches ShieldBot blocked"
+              : "Newest confirmed records in the registry"}
+          </h3>
+          <a
+            href="/dashboard"
+            className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-accent transition-colors duration-150 hover:text-accent-hover"
+          >
+            Every record on the dashboard
+            <Icon name="chevron" size={16} className="-rotate-90" />
+          </a>
+          <PauseButton paused={paused} setPaused={setPaused} />
+        </div>
+        {rows === undefined ? (
+          <ol aria-busy="true">
+            {Array.from({ length: 3 }, (_, i) => (
+              <li
+                key={i}
+                className="border-t border-hairline px-5 py-4 font-mono text-[13px] text-secondary"
+              >
+                …
+              </li>
+            ))}
+          </ol>
+        ) : rows === null || rows.length === 0 ? (
+          <p className="border-t border-hairline px-5 py-5 text-sm text-secondary">
+            <span className="font-medium text-ink">Unavailable. </span>
+            {rows === null
+              ? "The registry feed did not answer, so no record is shown."
+              : "No record has been published yet."}
+          </p>
+        ) : (
+          <ol>
+            {rows.map((row, index) => (
+              <RecordRow
+                key={row.subject}
+                {...row}
+                index={index}
+                again={turn > index ? Math.floor((turn - 1 - index) / rows.length) + 1 : 0}
+                live={turn > 0 && (turn - 1) % rows.length === index}
+              />
+            ))}
+          </ol>
+        )}
+        <p className="border-t border-hairline bg-ground-alt px-5 py-3 text-xs leading-[18px] text-secondary">
+          {recent === null
+            ? "GET /api/verdicts/recent?chain_id=4663&limit=3 did not answer."
+            : fallback && launches === null
+              ? "GET /api/launches/4663?outcome=blocked&limit=3 did not answer."
+              : fallback
+                ? `Live from GET /api/launches/4663?outcome=blocked&limit=3, then GET /api/verdict/4663/{address}${at}. While in view, one record at a time reads itself again; no new request.`
+                : `Live from GET /api/verdicts/recent?chain_id=4663&limit=3${at}. While in view, one record at a time reads itself again; no new request.`}
         </p>
-      ) : (
-        <ol>
-          {rows.map((row, index) => (
-            <RecordRow
-              key={row.subject}
-              {...row}
-              index={index}
-              again={turn > index ? Math.floor((turn - 1 - index) / rows.length) + 1 : 0}
-              live={turn > 0 && (turn - 1) % rows.length === index}
-            />
-          ))}
-        </ol>
-      )}
-      <p className="border-t border-hairline bg-ground-alt px-5 py-3 text-xs leading-[18px] text-secondary">
-        {recent === null
-          ? "GET /api/verdicts/recent?chain_id=4663&limit=3 did not answer."
-          : fallback && launches === null
-            ? "GET /api/launches/4663?outcome=blocked&limit=3 did not answer."
-            : fallback
-              ? `Live from GET /api/launches/4663?outcome=blocked&limit=3, then GET /api/verdict/4663/{address}${at}. While in view, one record at a time reads itself again; no new request.`
-              : `Live from GET /api/verdicts/recent?chain_id=4663&limit=3${at}. While in view, one record at a time reads itself again; no new request.`}
-      </p>
+      </div>
     </div>
   );
 }

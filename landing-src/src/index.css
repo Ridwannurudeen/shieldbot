@@ -242,7 +242,8 @@
      4300  4. the rule draws; at 4550 the chip stamps (scale 1.6 to 1, opened from its centre, a shadow tightening
               and fading: it lands, no bounce); the verdict dialog replaces the loading one; the evidence settles
      5800  5. the commit card slides up into the stage; the seal draws, block and evidence hash tick in
-   [data-out] eases the story to 0.6 just before it replays; [data-paused] (the Pause button) holds every frame. */
+   [data-out] eases the story to 0.6 just before it replays; [data-paused] (off screen, a hidden tab or the Pause
+   button) holds every frame. */
 .hero-loading { opacity: 0; }
 .hero-tick { display: inline-block; }
 .hero-card { transform-origin: top; transform: translateY(-8px) scale(0.96); }
@@ -398,7 +399,8 @@
 }
 
 /* Recent records (OnChain.tsx): while the strip is on screen, every 4.5 s the next record reads itself again (its key
-   changes) and its row is marked: a magenta bar draws down its edge and an accent tint rises and fades behind it. */
+   changes) and its row is marked: a magenta bar draws down its edge and an accent tint rises and fades behind it.
+   Off screen, in a hidden tab or paused, the strip holds its frame (data-paused). */
 @media (prefers-reduced-motion: no-preference) {
   .rr-live::before {
     content: "";

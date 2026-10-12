@@ -1302,10 +1302,12 @@ def test_every_animation_runs_only_when_motion_is_allowed():
     for name in ("HeroRecord.tsx", "OnChain.tsx", "Chains.tsx"):
         component = read(COMPONENTS / name)
         assert "useAlive<" in component and "<PauseButton paused={paused} setPaused={setPaused} />" in component, name
-    # The only animation that repeats is the orbit, and it is held (data-paused) whenever useAlive is off.
+    # The only animation that repeats is the orbit. The hero, the strip and the orbit each hold their frame
+    # (data-paused) whenever useAlive is off: paused, off screen or in a hidden tab, not only before the next replay.
     for css in (built, source):
         assert sorted(set(re.findall(r"animation:\s*([\w-]+)[^;}]*infinite", css))) == ["orbit-arm", "orbit-up"]
-    assert 'data-paused={on ? undefined : ""}' in read(COMPONENTS / "Chains.tsx")
+    for name in ("HeroRecord.tsx", "OnChain.tsx", "Chains.tsx"):
+        assert 'data-paused={on ? undefined : ""}' in read(COMPONENTS / name), name
 
 
 def test_the_footer_legend_explains_the_registry_chip():

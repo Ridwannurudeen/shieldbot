@@ -14,7 +14,8 @@ import { short, useFeed, utc } from "../registryFeed";
 // live registry record the page already fetched (src/registryFeed.ts), labelled as another token's record, never
 // this request's. A record and a capture are only ever shown together for the same reply. The story replays on each
 // pick, and 14 s after it last started while it is on screen (useAlive: not off screen, not in a hidden tab, not
-// paused, never with reduced motion). The final frame is the base style, so reduced motion shows it at once.
+// paused, never with reduced motion); whenever it is not, the frame on screen holds (data-paused). The final frame is
+// the base style, so reduced motion shows it at once.
 // Nothing here sends a request: the commit card reads the shared feed.
 type Pick = "block" | "unknown" | "safe";
 
@@ -165,7 +166,7 @@ export default function HeroRecord() {
   }, [on, pick, run]);
 
   return (
-    <div ref={ref} data-paused={paused ? "" : undefined}>
+    <div ref={ref} data-paused={on ? undefined : ""}>
       <div
         role="group"
         aria-label="Recorded replies"
