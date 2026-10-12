@@ -38,6 +38,7 @@ from adapters.robinhood import (
     WETH_ADDRESS,
 )
 from core.unknown_ledger import unknown_ledger
+from services.explorer_service import BACKGROUND, _Lane
 
 logger = logging.getLogger(__name__)
 
@@ -818,7 +819,12 @@ class RobinhoodSimulator:
         self._sim_rpc_url = sim_rpc_url or None
         self._cache = TTLCache(maxsize=1024, ttl=CACHE_TTL_SECONDS)
         self._inflight = {}
-        self._simulation_lock = asyncio.Lock()
+        # One simulation at a time, so the official RPC never serves two at once (two in parallel drew
+        # HTTP 429s). A waiting simulation a user is waiting on goes before waiting background ones
+        # (the hunter, the launch watch), as on the explorer's Blockscout lane.
+        self._lane = _Lane()
+        # Tokens whose background simulation a user has since joined: they take a user's turn.
+        self._promoted = set()
 
     async def simulate(self, token: str) -> dict:
         token = token.lower()
@@ -828,13 +834,16 @@ class RobinhoodSimulator:
         flight_key = (asyncio.get_running_loop(), token)
         if flight_key not in self._inflight:
             self._inflight[flight_key] = asyncio.create_task(self._simulate(token, flight_key))
+        elif not BACKGROUND.get():
+            self._promoted.add(token)
+            self._lane.promote(token)
         return await asyncio.shield(self._inflight[flight_key])
 
     async def _simulate(self, token: str, flight_key: tuple) -> dict:
         # Discovery and every pool attempt contribute evidence; retain the oldest read time.
         observed_at = time.time()
         try:
-            async with self._simulation_lock:
+            async with self._lane.hold(BACKGROUND.get() and token not in self._promoted, token):
                 result = await self._run(token)
         except SimulationUnavailable as e:
             logger.warning("Robinhood simulation unavailable: %s", type(e).__name__)
@@ -858,6 +867,7 @@ class RobinhoodSimulator:
             )
         finally:
             self._inflight.pop(flight_key, None)
+            self._promoted.discard(token)
         result["observed_at"] = observed_at
         self._cache[token] = result
         return result
