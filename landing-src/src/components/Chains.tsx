@@ -1,6 +1,7 @@
 import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useStats, type Stats } from "../liveStats";
-import { useReading } from "../reading";
+import { useAlive, useReading } from "../reading";
+import { PauseButton } from "./Button";
 
 // Per-chain coverage. tests/test_website_claims.py checks each row against the chain adapters
 // (sell simulation), services/mempool_service.py (mempool) and services/launch_discovery.py.
@@ -164,7 +165,7 @@ function CapabilityCell({
     <span className="inline-flex min-w-0 max-w-full items-start gap-1 text-[11px] leading-4 text-ink sm:items-center sm:gap-2 sm:text-[13px] sm:leading-5">
       <span
         aria-hidden="true"
-        className={`rd-cell rd-${state}${late ? " rd-late" : ""} h-2.5 w-2.5 flex-none rounded-[2px] border ${square}`}
+        className={`rd-cell rd-${state}${late ? " rd-late" : ""} h-3 w-3 sm:h-3.5 sm:w-3.5 flex-none rounded-[2px] border ${square}`}
       />
       <span className="min-w-0 whitespace-normal">
         {label}
@@ -206,6 +207,40 @@ function launchCell(chain: Chain): { state: CellState; label: string } {
     : { state: "unavailable", label: "No" };
 }
 
+// The chains in orbit (index.css, "Orbits"): each chain on its own ellipse, inner ones faster, logos upright; the
+// magenta ellipse is Robinhood Chain's, the registry's chain. A picture of the table below, which carries the facts,
+// so it is hidden from assistive technology. It moves only while on screen (useAlive).
+function Orbits() {
+  const { ref, on, paused, setPaused } = useAlive<HTMLDivElement>();
+  return (
+    <div ref={ref} data-paused={on ? undefined : ""} className="mt-10">
+      <div aria-hidden="true" className="orbits relative mx-auto max-w-[920px]">
+        {chains.map((chain, i) => (
+          <div
+            key={chain.chainId}
+            className={chain.chainId === 4663 ? "orbit orbit-mark" : "orbit"}
+            style={{ "--o": i } as CSSProperties}
+          >
+            <div className="orbit-arm">
+              <div className="orbit-up flex flex-col items-center gap-1 whitespace-nowrap font-mono text-[11px] text-secondary">
+                {chain.logo}
+                {chain.name}
+              </div>
+            </div>
+          </div>
+        ))}
+        <p className="absolute inset-0 grid place-content-center text-center font-mono text-[11px] uppercase tracking-[0.08em] text-secondary">
+          <span className="font-sans text-[44px] font-medium normal-case leading-none tracking-[-0.03em] text-ink">8</span>
+          chains
+        </p>
+      </div>
+      <div className="flex justify-end">
+        <PauseButton paused={paused} setPaused={setPaused} />
+      </div>
+    </div>
+  );
+}
+
 export default function Chains() {
   const { stats, fetchedAt } = useStats();
   // The matrix takes its reading on view: a magenta marker walks down the rows and each row's cells resolve
@@ -227,6 +262,8 @@ export default function Chains() {
             Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is reported as Unknown, never as Safe.
           </p>
         </div>
+
+        <Orbits />
 
         <div className="mt-10">
           <div className="flex flex-wrap items-center justify-between gap-4">

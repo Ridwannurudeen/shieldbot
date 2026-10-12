@@ -1,12 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import CodeBlock from "./CodeBlock";
 import ContractCard from "./ContractCard";
 import SectionHeader from "./SectionHeader";
 import Icon from "./Icon";
+import { PauseButton } from "./Button";
 import type { CSSProperties } from "react";
 import VerdictRecord from "./VerdictRecord";
 import { registryChip } from "../registryVerdict";
-import { useReading } from "../reading";
+import { useAlive, useReading } from "../reading";
 import {
   REGISTRY_CHAIN,
   loadRecentRecords,
@@ -111,13 +112,15 @@ const API = "https://api.shieldbotsecurity.online";
 
 type Row = { subject: string; record: RegistryRecord | null | undefined };
 
-// Each record reads itself as it arrives, once the list is in view, 120 ms after the row above it (index.css).
+// Each record reads itself as it arrives, once the list is in view, 120 ms after the row above it (index.css). Then,
+// while the strip is on screen, one record at a time reads itself again (again counts its turns; live marks the row
+// whose turn it is): the records already fetched, never a new request.
 
-function RecordRow({ subject, record, index }: Row & { index: number }) {
+function RecordRow({ subject, record, index, again, live }: Row & { index: number; again: number; live: boolean }) {
   const loading = record === undefined;
   return (
     <li
-      className="border-t border-hairline px-5 py-4 lg:py-5"
+      className={`${live ? "rr-live " : ""}relative isolate border-t border-hairline px-5 py-4 lg:py-5`}
       style={{ "--vr-d": `${index * 120}ms` } as CSSProperties}
     >
       <div className="grid gap-4 sm:grid-cols-[minmax(120px,0.7fr)_minmax(0,2.4fr)] lg:grid-cols-[minmax(140px,0.65fr)_minmax(0,2fr)] lg:items-start">
@@ -137,6 +140,7 @@ function RecordRow({ subject, record, index }: Row & { index: number }) {
           {record ? (
             <>
               <VerdictRecord
+                key={again}
                 animate
                 chip={registryChip(record.verdict, record.verdict_code)}
                 chain={REGISTRY_CHAIN}
@@ -188,6 +192,13 @@ function RecordRow({ subject, record, index }: Row & { index: number }) {
 function RecentRecords() {
   const { recent, launches, records, fetchedAt } = useFeed();
   const strip = useReading<HTMLDivElement>();
+  const { ref: alive, on, paused, setPaused } = useAlive<HTMLDivElement>();
+  const [turn, setTurn] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    const timer = setTimeout(() => setTurn(turn + 1), 4_500);
+    return () => clearTimeout(timer);
+  }, [on, turn]);
 
   // In the fallback each row needs its own record request; they are sent only once the strip is about a screen
   // away, so a visitor who never scrolls here does not spend the API's per-minute allowance on them.
@@ -221,7 +232,7 @@ function RecentRecords() {
       data-read="wait"
       className="mt-10 overflow-hidden rounded-[14px] border border-hairline bg-ground shadow-md"
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-5 py-4">
+      <div ref={alive} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 px-5 py-4">
         <h3 className="text-lg font-medium text-ink">
           {fallback
             ? "Records of the newest launches ShieldBot blocked"
@@ -234,6 +245,7 @@ function RecentRecords() {
           Every record on the dashboard
           <Icon name="chevron" size={16} className="-rotate-90" />
         </a>
+        <PauseButton paused={paused} setPaused={setPaused} />
       </div>
       {rows === undefined ? (
         <ol aria-busy="true">
@@ -256,7 +268,13 @@ function RecentRecords() {
       ) : (
         <ol>
           {rows.map((row, index) => (
-            <RecordRow key={row.subject} {...row} index={index} />
+            <RecordRow
+              key={row.subject}
+              {...row}
+              index={index}
+              again={turn > index ? Math.floor((turn - 1 - index) / rows.length) + 1 : 0}
+              live={turn > 0 && (turn - 1) % rows.length === index}
+            />
           ))}
         </ol>
       )}
@@ -266,8 +284,8 @@ function RecentRecords() {
           : fallback && launches === null
             ? "GET /api/launches/4663?outcome=blocked&limit=5 did not answer."
             : fallback
-              ? `Live from GET /api/launches/4663?outcome=blocked&limit=5, then GET /api/verdict/4663/{address} for each launch${at}. Each row is that token's newest record.`
-              : `Live from GET /api/verdicts/recent?chain_id=4663&limit=5${at}: confirmed records, newest first.`}
+              ? `Live from GET /api/launches/4663?outcome=blocked&limit=5, then GET /api/verdict/4663/{address} for each launch${at}. Each row is that token's newest record. While in view, one record at a time reads itself again; no new request.`
+              : `Live from GET /api/verdicts/recent?chain_id=4663&limit=5${at}: confirmed records, newest first. While in view, one record at a time reads itself again; no new request.`}
       </p>
     </div>
   );

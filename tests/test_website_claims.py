@@ -1215,7 +1215,29 @@ def test_the_hero_request_lines_are_the_recorded_calls():
         assert request["chainId"] == record["chain_id"], name
         assert record["request"]["method"] == selectors[request["data"][:10]], name
         assert record["request"]["to"] == f"{request['to'][:6]}…{request['to'][-4:]}", name
-    assert "request={`${reply.request.method} · to ${reply.request.to}`}" in read(COMPONENTS / "HeroRecord.tsx")
+        # approve(address,uint256): the spender is the first argument, the last 40 hex digits of its 32-byte word.
+        spender = "0x" + request["data"][34:74]
+        assert record["request"]["spender"] == f"{spender[:6]}…{spender[-4:]}", name
+    hero = " ".join(read(COMPONENTS / "HeroRecord.tsx").split())
+    assert "request={`${reply.request.method} · to ${reply.request.to}`}" in hero
+    # The signing card is an illustration of the recorded call, under a placeholder dApp, and says so.
+    assert "<dd>{reply.request.spender}</dd>" in hero and "<span>app.example</span>" in hero
+    assert "The signing card is an illustration: a placeholder dApp asking to sign the recorded call." in hero
+
+
+def test_the_hero_commit_card_shows_a_live_record_never_the_recorded_request():
+    # The recorded replies were never published, so the hero's commit beat shows the newest registry record the
+    # shared feed already fetched, labelled as another token's live record; it sends no request and prints no block
+    # of its own.
+    hero = " ".join(read(COMPONENTS / "HeroRecord.tsx").split())
+    assert "useFeed()" in hero and "fetch(" not in hero
+    assert "{label} · live, not the request above" in hero
+    assert '"Newest confirmed registry record"' in hero
+    assert '"Registry record of the newest launch ShieldBot blocked"' in hero
+    assert "value(record?.observed_block)" in hero
+    assert 'record?.onchain_status === "confirmed"' in hero
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert "live, not the request above" in bundle
 
 
 def media_blocks(css: str):
@@ -1254,6 +1276,33 @@ def test_every_animation_runs_only_when_motion_is_allowed():
         for selector, allowed in rules:
             assert allowed, selector
     assert "animation-duration: 0.01ms !important;" in source
+    # The pre-states that hide, clip, offset or hold something before it plays (a slot's clip, a transparent rule,
+    # a paused wait) exist only when motion is allowed too, so with reduce nothing starts hidden or frozen. The source
+    # only: the built CSS also holds Tailwind's static utilities (border-l-transparent).
+    for css in (source,):
+        stripped = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        held = [
+            (media, selector)
+            for media, selector, body in media_blocks(stripped)
+            if not selector.startswith("@keyframes") and not re.match(r"(from|to|\d)", selector)
+            and re.search(r"clip-path:|animation-play-state:|border(-left)?-color:\s*transparent", body)
+        ]
+        assert len(held) >= 4
+        for media, selector in held:
+            assert any("prefers-reduced-motion:no-preference" in m.replace(" ", "") for m in media), selector
+    # What keeps moving (the hero's replay, the strip's re-reading, the orbits) starts only through useAlive, which
+    # never turns on with reduced motion, and its Pause button is hidden there.
+    reading = read(LANDING_SRC / "src" / "reading.ts")
+    assert 'if (paused || matchMedia("(prefers-reduced-motion: reduce)").matches) {' in reading
+    assert "document.hidden" in reading and "new IntersectionObserver(" in reading
+    assert "motion-reduce:hidden" in read(COMPONENTS / "Button.tsx")
+    for name in ("HeroRecord.tsx", "OnChain.tsx", "Chains.tsx"):
+        component = read(COMPONENTS / name)
+        assert "useAlive<" in component and "<PauseButton paused={paused} setPaused={setPaused} />" in component, name
+    # The only animation that repeats is the orbit, and it is held (data-paused) whenever useAlive is off.
+    for css in (built, source):
+        assert sorted(set(re.findall(r"animation:\s*([\w-]+)[^;}]*infinite", css))) == ["orbit-arm", "orbit-up"]
+    assert 'data-paused={on ? undefined : ""}' in read(COMPONENTS / "Chains.tsx")
 
 
 def test_the_footer_legend_explains_the_registry_chip():

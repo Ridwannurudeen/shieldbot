@@ -5,12 +5,13 @@ import type { ScanReply } from "./firewallVerdict";
 // evidence hash, which the page never shows. Instead the fields the page renders are transcribed here, the
 // hash already shortened, and tests/test_website_claims.py checks every one against its fixture.
 // request is the recorded call itself (hero-overlay{,-unknown,-safe}-request.json): the method its 4-byte selector
-// names and its target address, shortened; the calldata is not transcribed.
+// names, its target address (the token contract) and the spender its calldata approves, both shortened; the rest of
+// the calldata is not transcribed.
 // A recorded reply has no observed block, publication time or guard outcome; those are registry fields.
 export interface RecordedReply extends ScanReply {
   fixture: string;
   sent_at: string;
-  request: { method: string; to: string };
+  request: { method: string; to: string; spender: string };
   chain_id: number;
   network: string;
   plain_english: string;
@@ -27,6 +28,7 @@ export const recordedReplies: Record<
     request: {
       method: "approve(address,uint256)",
       to: "0xa0b8…eb48",
+      spender: "0x1fcd…9107",
     },
     status: "ok",
     partial: false,
@@ -52,6 +54,7 @@ export const recordedReplies: Record<
     request: {
       method: "approve(address,uint256)",
       to: "0x8adb…8900",
+      spender: "0x89e5…9eba",
     },
     status: "unknown",
     partial: true,
@@ -82,6 +85,7 @@ export const recordedReplies: Record<
     request: {
       method: "approve(address,uint256)",
       to: "0x912c…6548",
+      spender: "0x68b3…fc45",
     },
     status: "ok",
     partial: false,

@@ -77,15 +77,6 @@
    --vr-r the rule starts (the chip lands 250 ms later). Easing: --e-read even-paced reading, --e-draw the rule,
    --e-out every settle (expo-out, no overshoot: a verdict settles, it does not bounce).
    In the hero (HeroRecord.tsx) the capture slot shows the overlay's loading dialog until the chip lands. */
-@layer components {
-  .hero-loading { opacity: 0; }
-  @media (min-width: 640px) {
-    .story-fade {
-      -webkit-mask-image: linear-gradient(#000 78%, transparent);
-      mask-image: linear-gradient(#000 78%, transparent);
-    }
-  }
-}
 
 @media (prefers-reduced-motion: no-preference) {
   :root {
@@ -154,9 +145,9 @@
 }
 
 /* Sections read on view (src/reading.ts): paused on the first frame until [data-read] turns "go".
-   Chain matrix (Chains.tsx): a 2 px magenta marker walks down the rows, 110 ms apart; each row's three cells resolve
-   behind it left to right, 70 ms apart (filled ones wipe in, dashed and outline ones fade in); their labels stay
-   legible throughout. A /api/stats reply that lands once the reading has started switches the mempool cells in
+   Chain matrix (Chains.tsx): a 3 px magenta needle with a trail sweeps across each row, 900 ms, rows 180 ms apart (a
+   diagonal wave down the table); each row's three cells resolve as it passes them (filled ones wipe in, dashed and
+   outline ones fade in); their labels stay legible throughout. A /api/stats reply that lands once the reading has started switches the mempool cells in
    place (rd-late). */
 @media (prefers-reduced-motion: no-preference) {
   [data-read="wait"] *,
@@ -172,16 +163,17 @@
     top: 0;
     bottom: 0;
     left: 0;
-    width: 2px;
-    background: rgb(var(--c-accent));
+    width: calc(100% / 0.3 - 1px);
+    background: linear-gradient(to left, rgb(var(--c-accent)) 3px, rgb(var(--c-accent) / 0.1) 3px, transparent 45%);
     opacity: 0;
-    animation: rd-mark 520ms var(--e-read) calc(var(--r) * 110ms) backwards;
+    pointer-events: none;
+    animation: rd-sweep 900ms var(--e-read) calc(var(--r) * 180ms) backwards;
   }
   .rd-cell {
-    --t: calc(var(--r) * 110ms + 140ms + var(--c, 0) * 70ms);
-    animation: story-fade-in 240ms ease-out var(--t) backwards;
+    --t: calc(var(--r) * 180ms + 300ms + var(--c, 0) * 210ms);
+    animation: story-fade-in 360ms ease-out var(--t) backwards;
   }
-  .rd-available { animation: vr-wipe 280ms var(--e-out) var(--t) backwards; }
+  .rd-available { animation: vr-wipe 420ms var(--e-out) var(--t) backwards; }
   .rd-cell.rd-late { animation: none; }
 }
 
@@ -193,9 +185,9 @@
   [data-read] .vr-animate .vr-chip { animation-name: vr-legible; }
 }
 
-/* Process track (HowItWorks.tsx): the rule draws one segment per step, 600 ms each; as a segment starts its node
-   lights and its step rises from dim; the last segment is the magenta one, and the record at its end reads itself
-   from 1500 ms (--vr-d). About 4 s, once. */
+/* Process track (HowItWorks.tsx): the rule draws one segment per step, 900 ms each, a 3 px magenta pen head riding its
+   front; as a segment starts its node lights and its step rises from 0.6; the last segment is the magenta one, and the
+   record at its end reads itself from 2400 ms (--vr-d), its needle 3 px. About 5 s, once. */
 @media (prefers-reduced-motion: no-preference) {
   .pt-step { border-color: transparent; }
   .pt-step::after {
@@ -207,20 +199,100 @@
     width: 1px;
     background: rgb(var(--c-hairline-strong));
     transform-origin: top;
-    animation: vr-draw 600ms var(--e-draw) calc(var(--s) * 600ms) backwards;
+    animation: vr-draw 900ms var(--e-draw) calc(var(--s) * 900ms) backwards;
+  }
+  .pt-step::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -2px;
+    width: 3px;
+    height: 100%;
+    background: linear-gradient(to top, rgb(var(--c-accent)) 24px, transparent 24px);
+    opacity: 0;
+    animation: pt-pen 900ms var(--e-draw) calc(var(--s) * 900ms) backwards;
   }
   .pt-last::after { background: rgb(var(--c-accent)); }
-  .pt-node { animation: pt-node 360ms var(--e-out) calc(var(--s) * 600ms) backwards; }
+  .pt-node { animation: pt-node 420ms var(--e-out) calc(var(--s) * 900ms) backwards; }
   .pt-step > p,
-  .pt-step > h3 { animation: pt-rise 520ms var(--e-out) calc(var(--s) * 600ms + 120ms) backwards; }
+  .pt-step > h3 { animation: pt-rise 600ms var(--e-out) calc(var(--s) * 900ms + 150ms) backwards; }
+  .vr-compact { --vr-g: 160ms; --vr-n: 320ms; --vr-r: 1100ms; }
+  .vr-compact .vr-slot::after { background: linear-gradient(to left, rgb(var(--c-accent)) 3px, transparent 0); }
 }
 @media (prefers-reduced-motion: no-preference) and (min-width: 1024px) {
   .pt-step::after { top: -1px; bottom: auto; left: 0; right: 0; width: auto; height: 1px; transform-origin: left; animation-name: pt-draw-x; }
+  .pt-step::before {
+    top: -2px;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    background: linear-gradient(to left, rgb(var(--c-accent)) 24px, transparent 24px);
+    animation-name: pt-pen-x;
+  }
 }
 
-@media (prefers-reduced-motion: no-preference) and (min-width: 640px) {
-  .hero-loading { animation: hero-loading 1750ms linear backwards; }
-  .hero-verdict { animation: story-fade-in 350ms ease-out 1550ms backwards; }
+/* The hero story (HeroRecord.tsx): about 7 s, replayed on each pick and 14 s after it last started while on screen.
+   The final frame is the base style: the signing card receded behind the overlay's verdict dialog, the record read,
+   the commit card at the stage's foot. Depth is 2D only: scale and shadow, no tilt, nothing dims the page.
+     0     1. the signing card rises into the stage (from 0.6, 28 px, scale .97), the request line wipes in
+     1100  2. the loading dialog slides up over it (48 px, scale .94); the card recedes (scale .96, -8 px)
+     1700  3. a 4 px needle with a trail reads each large cell, 520 ms each, 400 ms apart; a cell that ran fills and
+              presses (scale .9); on one that did not, the needle stalls part way and fades, the dashed edge draws
+              and its served reason settles beside the row
+     4300  4. the rule draws; at 4550 the chip stamps (scale 1.6 to 1, opened from its centre, a shadow tightening
+              and fading: it lands, no bounce); the verdict dialog replaces the loading one; the evidence settles
+     5800  5. the commit card slides up into the stage; the seal draws, block and evidence hash tick in
+   [data-out] eases the story to 0.6 just before it replays; [data-paused] (the Pause button) holds every frame. */
+.hero-loading { opacity: 0; }
+.hero-tick { display: inline-block; }
+.hero-card { transform-origin: top; transform: translateY(-8px) scale(0.96); }
+.hero-seal { stroke: rgb(var(--c-accent)); stroke-width: 1.6; stroke-dasharray: 1; }
+.vr-hero .vr-slot { width: 100%; max-width: 88px; height: auto; aspect-ratio: 1; }
+.vr-hero .vr-slot + span { font-size: 13px; line-height: 18px; }
+.vr-hero .vr-cell { border-width: 2px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  :root { --e-stamp: cubic-bezier(0.2, 0.9, 0.1, 1); }
+  [data-paused] *,
+  [data-paused] *::before,
+  [data-paused] *::after { animation-play-state: paused !important; }
+
+  .hero-run { transition: opacity 400ms var(--e-draw); animation: vr-legible 400ms var(--e-out) backwards; }
+  [data-out] .hero-run { opacity: 0.6; }
+
+  .hero-card { animation: hero-card 1800ms var(--e-out) backwards; }
+  .hero-loading { animation: hero-loading 5000ms linear backwards; }
+  .hero-verdict { animation: hero-verdict 500ms var(--e-out) 4450ms backwards; }
+  .hero-commit { animation: hero-commit 650ms var(--e-out) 5800ms backwards; }
+  .hero-seal rect { animation: hero-seal 500ms var(--e-draw) 6150ms backwards; }
+  .hero-seal path { animation: hero-seal 300ms var(--e-out) 6600ms backwards; }
+  .hero-tick { animation: vr-wipe 700ms steps(9, end) 6300ms backwards; }
+
+  .vr-hero .vr-animate { --vr-s: 1700ms; --vr-g: 400ms; --vr-n: 520ms; --vr-r: 4300ms; }
+  .vr-hero .vr-slot {
+    clip-path: inset(-12px 0);
+    animation: vr-press 420ms var(--e-out) calc(var(--vr-s) + var(--i) * var(--vr-g) + var(--vr-n) * 0.7) backwards;
+  }
+  .vr-hero .vr-slot::after {
+    inset: -12px -1px;
+    background: linear-gradient(to left, rgb(var(--c-accent)) 4px, rgb(var(--c-accent) / 0.16) 4px, transparent 80%);
+  }
+  .vr-hero .vr-slot:has(.vr-none)::after,
+  .vr-hero .vr-slot:has(.vr-partial)::after { animation-name: vr-stall; }
+  .vr-hero .vr-chip {
+    position: relative;
+    width: fit-content;
+    animation: vr-stamp 600ms var(--e-stamp) calc(var(--vr-r) + 250ms) backwards;
+  }
+  .vr-hero .vr-chip::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 6px;
+    box-shadow: 0 18px 32px -8px rgb(var(--c-ink) / 0.45);
+    opacity: 0;
+    animation: vr-shadow 700ms var(--e-out) calc(var(--vr-r) + 250ms) backwards;
+  }
 }
 
 @keyframes vr-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
@@ -233,17 +305,44 @@
 @keyframes vr-rise { from { transform: scaleY(0); } }
 @keyframes vr-draw { from { transform: scaleY(0); } }
 @keyframes vr-tick { from { transform: scaleX(0); } }
-@keyframes rd-mark { 30% { opacity: 1; } }
+@keyframes rd-sweep {
+  from { transform: translateX(-100%); opacity: 1; }
+  85% { opacity: 1; }
+  to { transform: none; opacity: 0; }
+}
 @keyframes pt-draw-x { from { transform: scaleX(0); } }
+@keyframes pt-pen { from { transform: translateY(-100%); opacity: 1; } 90% { opacity: 1; } to { transform: none; opacity: 0; } }
+@keyframes pt-pen-x { from { transform: translateX(-100%); opacity: 1; } 90% { opacity: 1; } to { transform: none; opacity: 0; } }
 @keyframes pt-node { from { opacity: 0; transform: scale(0.4); } }
 @keyframes pt-rise { from { opacity: 0.6; transform: translateY(6px); } }
 @keyframes vr-legible { from { opacity: 0.6; } }
 @keyframes vr-settle-legible { from { opacity: 0.6; transform: translateX(-6px); } }
 @keyframes story-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes hero-loading {
-  0%, 100% { opacity: 0; }
-  6%, 85% { opacity: 1; }
+  0%, 22% { opacity: 0; transform: translateY(48px) scale(0.94); animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+  34%, 93% { opacity: 1; transform: none; }
+  to { opacity: 0; transform: none; }
 }
+@keyframes hero-card {
+  from { opacity: 0.6; transform: translateY(28px) scale(0.97); }
+  35%, 61% { opacity: 1; transform: none; }
+}
+@keyframes hero-verdict { from { opacity: 0; transform: scale(0.97); } }
+@keyframes hero-commit { from { transform: translateY(calc(100% + 16px)); } }
+@keyframes hero-seal { from { stroke-dashoffset: 1; } }
+@keyframes vr-press { 40% { transform: scale(0.9); } }
+@keyframes vr-stall {
+  from { transform: translateX(-100%); opacity: 0; }
+  12% { opacity: 1; }
+  55% { transform: translateX(-45%); opacity: 1; }
+  to { transform: translateX(-45%); opacity: 0; }
+}
+@keyframes vr-stamp {
+  from { transform: scale(1.6); opacity: 0.6; clip-path: inset(50% round 6px); }
+  25% { clip-path: inset(-40px round 6px); }
+  to { transform: none; opacity: 1; clip-path: inset(-40px round 6px); }
+}
+@keyframes vr-shadow { from { opacity: 1; transform: translateY(14px) scale(1.25); } }
 
 @layer components {
   .try-select {
@@ -253,6 +352,78 @@
     background-size: 14px;
   }
 }
+
+/* Orbits (Chains.tsx): each chain on its own ellipse, a hairline (Robinhood Chain's magenta), periods 18 s (inner) to
+   60 s (outer), each starting at its own angle (137.5 deg apart). 2D only: an arm squashed by --k turns, and the logo
+   turns back and un-squashes, so it stays upright and crisp; nothing tilts, blurs or fades. With reduced motion the
+   planets stand at their starting angles. The only motion on the page that repeats: it runs only while on screen and
+   the tab is visible, and its Pause button holds it (data-paused). */
+.orbits { container-type: inline-size; aspect-ratio: 2 / 1; --k: 0.42; --r0: 0.24; --dr: 0.1; }
+.orbit {
+  --r: calc(var(--r0) + var(--o) * var(--dr));
+  --a: calc(var(--o) * 137.5deg);
+  --p: calc(18s + var(--o) * 6s);
+  position: absolute;
+  left: 50%;
+  top: 50%;
+}
+.orbit::before {
+  content: "";
+  position: absolute;
+  width: calc(var(--r) * 100cqw);
+  height: calc(var(--r) * var(--k) * 100cqw);
+  transform: translate(-50%, -50%);
+  border: 1px solid rgb(var(--c-hairline-strong));
+  border-radius: 50%;
+}
+.orbit-mark::before { border-color: rgb(var(--c-accent)); }
+.orbit-arm { position: absolute; transform: scaleY(var(--k)) rotate(var(--a)); }
+.orbit-up {
+  position: absolute;
+  transform-origin: 0 0;
+  transform: translateX(calc(var(--r) * 50cqw)) rotate(calc(-1 * var(--a))) scaleY(calc(1 / var(--k))) translate(-50%, -50%);
+}
+.orbit-up svg { width: 32px; height: 32px; }
+@media (max-width: 639px) {
+  .orbits { aspect-ratio: 1; --k: 0.8; --r0: 0.36; --dr: 0.085; }
+  .orbit-up svg { width: 26px; height: 26px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .orbit-arm { animation: orbit-arm var(--p) linear infinite; }
+  .orbit-up { animation: orbit-up var(--p) linear infinite; }
+}
+@keyframes orbit-arm { to { transform: scaleY(var(--k)) rotate(calc(var(--a) + 1turn)); } }
+@keyframes orbit-up {
+  to { transform: translateX(calc(var(--r) * 50cqw)) rotate(calc(-1 * var(--a) - 1turn)) scaleY(calc(1 / var(--k))) translate(-50%, -50%); }
+}
+
+/* Recent records (OnChain.tsx): while the strip is on screen, every 4.5 s the next record reads itself again (its key
+   changes) and its row is marked: a magenta bar draws down its edge and an accent tint rises and fades behind it. */
+@media (prefers-reduced-motion: no-preference) {
+  .rr-live::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: rgb(var(--c-accent-tint));
+    opacity: 0;
+    animation: rr-tint 2400ms var(--e-out) backwards;
+  }
+  .rr-live::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 3px;
+    background: rgb(var(--c-accent));
+    transform-origin: top;
+    opacity: 0;
+    animation: rr-mark 2400ms var(--e-draw) backwards;
+  }
+}
+@keyframes rr-tint { 15% { opacity: 1; } }
+@keyframes rr-mark { from { opacity: 1; transform: scaleY(0); } 30%, 80% { opacity: 1; transform: none; } }
 
 /* Accordion (FAQ.tsx): the panel opens from 0fr to 1fr in 300 ms, so nothing measures height. */
 @layer components {

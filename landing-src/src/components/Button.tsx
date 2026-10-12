@@ -18,3 +18,13 @@ export default function Button(props: { variant?: "primary" | "secondary" | "gho
 
   return <button type={type ?? "button"} onClick={onClick} disabled={disabled} aria-label={ariaLabel} aria-pressed={ariaPressed} aria-expanded={ariaExpanded} aria-controls={ariaControls} className={classes}>{children}</button>;
 }
+
+// Pause and play for a part of the page that keeps moving (useAlive, src/reading.ts); hidden with reduced motion,
+// where nothing moves.
+export function PauseButton({ paused, setPaused }: { paused: boolean; setPaused: (paused: boolean) => void }) {
+  return (
+    <button type="button" onClick={() => setPaused(!paused)} className="h-9 rounded-lg border border-hairline-strong bg-ground px-3 font-mono text-xs text-ink transition-colors duration-150 hover:bg-ground-alt motion-reduce:hidden">
+      {paused ? "Play motion" : "Pause motion"}
+    </button>
+  );
+}
