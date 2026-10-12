@@ -247,12 +247,6 @@ def test_evidence_links_are_not_fine_print():
     assert "text-[13px] text-emerald" not in read(COMPONENTS / "OnChain.tsx")
 
 
-def test_the_site_has_one_light_theme_and_no_theme_script():
-    for page in TWELVE_PAGES:
-        assert "data-theme" not in read(page), page
-    assert "[data-theme" not in read(LANDING_SRC / "src" / "index.css")
-
-
 def welcome_text() -> str:
     """The visible text of the extension's welcome page, without its styles and scripts."""
     html = re.sub(r"<(style|script)\b.*?</\1>", " ", read(WELCOME), flags=re.DOTALL)
@@ -578,7 +572,7 @@ def test_no_inline_script_and_no_hash_in_the_policy():
     script_src = re.search(r"script-src ([^;]*);", csp).group(1)
     assert "'unsafe-inline'" not in script_src
     assert script_src.count("'sha256-") == 0, script_src
-    for page in TWELVE_PAGES:
+    for page in [*TWELVE_PAGES, LANDING_SRC / "public" / "try" / "index.html", ROOT / "landing" / "try" / "index.html"]:
         parser = InlineScriptChecker()
         parser.feed(read(page))
         parser.close()
@@ -1031,8 +1025,8 @@ process.stdout.write(JSON.stringify(out));
     markup = json.loads(run_typescript(script, json.dumps(coverage)))
     cells = dict(zip(CHECK_ORDER, markup["full"].split("<li")[1:]))
     assert "Unavailable" in cells["market"] and not re.search(r">\s*0</span>", cells["market"])
-    assert "border-ink bg-ground" in cells["market"] and "border-hairline-strong" not in cells["market"]
-    assert re.search(r">\s*0</span>", cells["behavioral"]) and "border-hairline-strong" in cells["behavioral"]
+    assert "border-ink bg-ground" in cells["market"] and "border-edge" not in cells["market"]
+    assert re.search(r">\s*0</span>", cells["behavioral"]) and "border-edge" in cells["behavioral"]
     for key in ("intent", "signature"):
         assert "Unavailable" in cells[key] and "border-ink bg-ground" in cells[key], key
     assert "market: Unavailable" in markup["compact"] and "market: did not run" not in markup["compact"]
@@ -1226,6 +1220,44 @@ def test_the_hero_request_lines_are_the_recorded_calls():
     # The signing card is an illustration of the recorded call, under a placeholder dApp, and says so.
     assert "<dd>{reply.request.spender}</dd>" in hero and "<span>app.example</span>" in hero
     assert "The signing card is an illustration: a placeholder dApp asking to sign the recorded call." in hero
+
+
+def test_the_hero_says_lines_are_the_recorded_replies():
+    # What the hero says on each verdict field is fields of the recorded reply, never a paraphrase: one sentence of
+    # plain_english (the first, or for an incomplete reply its last, since the first lists the coverage reasons the
+    # record prints), then risk_score, or each coverage key below 1 with its value, and the chain.
+    def js(number):
+        return str(int(number)) if float(number).is_integer() else str(number)
+
+    says = {}
+    for name, record in recorded_replies().items():
+        reply = json.loads(read(LANDING_SRC / "scripts" / record["fixture"]))
+        incomplete = reply["status"] != "ok" or reply.get("partial") is True or any(
+            float(value) < 1 for value in reply["coverage"].values()
+        )
+        sentences = re.split(r"(?<=\.) ", reply["plain_english"])
+        measure = (
+            [f"{key} {js(reply['coverage'][key])}" for key in CHECK_ORDER if reply["coverage"][key] < 1]
+            if incomplete
+            else [f"risk_score {js(reply['risk_score'])}"]
+        )
+        says[name] = (sentences[-1] if incomplete else sentences[0], " · ".join([*measure, f"chain {reply['chain_id']}"]))
+    assert says == {
+        "block": ("Do not proceed with this transaction.", "risk_score 100 · chain 1"),
+        "unknown": ("Review the missing data before proceeding.", "market 0 · honeypot 0.4 · chain 4663"),
+        "safe": ("No major risks detected.", "risk_score 6.4 · chain 42161"),
+    }
+    hero = " ".join(read(COMPONENTS / "HeroRecord.tsx").split())
+    for line in (
+        "const sentences = reply.plain_english.split(/(?<=\\.) /);",
+        "CHECK_ORDER.filter((key) => reply.coverage[key] < 1).map( (key) => `${key} ${reply.coverage[key]}`, )",
+        ": [`risk_score ${reply.risk_score}`];",
+        "sentence: incomplete ? sentences[sentences.length - 1] : sentences[0],",
+        "measure: [...measure, `chain ${reply.chain_id}`].join(\" · \"),",
+        "{says.sentence}",
+        "{says.measure}",
+    ):
+        assert line in hero, line
 
 
 def test_the_hero_commit_card_shows_a_live_record_never_the_recorded_request():

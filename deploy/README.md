@@ -166,8 +166,8 @@ The landing vhost's reference is `nginx-shieldbotsecurity-new.conf` (below).
 
 ### No inline script: the policy carries no hash
 
-The landing pages have no inline script (the site has one white theme, so the theme restore script
-and its hash are gone). `script-src` is `'self'` with no `'unsafe-inline'` and no `'sha256-` in
+The landing pages have no inline script (the theme is restored by `/js/theme.js`, a same-origin file
+allowed by `'self'`). `script-src` is `'self'` with no `'unsafe-inline'` and no `'sha256-` in
 `nginx-shieldbotsecurity-new.conf`. `tests/test_website_claims.py` fails if any of the twelve pages
 (the six sources under `landing-src/` and their six built copies under `landing/`) gains a bare
 `<script>` or the reference policy gains a hash.

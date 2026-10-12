@@ -1,7 +1,7 @@
 import Icon from "./Icon";
 import { setTheme, useTheme } from "../theme";
 
-// The theme switch (THEME-SPEC 4.2): a native button with role="switch", checked when the light theme is on. Enter
+// The theme switch (THEME-SPEC 4.2): a native button in the switch role, checked when the light theme is on. Enter
 // and Space toggle it; the glyph is a sun while dark and a moon while light.
 export default function ThemeToggle() {
   const light = useTheme() === "light";
