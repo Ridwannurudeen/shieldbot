@@ -230,6 +230,7 @@ class TestHelpCommand:
 **/token <address>** - Check if a token is safe to trade
 **/chain** - Switch active chain
 **/rescue <wallet>** - Scan wallet for risky token approvals
+**/rescue bot:<wallet>** - Scan BOT Chain token approvals with BDEX names, dollar values and revoke links; BOT Chain has approval scanning only
 **/threats** - Live mempool threat alerts
 **/campaign <address>** - Check if address is part of a scam campaign
 **/report <address> <reason>** - Report a scam address

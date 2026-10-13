@@ -6,6 +6,7 @@ ready-to-sign revocation transactions for one-click cleanup.
 
 import asyncio
 import logging
+import math
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,6 +16,7 @@ from cachetools import TTLCache
 from eth_utils import keccak
 from web3 import Web3
 
+from adapters.botchain_approval import BOTCHAIN_RPC_URL, BotChainApprovalReader
 from utils.chain_info import CHAIN_INFO, get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,9 @@ APPROVAL_TOPIC = "0x" + keccak(text="Approval(address,address,uint256)").hex()
 
 # ApprovalForAll event topic (ERC-721/1155)
 APPROVAL_FOR_ALL_TOPIC = "0x" + keccak(text="ApprovalForAll(address,address,bool)").hex()
+BOTCHAIN_CHAIN_ID = 677
+BOTCHAIN_LOG_WINDOW_BLOCKS = 1_000_000
+BOTCHAIN_USDT = "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
 
 # A chain without a configured logs RPC is read through its adapter's public RPC, which serves no
 # archive history, so rescue reads only recent approval history there: 24 windows of 10,000
@@ -51,6 +56,8 @@ RECENT_LOG_WINDOWS = 24
 PUBLIC_RPC_CONCURRENCY = 4
 PUBLIC_RPC_ATTEMPTS = 3
 RATE_LIMIT_TERMS = ("rate limit", "rate-limit", "too many requests")
+SPENDER_CODE_DEADLINE_SECONDS = 5
+SPENDER_CODE_MARGIN_SECONDS = 1
 
 # A scan answers within SCAN_DEADLINE_SECONDS or says it did not finish: nginx closes the API's
 # connection at 60 s (deploy/nginx-api.conf.example) and the extension's Health tab gives up at
@@ -171,6 +178,13 @@ KNOWN_SAFE_SPENDERS = {
         "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap Meta Aggregation Router V2",
         "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": "OpenOcean Exchange V2",
     },
+    BOTCHAIN_CHAIN_ID: {
+        "0x1414ed29fdfd322c3c0a830330ed982e2d629e76": "BDEX V2 Router02",
+        "0x07032d47a1b9f8460cbee9dc17c1d3e438693929": "BDEX V3 SwapRouter",
+        "0xae6ae8630f7a888dec0b9195c85f7515d5887655": "BDEX Universal Router",
+        "0x8366170f09a04f715a13549d616a06aed16db7c3": "Permit2",
+        "0xdac3fcff004d8a8675b94e44941a1a2e3b240090": "BDEX V3 Position Manager",
+    },
 }
 
 # Stablecoins by chain — price = $1.00 without an API call, only on the chain they live on
@@ -192,6 +206,11 @@ STABLECOINS = {
 def _known_spender(spender: str, chain_id: int) -> Optional[str]:
     """Label of a known safe spender on ``chain_id``, or None."""
     return KNOWN_SAFE_SPENDERS.get(chain_id, {}).get(spender)
+
+
+def truncate_token_text(value: str) -> str:
+    """Keep untrusted BOT Chain token labels within the approval reply budget."""
+    return value if len(value) <= 24 else value[:23] + "…"
 
 
 def _is_rate_limited(error) -> bool:
@@ -242,6 +261,7 @@ class RescueService:
     # Override with LOGS_RPC_URL (BSC default) or per-chain entries in logs_rpcs.
     _DEFAULT_LOGS_RPC = ""
     _DEXSCREENER_API = "https://api.dexscreener.com/tokens/v1"
+    _BOTCHAIN_PRICE_API = "https://dex-wallet.botchain.ai/api/graph/price"
 
     def __init__(
         self,
@@ -261,19 +281,27 @@ class RescueService:
         # Kept for callers that still read it (read-only).
         self._logs_rpc = self._logs_rpcs.get(56, "")
         self._results = TTLCache(maxsize=1024, ttl=RESULT_CACHE_SECONDS)
+        self._botchain_adapter = None
 
     def approval_history(self, chain_id: int) -> Dict[str, Any]:
         """How much approval history a scan on chain_id tries to read: all of it from a configured
         logs RPC (newest first, within HISTORY_DEADLINE_SECONDS; each result's scanned_blocks says
         what was read), or the newest windows from the chain's own RPC. Names no RPC, since its URL
         can carry a key."""
+        if chain_id == BOTCHAIN_CHAIN_ID:
+            return {
+                "history": "recent",
+                "window_blocks": BOTCHAIN_LOG_WINDOW_BLOCKS * RECENT_LOG_WINDOWS,
+            }
         if chain_id in self._logs_rpcs:
             return {"history": "full", "window_blocks": None}
         window = PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
         return {"history": "recent", "window_blocks": window * RECENT_LOG_WINDOWS}
 
-    def _rpc_for(self, chain_id: int) -> str:
+    def _rpc_for(self, chain_id: int, botchain_approval_scan: bool = False) -> str:
         """Resolve archive RPC URL for a chain. Falls back to the registered adapter's RPC."""
+        if botchain_approval_scan and chain_id == BOTCHAIN_CHAIN_ID:
+            return BOTCHAIN_RPC_URL
         adapter = self._web3_client._get_adapter(chain_id) if self._web3_client else None
         url = self._logs_rpcs.get(chain_id)
         if url:
@@ -285,8 +313,14 @@ class RescueService:
                 return endpoint
         return ""
 
+    def _botchain_reader(self):
+        if self._botchain_adapter is None:
+            self._botchain_adapter = BotChainApprovalReader()
+        return self._botchain_adapter
+
     async def scan_approvals(
-        self, wallet_address: str, chain_id: int = 56, etherscan_api_key: str = ""
+        self, wallet_address: str, chain_id: int = 56, etherscan_api_key: str = "",
+        *, botchain_approval_scan: bool = False,
     ) -> Dict[str, Any]:
         """Scan a wallet's active token approvals and assess risk.
 
@@ -308,6 +342,12 @@ class RescueService:
         was read. A scan that read none is not: that is often a passing timeout or rate limit, so
         the next call tries again.
         """
+        from utils.web3_client import UnsupportedChainError
+
+        if botchain_approval_scan and chain_id != BOTCHAIN_CHAIN_ID:
+            raise ValueError("BOT Chain approval mode only supports chain 677")
+        if chain_id == BOTCHAIN_CHAIN_ID and not botchain_approval_scan:
+            raise UnsupportedChainError("Unsupported chain ID 677")
         wallet = wallet_address.lower()
         cached = self._results.get((chain_id, wallet))
         if cached is not None:
@@ -317,7 +357,8 @@ class RescueService:
             # *this* scan ran out, which a wall clock cannot distinguish from an unrelated cancel.
             async with asyncio.timeout(SCAN_DEADLINE_SECONDS) as scan_budget:
                 approvals, coverage_reasons, scanned_blocks = await self._fetch_approvals(
-                    wallet, chain_id, scan_budget
+                    wallet, chain_id, scan_budget,
+                    botchain_approval_scan=botchain_approval_scan,
                 )
         except TimeoutError:
             logger.warning(
@@ -384,7 +425,8 @@ class RescueService:
         return result
 
     async def _fetch_approvals(
-        self, wallet: str, chain_id: int, scan_budget: asyncio.Timeout, api_key: str = ""
+        self, wallet: str, chain_id: int, scan_budget: asyncio.Timeout, api_key: str = "",
+        *, botchain_approval_scan: bool = False,
     ) -> Tuple[List[ApprovalInfo], Dict[str, str], Optional[Dict[str, int]]]:
         """Fetch and verify active token approvals, with reasons for incomplete data.
 
@@ -406,11 +448,11 @@ class RescueService:
 
         approvals = []
         coverage_reasons: Dict[str, str] = {}
-        rpc_url = self._rpc_for(chain_id)
+        rpc_url = self._rpc_for(chain_id, botchain_approval_scan=botchain_approval_scan)
         if not rpc_url:
             logger.warning(f"No logs RPC configured for chain {chain_id}")
             raise RuntimeError(f"Approval scan unavailable: no logs RPC configured for chain {chain_id}")
-        public_rpc = chain_id not in self._logs_rpcs
+        public_rpc = botchain_approval_scan or chain_id not in self._logs_rpcs
         deadline = asyncio.get_running_loop().time() + HISTORY_DEADLINE_SECONDS
         try:
             # The history, allowance and balance reads share one pool of connections to the chain's
@@ -435,7 +477,11 @@ class RescueService:
                         # deadline stopped the read: then nothing more is asked of it.
                         public_rpc = scanned_from > latest and not budget.expired()
                 if public_rpc:
-                    window = PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
+                    window = (
+                        BOTCHAIN_LOG_WINDOW_BLOCKS
+                        if botchain_approval_scan
+                        else PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
+                    )
                     budget = asyncio.timeout_at(deadline)
                     all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
                         wallet, connector, rpc_url, window, budget
@@ -467,16 +513,30 @@ class RescueService:
                         amount_hex = log.get("data", "0x0")
                         amount = int(amount_hex, 16) if amount_hex and amount_hex != "0x" else 0
                         block = int(log.get("blockNumber", "0x0"), 16)
+                        log_index = 0
+                        if botchain_approval_scan:
+                            log_index_hex = log.get("logIndex", "0x0")
+                            log_index = (
+                                int(log_index_hex, 16)
+                                if log_index_hex and log_index_hex != "0x"
+                                else 0
+                            )
 
                         key = (token, spender.lower())
                         existing = latest_events.get(key)
-                        if not existing or block > existing["block"]:
-                            latest_events[key] = {
+                        is_newer = not existing or block > existing["block"]
+                        if botchain_approval_scan and existing and block == existing["block"]:
+                            is_newer = log_index > existing["log_index"]
+                        if is_newer:
+                            latest_event = {
                                 "token": token,
                                 "spender": spender.lower(),
                                 "amount": amount,
                                 "block": block,
                             }
+                            if botchain_approval_scan:
+                                latest_event["log_index"] = log_index
+                            latest_events[key] = latest_event
                     except (ValueError, IndexError, KeyError):
                         continue
 
@@ -552,8 +612,14 @@ class RescueService:
                 coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
                 return [], coverage_reasons, scanned_blocks
             try:
+                metadata_calls = [
+                    self._botchain_reader().get_token_info(token)
+                    if botchain_approval_scan
+                    else self._web3_client.get_token_info(token, chain_id)
+                    for token in active_tokens
+                ]
                 token_info_results = await asyncio.gather(
-                    *[self._web3_client.get_token_info(token, chain_id) for token in active_tokens],
+                    *metadata_calls,
                     return_exceptions=True,
                 )
             except asyncio.CancelledError:
@@ -581,16 +647,37 @@ class RescueService:
                 price_reason = coverage_reasons.get("prices")
                 coverage_reasons["prices"] = f"{price_reason}; {reason}" if price_reason else reason
 
+            codeless_spenders = set()
+            if botchain_approval_scan:
+                unknown_spenders = sorted({
+                    spender for _, spender in verified
+                    if _known_spender(spender, chain_id) is None
+                })
+                loop = asyncio.get_running_loop()
+                code_deadline = min(
+                    loop.time() + SPENDER_CODE_DEADLINE_SECONDS,
+                    scan_budget.when() - SPENDER_CODE_MARGIN_SECONDS,
+                )
+                if unknown_spenders and code_deadline > loop.time():
+                    codeless_spenders = await self._spenders_without_code(
+                        unknown_spenders, rpc_url, code_deadline,
+                    )
+
             # Build ApprovalInfo for each verified active approval
             for (token, spender), current_allowance in verified.items():
                 token_info = token_info_map.get(token, {})
                 name = token_info.get("name", "Unknown")
                 symbol = token_info.get("symbol", "???")
+                if botchain_approval_scan:
+                    name = truncate_token_text(name if isinstance(name, str) else "Unknown")
+                    symbol = truncate_token_text(symbol if isinstance(symbol, str) else "???")
                 # Unread decimals stay unknown: a default of 18 misstated every amount of a token
                 # with other decimals by 10^(18 - decimals), 1,000 USDC at risk as $0.00.
                 decimals = token_info.get("decimals")
 
-                spender_label = _known_spender(spender, chain_id) or "Unknown Contract"
+                spender_label = _known_spender(spender, chain_id) or (
+                    "Unknown address" if spender in codeless_spenders else "Unknown Contract"
+                )
                 risk_level, risk_reason = self._assess_approval_risk(
                     spender, current_allowance, spender_label, chain_id
                 )
@@ -820,6 +907,33 @@ class RescueService:
             logger.warning("Approval state call unavailable: %s", type(e).__name__)
             return None
 
+    async def _spenders_without_code(
+        self, spenders: List[str], rpc_url: str, deadline: float
+    ) -> set:
+        """Return BOT Chain spenders whose code lookup answered empty before the deadline."""
+        semaphore = asyncio.Semaphore(PUBLIC_RPC_CONCURRENCY)
+        codeless = set()
+
+        async def read_code(session: aiohttp.ClientSession, spender: str) -> None:
+            async with semaphore:
+                try:
+                    code = await self._public_rpc(
+                        session, rpc_url, "eth_getCode", [spender, "latest"]
+                    )
+                except Exception as error:
+                    logger.warning("Spender code unavailable: %s", type(error).__name__)
+                    return
+            if code == "0x":
+                codeless.add(spender)
+
+        try:
+            async with asyncio.timeout_at(deadline):
+                async with aiohttp.ClientSession() as session:
+                    await asyncio.gather(*(read_code(session, spender) for spender in spenders))
+        except TimeoutError:
+            logger.warning("Spender code read stopped at its deadline")
+        return codeless
+
     async def _fetch_log_chunk(
         self,
         session: aiohttp.ClientSession,
@@ -971,12 +1085,20 @@ class RescueService:
 
         # Hardcode stablecoin prices
         for token in tokens:
-            if token.lower() in STABLECOINS.get(chain_id, ()):
+            if token.lower() in STABLECOINS.get(chain_id, ()) or (
+                chain_id == BOTCHAIN_CHAIN_ID and token.lower() == BOTCHAIN_USDT
+            ):
                 prices[token] = 1.0
 
-        slug = get_dexscreener_slug(chain_id)
         to_fetch = [t for t in tokens if t not in prices]
-        if not to_fetch or not slug:
+        if not to_fetch:
+            return prices
+        if chain_id == BOTCHAIN_CHAIN_ID:
+            prices.update(await self._fetch_botchain_prices(to_fetch))
+            return prices
+
+        slug = get_dexscreener_slug(chain_id)
+        if not slug:
             return prices
 
         BATCH_SIZE = 30
@@ -1027,6 +1149,68 @@ class RescueService:
 
         return prices
 
+    async def _fetch_botchain_prices(self, tokens: List[str]) -> Dict[str, float]:
+        semaphore = asyncio.Semaphore(PUBLIC_RPC_CONCURRENCY)
+
+        async def fetch_price(
+            session: aiohttp.ClientSession, token: str
+        ) -> Tuple[str, Optional[float]]:
+            async with semaphore:
+                try:
+                    async with session.get(
+                        self._BOTCHAIN_PRICE_API,
+                        params={"token": token},
+                        headers={
+                            "User-Agent": (
+                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                "Chrome/130.0.0.0 Safari/537.36"
+                            )
+                        },
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status != 200:
+                            return token, None
+                        answer = await resp.json(content_type=None)
+
+                    if not isinstance(answer, dict) or answer.get("success") is not True:
+                        return token, None
+                    data = answer.get("data")
+                    if not isinstance(data, dict):
+                        return token, None
+                    response_token = data.get("token")
+                    path = data.get("path")
+                    if (
+                        not isinstance(response_token, str)
+                        or response_token.lower() != token.lower()
+                        or not isinstance(path, list)
+                        or not path
+                        or not isinstance(path[-1], str)
+                        or path[-1].lower() != BOTCHAIN_USDT
+                    ):
+                        return token, None
+
+                    raw_price = data.get("price")
+                    if isinstance(raw_price, bool):
+                        return token, None
+                    price = float(raw_price)
+                    if not math.isfinite(price) or price <= 0:
+                        return token, None
+                    return token, price
+                except Exception as error:
+                    logger.warning("BOT Chain price request failed: %s", type(error).__name__)
+                    return token, None
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                results = await asyncio.gather(
+                    *(fetch_price(session, token) for token in tokens)
+                )
+        except Exception as error:
+            logger.warning("BOT Chain price fetch failed: %s", type(error).__name__)
+            return {}
+        return {token: price for token, price in results if price is not None}
+
     def _assess_approval_risk(
         self, spender: str, amount: int, spender_label: str, chain_id: int
     ) -> tuple:
@@ -1036,12 +1220,12 @@ class RescueService:
         if amount >= UNLIMITED_THRESHOLD:
             if is_known_safe:
                 return "MEDIUM", f"Unlimited approval to {spender_label} — safe but excessive"
-            return "HIGH", "Unlimited approval to unknown contract"
+            return "HIGH", f"Unlimited approval to {spender_label.lower()}"
 
         if amount >= HIGH_APPROVAL:
             if is_known_safe:
                 return "LOW", f"Large approval to {spender_label}"
-            return "MEDIUM", "Large approval to unknown contract"
+            return "MEDIUM", f"Large approval to {spender_label.lower()}"
 
         if is_known_safe:
             return "LOW", f"Normal approval to {spender_label}"
@@ -1053,24 +1237,25 @@ class RescueService:
             return None
 
         if approval.risk_level == "HIGH":
+            noun = "address" if approval.spender_label == "Unknown address" else "contract"
             return RescueAlert(
                 alert_type="dangerous_approval",
                 severity="HIGH",
                 title=f"Dangerous Approval: {approval.token_symbol}",
                 description=(
                     f"Your wallet has an unlimited approval for {approval.token_symbol} "
-                    f"({approval.token_name}) granted to an unknown contract "
+                    f"({approval.token_name}) granted to an {approval.spender_label.lower()} "
                     f"({approval.spender[:10]}...)."
                 ),
                 what_it_means=(
-                    "This contract can spend ALL of your "
+                    f"This {noun} can spend ALL of your "
                     f"{approval.token_symbol} tokens at any time without "
-                    "further permission. If the contract is malicious or gets "
+                    f"further permission. If the {noun} is malicious or gets "
                     "compromised, your tokens could be drained instantly."
                 ),
                 what_you_can_do=[
                     "Revoke this approval immediately from your own wallet",
-                    f"Check the contract {approval.spender} on the block explorer",
+                    f"Check the {noun} {approval.spender} on the block explorer",
                     "If you don't recognize this approval, it may be from a phishing site",
                 ],
                 affected_token=approval.token_address,
