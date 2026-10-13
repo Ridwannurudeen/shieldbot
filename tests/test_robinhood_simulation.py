@@ -40,6 +40,7 @@ from services.robinhood_simulation import (
     evaluate_simulation,
     _error_string,
     tax_percent,
+    _v3_pool_address as _v3_address,
 )
 from utils.scam_db import ScamDatabase
 from utils.web3_client import Web3Client
@@ -60,7 +61,9 @@ def load(name):
 
 def pool_of(fixture):
     key = tuple(fixture["key"]) if "key" in fixture else None
-    return Pool(fixture["route"], fixture["numeraire"], key=key, pair=fixture.get("pair"))
+    return Pool(
+        fixture["route"], fixture["numeraire"], key=key, pair=fixture.get("pair"), fee=fixture.get("fee")
+    )
 
 
 def selector(signature):
@@ -131,6 +134,7 @@ def evaluate(fixture, sell_amount=None):
         "v4_weth_hookless",
         "v2_router02",
         "v2_honeypot_sell_reverts",
+        "v3_weth_native",
     ],
 )
 def test_request_matches_live_verified_calldata(name):
@@ -195,6 +199,51 @@ def test_v4_buy_and_sell_use_the_deployed_router_layout():
     assert calls["buy"]["status"] == calls["sell"]["status"] == "0x1"
 
 
+def test_v3_buy_and_sell_use_the_deployed_router_layout():
+    # The deployed Dispatcher reads V3_SWAP_EXACT_IN/OUT inputs as (recipient, amount, limit, path,
+    # payerIsUser, minHopPriceX36). Both paths are token, uint24 fee, WETH: exact output is written output
+    # first. The buy wraps the budget into the router (ADDRESS_THIS) and unwraps the rest to the buyer; the
+    # sell pays from the buyer through Permit2 and unwraps the WETH output to the buyer.
+    fixture = load("v3_weth_native")
+    calls = calls_by_label(fixture)
+    request = fixture["request"][0]["blockStateCalls"][0]["calls"]
+    labels = call_labels(pool_of(fixture))
+    buy = request[labels.index("buy")]
+    sell = request[labels.index("sell")]
+
+    def w(value):
+        return value.rjust(64, "0")
+
+    token, buyer = fixture["token"][2:], fixture["buyer"][2:]
+    path = token + "002710" + WETH[2:]
+    assert len(path) == 2 * 43
+    path_tail = w("2b") + path.ljust(128, "0") + w("0")
+    wrap = w("2") + w("8ac7230489e80000")
+    exact_out = w(buyer) + w("3635c9adc5dea00000") + w("8ac7230489e80000") + w("c0") + w("0") + w("120") + path_tail
+    unwrap = w(buyer) + w("0")
+    exact_in = w("2") + w("3635c9adc5dea00000") + w("0") + w("c0") + w("1") + w("120") + path_tail
+    execute = selector("execute(bytes,bytes[],uint256)").hex()
+    deadline = 2**256 - 1
+
+    def envelope(commands, inputs):
+        return (
+            "0x"
+            + execute
+            + encode(
+                ["bytes", "bytes[]", "uint256"],
+                [bytes(commands), [bytes.fromhex(item) for item in inputs], deadline],
+            ).hex()
+        )
+
+    assert fixture["amount"] == int("3635c9adc5dea00000", 16)
+    assert buy["data"] == envelope([0x0B, 0x01, 0x0C], [wrap, exact_out, unwrap])
+    assert sell["data"] == envelope([0x00, 0x0C], [exact_in, unwrap])
+    assert buy["to"] == sell["to"] == robinhood_simulation.UNIVERSAL_ROUTER
+    assert buy["value"] == hex(10**19)
+    assert "value" not in sell
+    assert calls["buy"]["status"] == calls["sell"]["status"] == "0x1"
+
+
 # --- verdicts on recorded live simulations --------------------------------------------------
 
 
@@ -206,6 +255,7 @@ def test_v4_buy_and_sell_use_the_deployed_router_layout():
         ("v4_doppler_native_fee_hook", 65551521, 7988294284787),
         ("v4_weth_hookless", 65704949, 2002143633592),
         ("v2_router02", 65551531, 1141608),
+        ("v3_weth_native", 87235140, 158205204358774),
     ],
 )
 def test_recorded_buy_and_sell_are_measured(name, block, output):
@@ -241,6 +291,7 @@ def test_live_honeypot_is_proven_unsellable():
         ("v4_weth_hookless", "TRANSFER_FROM_FAILED"),
         ("v4_hookless_usdg_nvda", "TRANSFER_FROM_FAILED"),
         ("v2_router02", "TransferHelper: TRANSFER_FROM_FAILED"),
+        ("v3_weth_native", "TRANSFER_FROM_FAILED"),
     ],
 )
 def test_token_refusing_the_sell_is_a_honeypot(name, message):
@@ -278,6 +329,16 @@ def test_invalid_utf8_plain_transfer_revert_does_not_crash_sell_trap_attribution
     assert outcome["can_sell"] is False
     assert outcome["is_honeypot"] is True
     assert "plain transfer to a fresh address also reverted" in outcome["reason"]
+
+
+def test_a_v3_pool_rejecting_a_short_payment_is_not_a_trap():
+    # A V3 pool reverts IIA when it receives less than the swap asked for (a transfer-taxed token); the
+    # pool shape, not the token's sell, is what fails, so the sell stays unknown.
+    outcome = evaluate(failed_sell(load("v3_weth_native"), error_string("IIA")))
+    assert outcome["can_buy"] is True
+    assert outcome["can_sell"] is None
+    assert outcome["is_honeypot"] is None
+    assert 'sell reverted with an unattributed error (Error("IIA"))' in outcome["reason"]
 
 
 def test_every_route_has_a_token_refused_string():
@@ -1199,6 +1260,7 @@ class FakeRpc:
         logs=None,
         pool_slots=None,
         head=65_540_000,
+        v3_liquidity=None,
     ):
         self.token = token
         self.supply = supply
@@ -1207,6 +1269,7 @@ class FakeRpc:
         self.state = state or doppler_state()
         self.slot0 = slot0
         self.pool_slots = pool_slots or {}
+        self.v3_liquidity = v3_liquidity or {}
         self.simulations = list(simulations)
         self.logs = logs or {}
         self.head = head
@@ -1251,6 +1314,9 @@ class FakeRpc:
         if data.startswith("0x" + selector("getState(address)").hex()):
             assert target == HOOK_INITIALIZER
             return {"result": self.state}
+        if data == "0x" + selector("liquidity()").hex():
+            # No code at the address: an eth_call returns empty data.
+            return {"result": word(self.v3_liquidity[target]) if target in self.v3_liquidity else "0x"}
         if data.startswith("0x" + selector("extsload(bytes32)").hex()):
             assert target == POOL_MANAGER
             slot = data[-64:]
@@ -1306,12 +1372,17 @@ def rpc_for(fixture, **overrides):
         }
     elif fixture["route"] == "v2":
         options.update(pair=fixture["pair"], reserves=(10**20, 10**27))
+    elif fixture["route"] == "v3":
+        options["v3_liquidity"] = {fixture["pair"]: 1}
     options.update(overrides)
     return FakeRpc(**options)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["v4_native_liquidity_launcher", "v4_doppler_weth", "v4_doppler_native_fee_hook", "v2_router02"])
+@pytest.mark.parametrize(
+    "name",
+    ["v4_native_liquidity_launcher", "v4_doppler_weth", "v4_doppler_native_fee_hook", "v2_router02", "v3_weth_native"],
+)
 async def test_discovery_finds_the_pool_and_runs_one_simulation(name):
     fixture = load(name)
     rpc = rpc_for(fixture)
@@ -1362,7 +1433,76 @@ async def test_liquidity_launcher_lookup_reads_the_derived_pool_slot():
         for key in keys
         for offset in (0, 3)
     ]
-    assert len(rpc.requests[0]) == 33
+    assert len(rpc.requests[0]) == 37
+
+
+# computePoolAddress(token, WETH, fee) on the Universal Router's V3 factory and init code hash for the
+# live token, fee tiers 100, 500, 3000 and 10000; the last is the verified UniswapV3Pool holding it.
+V3_LIVE_POOLS = [
+    "0xf50d8bf6481c8eedfdc80885681a9ae9259ef605",
+    "0x79128b2d580aaf2718e7635b93db0c919e984fad",
+    "0x5f5b7d5cca946f88c029382cb0451b638b66fb0b",
+    "0x3f281ad0b210f92ea5c1565fb6fb14c0936803ea",
+]
+
+
+def v3_liquidity_lookups(rpc):
+    return [
+        params[0]["to"]
+        for calls in rpc.requests
+        for method, params in calls
+        if method == "eth_call" and params[0]["data"] == "0x" + selector("liquidity()").hex()
+    ]
+
+
+@pytest.mark.asyncio
+async def test_v3_pool_is_found_in_the_discovery_batch_and_simulated():
+    fixture = load("v3_weth_native")
+    rpc = rpc_for(fixture)
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    with fresh_addresses(fixture):
+        result = await simulator.simulate(fixture["token"])
+    assert result["can_sell"] is True and result["is_honeypot"] is False
+    assert result["buy_tax"] == result["sell_tax"] == 0.0
+    assert f"v3 pool {fixture['pair']}" in result["reason"]
+    # Four liquidity() calls ride in the one discovery batch (33 + 4); no extra HTTP request: the batch,
+    # then the source header and the simulation.
+    assert v3_liquidity_lookups(rpc) == V3_LIVE_POOLS
+    assert [call for call in rpc.requests[0] if call[1][0]["to"] in V3_LIVE_POOLS] == rpc.requests[0][33:]
+    assert len(rpc.requests[0]) == 37
+    assert len(rpc.requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_an_empty_v3_pool_is_noted_and_not_simulated():
+    fixture = load("v3_weth_native")
+    rpc = rpc_for(fixture, v3_liquidity={fixture["pair"]: 0}, simulations=[])
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    result = await simulator.simulate(fixture["token"])
+    assert all(result[field] is None for field in FIELDS)
+    assert f"v3 pool {fixture['pair']} (fee 10000) has no liquidity in range" in result["reason"]
+    assert "No supported pool found" in result["reason"]
+    methods = [method for calls in rpc.requests for method, _ in calls]
+    assert "eth_simulateV1" not in methods
+
+
+@pytest.mark.asyncio
+async def test_a_v3_pool_ranks_beside_v4_and_v2_pools():
+    native = load("v4_native_liquidity_launcher")
+    rpc = rpc_for(
+        native,
+        pair="0x" + "55" * 20,
+        reserves=(10**20, 10**27),
+        v3_liquidity={_v3_address(native["token"], 3000): 5},
+        simulations=[],
+    )
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = rpc
+    _, pools, _ = await simulator._discover(None, native["token"])
+    assert [pool.route for pool in pools] == ["v4-native", "v3", "v2"]
+    assert pools[1] == Pool("v3", ZERO, pair=_v3_address(native["token"], 3000), fee=3000)
 
 
 @pytest.mark.asyncio
