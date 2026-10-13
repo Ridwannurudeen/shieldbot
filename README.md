@@ -27,6 +27,10 @@ The core scan path refuses to call incomplete data safe and flags dangers suppor
 
 Live: [shieldbotsecurity.online](https://shieldbotsecurity.online) · [threat dashboard](https://api.shieldbotsecurity.online/dashboard)
 
+## Telegram commands
+
+In `@shieldbot_bnb_bot`, `/rescue bot:<wallet>` scans BOT Chain token approvals and shows BDEX spender names, dollar values and revoke links. BOT Chain has approval scanning only.
+
 ## On-chain permission before funds move
 
 [`ShieldBotVerdictGuard`](contracts/base/src/ShieldBotVerdictGuard.sol) reads the latest registry record and allows only LOW or MEDIUM within the caller's publication-age tolerance. `check(address subject, uint64 maxAge)` returns `(bool allowed, uint8 reason)`; `requireAllowed(address subject, uint64 maxAge)` reverts with `NotAllowed(subject, reason)` on denial. MEDIUM deliberately accepts moderate reported risk; permission is not a token-safety guarantee.
