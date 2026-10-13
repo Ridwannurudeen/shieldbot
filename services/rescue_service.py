@@ -1215,12 +1215,12 @@ class RescueService:
         if amount >= UNLIMITED_THRESHOLD:
             if is_known_safe:
                 return "MEDIUM", f"Unlimited approval to {spender_label} — safe but excessive"
-            return "HIGH", "Unlimited approval to unknown contract"
+            return "HIGH", f"Unlimited approval to {spender_label.lower()}"
 
         if amount >= HIGH_APPROVAL:
             if is_known_safe:
                 return "LOW", f"Large approval to {spender_label}"
-            return "MEDIUM", "Large approval to unknown contract"
+            return "MEDIUM", f"Large approval to {spender_label.lower()}"
 
         if is_known_safe:
             return "LOW", f"Normal approval to {spender_label}"
@@ -1232,24 +1232,25 @@ class RescueService:
             return None
 
         if approval.risk_level == "HIGH":
+            noun = "address" if approval.spender_label == "Unknown address" else "contract"
             return RescueAlert(
                 alert_type="dangerous_approval",
                 severity="HIGH",
                 title=f"Dangerous Approval: {approval.token_symbol}",
                 description=(
                     f"Your wallet has an unlimited approval for {approval.token_symbol} "
-                    f"({approval.token_name}) granted to an unknown contract "
+                    f"({approval.token_name}) granted to an {approval.spender_label.lower()} "
                     f"({approval.spender[:10]}...)."
                 ),
                 what_it_means=(
-                    "This contract can spend ALL of your "
+                    f"This {noun} can spend ALL of your "
                     f"{approval.token_symbol} tokens at any time without "
-                    "further permission. If the contract is malicious or gets "
+                    f"further permission. If the {noun} is malicious or gets "
                     "compromised, your tokens could be drained instantly."
                 ),
                 what_you_can_do=[
                     "Revoke this approval immediately from your own wallet",
-                    f"Check the contract {approval.spender} on the block explorer",
+                    f"Check the {noun} {approval.spender} on the block explorer",
                     "If you don't recognize this approval, it may be from a phishing site",
                 ],
                 affected_token=approval.token_address,

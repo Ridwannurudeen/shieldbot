@@ -13,6 +13,7 @@ from web3 import Web3
 from core.telegram_formatter import escape_untrusted
 from services.rescue_service import (
     APPROVAL_TOPIC,
+    ApprovalInfo,
     KNOWN_SAFE_SPENDERS,
     PUBLIC_LOG_WINDOW_BLOCKS,
     RescueService,
@@ -218,11 +219,46 @@ async def test_unknown_unlimited_spender_is_high_and_codeless_address_is_named()
     [alert] = result["alerts"]
     assert approval["spender_label"] == "Unknown address"
     assert approval["risk_level"] == "HIGH"
+    assert approval["risk_reason"] == "Unlimited approval to unknown address"
     assert approval["token_name"] == "A" * 23 + "…"
     assert approval["token_symbol"] == "B" * 23 + "…"
     assert alert["severity"] == "HIGH"
     assert alert["title"] == "Dangerous Approval: " + "B" * 23 + "…"
     assert "(" + "A" * 23 + "…" + ")" in alert["description"]
+    assert "granted to an unknown address" in alert["description"]
+    assert "This address can spend ALL" in alert["what_it_means"]
+    assert f"Check the address {SPENDER} on the block explorer" in alert["what_you_can_do"]
+
+
+def test_unknown_spender_wording_stays_unchanged_on_non_botchain():
+    service = RescueService(MagicMock())
+    risk_level, risk_reason = service._assess_approval_risk(
+        SPENDER, int(UNLIMITED, 16), "Unknown Contract", 56,
+    )
+    approval = ApprovalInfo(
+        token_address=TOKEN,
+        token_name="Token",
+        token_symbol="TKN",
+        spender=SPENDER,
+        spender_label="Unknown Contract",
+        allowance="Unlimited",
+        allowance_raw=int(UNLIMITED, 16),
+        risk_level=risk_level,
+        risk_reason=risk_reason,
+        chain_id=56,
+    )
+    alert = service._generate_alert(approval)
+
+    assert risk_reason == "Unlimited approval to unknown contract"
+    assert alert.description == (
+        f"Your wallet has an unlimited approval for TKN (Token) granted to an unknown contract "
+        f"({SPENDER[:10]}...)."
+    )
+    assert alert.what_it_means == (
+        "This contract can spend ALL of your TKN tokens at any time without further permission. "
+        "If the contract is malicious or gets compromised, your tokens could be drained instantly."
+    )
+    assert alert.what_you_can_do[1] == f"Check the contract {SPENDER} on the block explorer"
 
 
 @pytest.mark.asyncio
