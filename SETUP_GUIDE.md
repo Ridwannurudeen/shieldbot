@@ -1,20 +1,20 @@
-# ShieldAI extension setup
+# ShieldBot extension setup
 
-The browser extension is in [`extension/`](extension/), version 3.1.0. It needs no build step, no API key and no account.
+The browser extension is in [`extension/`](extension/), version 3.3.0. It needs no build step, no API key and no account.
 
 ## Load it unpacked
 
 1. Open `chrome://extensions` and turn on Developer mode.
 2. Choose Load unpacked and select the `extension/` directory of this checkout.
-3. The card reads **ShieldAI Transaction Firewall 3.1.0**. Chrome warns that it cannot verify where an unpacked extension comes from; that applies to any unpacked extension.
+3. The card reads **ShieldBot Transaction Firewall 3.3.0**. Chrome warns that it cannot verify where an unpacked extension comes from; that applies to any unpacked extension.
 
-The Chrome Web Store listing for ShieldAI Transaction Firewall serves version 3.1.0, the same version as `extension/` in this checkout.
+The Chrome Web Store listing for ShieldAI Transaction Firewall serves version 3.1.0; `extension/` in this checkout is 3.3.0, renamed ShieldBot Transaction Firewall, and not yet published there.
 
 ## What you see
 
 - **Welcome tab.** A fresh install opens it. Its Activate Protection button asks Chrome for access to https sites, which the extension already holds from its manifest, and to `localhost` and `127.0.0.1`, which are optional and only matter for a local API server.
-- **Popup.** It says ShieldAI is ready with no setup needed: the API endpoint is pre-configured to `https://api.shieldbotsecurity.online` and stored on install and on every update unless you saved your own. The status line reads "Checking connection..." and then "Connected" once that server's `/api/health` answers. The popup also holds the firewall switch, the Balanced and Strict policy modes, the language, the scan history, an approval scan with its own chain selector, and a threat feed.
-- **Signing overlay.** On an https page that talks to an injected wallet (`window.ethereum` or EIP-6963), a transaction or signature request shows ShieldAI's verdict **before** the wallet prompt. Declining it rejects the request, so the wallet is never asked. A signature request is the cheapest thing to try, because it moves no value. The [demo page](https://shieldbotsecurity.online/try/) sends one Robinhood Chain transaction per firewall outcome; it needs a wallet extension installed alongside, connected and switched to Robinhood Chain (4663), preferably with a fresh test account. 3.1.0 has been tested with Rabby; it has not been tested with MetaMask.
+- **Popup.** It says ShieldBot is ready with no setup needed: the API endpoint is pre-configured to `https://api.shieldbotsecurity.online` and stored on install and on every update unless you saved your own. The status line reads "Checking connection..." and then "Connected" once that server's `/api/health` answers. The popup also holds the firewall switch, the Balanced and Strict policy modes, the language, the scan history, an approval scan with its own chain selector, and a threat feed.
+- **Signing overlay.** On an https page that talks to an injected wallet (`window.ethereum` or EIP-6963), a transaction or signature request shows ShieldBot's verdict **before** the wallet prompt. Declining it rejects the request, so the wallet is never asked. A signature request is the cheapest thing to try, because it moves no value. The [demo page](https://shieldbotsecurity.online/try/) sends one Robinhood Chain transaction per firewall outcome; it needs a wallet extension installed alongside, connected and switched to Robinhood Chain (4663), preferably with a fresh test account. 3.1.0 has been tested with Rabby; it has not been tested with MetaMask.
 - **Side panel.** "Ask ShieldBot AI" in the popup opens it, with Chat, Guardian and Scanner tabs. The assistant behind Chat can answer that it is unavailable; scanning, the firewall and the guard do not use it.
 
 WalletConnect sessions and anything started inside the wallet are not checked. Switching the firewall off forwards requests to the wallet untouched, with the exceptions listed in the [extension README](extension/README.md#switching-it-off).
