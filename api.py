@@ -41,7 +41,7 @@ from core.config import Settings
 from core.container import ServiceContainer
 from core.database import LAUNCH_OUTCOMES, SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
-from core.chat_coverage import UNKNOWN_LINE, readable_coverage_gaps
+from core.chat_coverage import unknown_reply
 from core.first_verdict import IN_PROGRESS, FirstVerdictProgress, build_first_verdict
 from core.policy import PolicyMode
 from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
@@ -2770,11 +2770,10 @@ async def agent_chat(req: ChatRequest, request: Request):
                 })
                 resp["scan_data"] = {**scan_data, **_coverage_fields(alert)}
                 if alert['status'] == 'unknown':
-                    gaps = readable_coverage_gaps(alert['coverage_reasons'])
-                    response_parts = [UNKNOWN_LINE, *(f"- {gap}" for gap in gaps)]
-                    if result.get('model_response_available'):
-                        response_parts.extend(["", result['text']])
-                    resp['response'] = "\n".join(response_parts)
+                    resp['response'] = unknown_reply(
+                        alert['coverage_reasons'],
+                        result['text'] if result.get('model_response_available') else "",
+                    )
             return resp
         # Backward compat: plain string return
         return {"response": result, "user_id": req.user_id}
@@ -2799,7 +2798,7 @@ async def agent_explain(req: ExplainRequest, request: Request):
             alert = format_extension_alert({
                 **req.scan_result, 'rug_probability': req.scan_result.get('risk_score') or 0,
             })
-            return {"explanation": alert['recommended_action']}
+            return {"explanation": unknown_reply(alert['coverage_reasons'])}
         explanation = await container.advisor.explain_scan(req.scan_result)
         return {"explanation": explanation}
     except UnsupportedChainError:

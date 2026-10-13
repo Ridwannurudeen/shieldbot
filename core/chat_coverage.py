@@ -12,6 +12,14 @@ FIELD_LABELS = {
 }
 UNKNOWN_LINE = "ShieldBot could not finish checking this token, so it has no verdict."
 
+# On an Unknown scan the model may explain what is missing, never judge the token: a paragraph that
+# calls it safe or risky, gives a score or verdict, or rules out a honeypot or scam is dropped.
+_VERDICT_CLAIM = re.compile(
+    r"(?i)\b(?:safe|safety|unsafe|legit(?:imate)?|trustworthy|risk[- ](?:free|score|verdict|level|rating)"
+    r"|(?:low|medium|high|minimal|no)[- ]risk|verdict|score|rug(?:[- ]?pull)?|scam|honeypot[- ]free"
+    r"|not\s+a\s+honeypot|(?:block|caution|proceed)\s+recommended)\b|\b\d{1,3}\s*/\s*100\b"
+)
+
 
 def _clean_reason(reason: str) -> str:
     reason = re.sub(
@@ -56,3 +64,19 @@ def readable_coverage_gaps(reasons: dict) -> list[str]:
             if gap not in gaps:
                 gaps.append(gap)
     return gaps
+
+
+def without_verdict_claims(text: str) -> str:
+    """The model's explanation with every paragraph that judges the token removed."""
+    paragraphs = re.split(r"\n\s*\n", text or "")
+    kept = [p.strip() for p in paragraphs if p.strip() and not _VERDICT_CLAIM.search(p)]
+    return "\n\n".join(kept)
+
+
+def unknown_reply(reasons: dict, model_text: str = "") -> str:
+    """The Unknown reply: the plain first line, the readable gaps, then any explanation left."""
+    parts = [UNKNOWN_LINE, *(f"- {gap}" for gap in readable_coverage_gaps(reasons))]
+    explanation = without_verdict_claims(model_text)
+    if explanation:
+        parts.extend(["", explanation])
+    return "\n".join(parts)
