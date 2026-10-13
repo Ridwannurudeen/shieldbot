@@ -153,10 +153,21 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     let metaParts = [];
     const hp = (typeof scanData.honeypot === "object" && scanData.honeypot) || {};
-    // A sell simulation that failed, or of ShieldBot's own that could not run, leaves a provider's
-    // "not a honeypot" (GoPlus's, after it) unresolved.
     const unresolved = hp.simulation_failed || hp.rpc_failed;
-    metaParts.push(`Honeypot: <span>${hp.is_honeypot === true ? "Yes" : hp.is_honeypot === false && !unresolved ? "No" : "Unknown"}</span>`);
+    const simulationProvedSell = hp.can_sell === true && hp.field_providers?.can_sell === "eth_simulateV1";
+    const sellCovered = !unresolved && (simulationProvedSell || hp.coverage?.can_sell === true ||
+      Number(hp.coverage?.can_sell) >= 1);
+    const provider = hp.field_providers?.is_honeypot;
+    const providerName = typeof provider === "string" && provider
+      ? provider.toLowerCase() === "goplus" ? "GoPlus" : provider[0].toUpperCase() + provider.slice(1)
+      : "a provider";
+    let honeypotStatus = "Unknown";
+    if (hp.is_honeypot === true) honeypotStatus = "Yes";
+    else if (hp.is_honeypot === false && sellCovered) honeypotStatus = "No";
+    else if (hp.is_honeypot === false) {
+      honeypotStatus = `Not flagged by ${escapeHtml(providerName)} (sell not simulated)`;
+    }
+    metaParts.push(`Honeypot: <span>${honeypotStatus}</span>`);
     metaParts.push(`Sell tax: <span>${hp.sell_tax == null || hp.sell_tax === "" ? "Unknown" : `${Number(hp.sell_tax)}%`}</span>`);
     const mkt = (typeof scanData.market === "object" && scanData.market) || {};
     if (mkt.liquidity_usd !== undefined) {

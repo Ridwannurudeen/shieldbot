@@ -367,7 +367,11 @@ async def test_gather_context_all_tools_fail(advisor, mock_tools):
     mock_tools.get_market_data = AsyncMock(side_effect=RuntimeError("fail"))
     addr = "0x4904c02efa081cb7685346968bac854cdf4e7777"
     context = await advisor._gather_context("CONTRACT_CHECK", {"address": addr})
-    assert context == {"scan": {"status": "unknown", "coverage": {}, "coverage_reasons": {"scan": "Contract scan unavailable"}}, "deployer": {}, "honeypot": {}, "market": {}}
+    assert context == {
+        "scan": {"status": "unknown", "coverage": {}, "coverage_reasons": {"scan": "Contract scan unavailable"}},
+        "deployer": {}, "honeypot": {}, "market": {},
+        "coverage_gaps": ["Contract scan unavailable"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -506,6 +510,8 @@ def test_advisor_prompt_uses_supplied_chain_identity():
 
     assert 'BNB Chain' not in ADVISOR_SYSTEM_PROMPT
     assert 'chain' in ADVISOR_SYSTEM_PROMPT.lower()
+    assert 'when scan coverage is incomplete, do not state a score or verdict' in ADVISOR_SYSTEM_PROMPT
+    assert 'with complete scan coverage' in ADVISOR_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
@@ -682,3 +688,20 @@ async def test_scan_data_carries_the_official_token_check(advisor, mock_tools, m
     result = await advisor.chat("u1", "Check 0x" + "a" * 40, chain_id=4663)
 
     assert result["scan_data"]["impostor_check"] == check
+
+@pytest.mark.asyncio
+async def test_gather_context_exposes_readable_unknown_coverage_gaps(advisor, mock_tools):
+    mock_tools.scan_contract.return_value = {
+        "status": "unknown",
+        "coverage": {"honeypot": 0},
+        "coverage_reasons": {
+            "honeypot": "No supported pool found; Unknown fields: buy_tax, sell_tax, can_sell"
+        },
+    }
+
+    context = await advisor._gather_context("CONTRACT_CHECK", {"address": "0xdead"})
+
+    assert context["coverage_gaps"] == [
+        "no pool ShieldBot can simulate a sale on, so it could not test selling",
+        "buy tax, sell tax and whether the token can be sold are unknown",
+    ]

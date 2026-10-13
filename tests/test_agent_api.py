@@ -220,3 +220,62 @@ def test_chat_rejects_a_malformed_install_id(client, install_id):
     resp = client.post("/api/agent/chat", json={"message": "hi", "user_id": "u1"}, headers={"X-Install-Id": install_id})
     assert resp.status_code == 400
     api_module.container.advisor.chat.assert_not_called()
+
+UNKNOWN_SCAN = {
+    "address": "0xdead",
+    "risk_level": "UNKNOWN",
+    "risk_score": 0,
+    "status": "unknown",
+    "coverage": {"honeypot": 0},
+    "coverage_reasons": {
+        "honeypot": "Initialize logs scanned over blocks 87195168-87225167; No supported pool found; Unknown fields: buy_tax, sell_tax, can_sell"
+    },
+}
+UNKNOWN_REPLY = (
+    "ShieldBot could not finish checking this token, so it has no verdict.\n"
+    "- no pool ShieldBot can simulate a sale on, so it could not test selling\n"
+    "- buy tax, sell tax and whether the token can be sold are unknown"
+)
+
+
+def test_chat_unknown_keeps_model_explanation_and_uses_readable_gaps(client):
+    import api as api_module
+
+    api_module.container.advisor.chat = AsyncMock(return_value={
+        "text": "Selling could not be tested because no supported pool was found.",
+        "model_response_available": True,
+        "scan_data": UNKNOWN_SCAN,
+    })
+    response = client.post("/api/agent/chat", json={"message": "Check token", "user_id": "u1"})
+
+    assert response.status_code == 200
+    assert response.json()["response"] == (
+        UNKNOWN_REPLY + "\n\nSelling could not be tested because no supported pool was found."
+    )
+    assert "Initialize logs scanned over blocks" not in response.json()["response"]
+
+
+def test_chat_unknown_without_model_returns_only_deterministic_gaps(client):
+    import api as api_module
+
+    api_module.container.advisor.chat = AsyncMock(return_value={
+        "text": "AI analysis is currently unavailable.",
+        "model_response_available": False,
+        "scan_data": UNKNOWN_SCAN,
+    })
+    response = client.post("/api/agent/chat", json={"message": "Check token", "user_id": "u1"})
+
+    assert response.status_code == 200
+    assert response.json()["response"] == UNKNOWN_REPLY
+
+
+def test_chat_coverage_reason_translation_and_clean_fallback():
+    from core.chat_coverage import readable_coverage_gaps
+
+    assert readable_coverage_gaps({"honeypot": UNKNOWN_SCAN["coverage_reasons"]["honeypot"]}) == [
+        "no pool ShieldBot can simulate a sale on, so it could not test selling",
+        "buy tax, sell tax and whether the token can be sold are unknown",
+    ]
+    assert readable_coverage_gaps({"scan": "Initialize logs scanned over blocks 12-34; New provider check unavailable"}) == [
+        "New provider check unavailable"
+    ]
