@@ -1,10 +1,12 @@
 """BOT Chain approvals stay inside the explicitly prefixed Telegram rescue path."""
 
+import asyncio
 import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlsplit
 
+import aiohttp
 import pytest
 from web3 import Web3
 
@@ -125,6 +127,8 @@ def price_session(answer, status=200, error=None):
 
         def get(self, url, **kwargs):
             self.calls.append((url, kwargs))
+            if isinstance(error, (aiohttp.ClientError, asyncio.TimeoutError)):
+                raise error
             if error == "request":
                 raise RuntimeError("offline")
             return Context()
@@ -163,7 +167,8 @@ def test_botchain_labels_are_confined_to_677_and_public_history_lists_stay_uncha
 @pytest.mark.asyncio
 async def test_botchain_uses_twenty_four_million_recent_blocks_and_discloses_older_history():
     spender = next(iter(MAINNET_SPENDERS))
-    result, rpc = await scan_botchain(rpc_handler([approval_log(spender)]))
+    service = botchain_service()
+    result, rpc = await scan_botchain(rpc_handler([approval_log(spender)]), service=service)
 
     logs_calls = rpc.methods("eth_getLogs")
     bounds = [
@@ -178,6 +183,7 @@ async def test_botchain_uses_twenty_four_million_recent_blocks_and_discloses_old
     assert result["coverage_reasons"]["allowances"] == (
         f"Approvals before block {WINDOW_START} not scanned"
     )
+    service._web3_client._get_adapter.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -258,6 +264,8 @@ async def test_botchain_price_api_prices_only_a_positive_price_routed_to_usdt():
         (price_answer(price=True), 200, None),
         (price_answer(price="NaN"), 200, None),
         (price_answer(), 503, None),
+        (price_answer(), 200, aiohttp.ClientConnectionError("offline")),
+        (price_answer(), 200, asyncio.TimeoutError()),
         ({}, 200, ValueError("bad response")),
     ],
 )
@@ -268,6 +276,7 @@ async def test_botchain_price_source_fails_closed(answer, status, error):
         prices = await service._fetch_prices([TOKEN], BOTCHAIN)
 
     assert prices == {}
+    assert TOKEN not in prices
 
 
 @pytest.mark.asyncio
@@ -307,6 +316,22 @@ async def test_rescue_accepts_botchain_only_with_an_explicit_prefix(bot_module, 
     await bot_module.rescue_command(update, SimpleNamespace(args=[prefix + WALLET], user_data={}))
 
     scan.assert_awaited_once_with(update, WALLET, BOTCHAIN, botchain_approval=True)
+
+
+@pytest.mark.asyncio
+async def test_rescue_rejects_invalid_botchain_address_without_scanning(bot_module, monkeypatch):
+    update = MagicMock()
+    update.message.reply_text = AsyncMock()
+    scan = AsyncMock()
+    monkeypatch.setattr(bot_module, "_scan_approvals", scan)
+    bot_module.web3_client.is_valid_address.side_effect = Web3.is_address
+
+    await bot_module.rescue_command(
+        update, SimpleNamespace(args=["bot:not-an-address"], user_data={}),
+    )
+
+    update.message.reply_text.assert_awaited_once_with("❌ Invalid address format.")
+    scan.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -367,14 +392,28 @@ def test_botchain_is_not_advertised_by_api(api_client):
     import api
 
     api.web3_client.get_supported_chain_ids.return_value = list(CHAIN_INFO)
-    api.web3_client.validate_chain_id.side_effect = UnsupportedChainError("unsupported")
+
+    def validate_chain_id(chain_id):
+        if chain_id not in CHAIN_INFO:
+            raise UnsupportedChainError("unsupported")
+
+    api.web3_client.validate_chain_id.side_effect = validate_chain_id
+    api.container = SimpleNamespace(
+        rescue_service=SimpleNamespace(scan_approvals=AsyncMock(return_value={"status": "ok"})),
+        settings=SimpleNamespace(bscscan_api_key=""),
+    )
 
     response = api_client.get("/api/health")
     rescue_response = api_client.get(f"/api/rescue/{WALLET}?chain_id=677")
+    supported_rescue_response = api_client.get(f"/api/rescue/{WALLET}?chain_id=56")
 
     assert response.status_code == 200
     assert BOTCHAIN not in response.json()["supported_chains"]
     assert rescue_response.status_code == 400
+    assert supported_rescue_response.status_code == 200
+    api.container.rescue_service.scan_approvals.assert_awaited_once_with(
+        WALLET, chain_id=56, etherscan_api_key="",
+    )
 
 
 @pytest.mark.asyncio
