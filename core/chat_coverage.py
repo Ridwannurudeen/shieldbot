@@ -65,11 +65,20 @@ def readable_coverage_gaps(reasons: dict) -> list[str]:
                 gaps.append(gap)
     return gaps
 
+# Internal scan detail the model may repeat from its tool data; never shown to the user.
+_BLOCK_RANGE = re.compile(
+    r"(?i)\s*\(?(?:initialize logs )?(?:scanned )?(?:over )?blocks?\s+\d+\s*-\s*\d+\)?"
+)
+
 
 def without_verdict_claims(text: str) -> str:
     """The model's explanation with every paragraph that judges the token removed."""
     paragraphs = re.split(r"\n\s*\n", text or "")
-    kept = [p.strip() for p in paragraphs if p.strip() and not _VERDICT_CLAIM.search(p)]
+    kept = [
+        _BLOCK_RANGE.sub("", p).strip()
+        for p in paragraphs
+        if p.strip() and not _VERDICT_CLAIM.search(p)
+    ]
     return "\n\n".join(kept)
 
 
