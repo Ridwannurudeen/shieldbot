@@ -698,7 +698,8 @@ async def test_unknown_explanation_avoids_ai_safe_text(consumer_api, incomplete_
     services.advisor = SimpleNamespace(explain_scan=AsyncMock(return_value='SAFE: risk 0%'))
     response = await api.agent_explain(api.ExplainRequest(scan_result=incomplete_output),
         SimpleNamespace(client=SimpleNamespace(host='consumer-test'), headers={}))
-    assert 'Unknown' in response['explanation']
+    assert response['explanation'].startswith('ShieldBot could not finish checking this token, so it has no verdict.')
+    assert 'blocks' not in response['explanation'] and 'SAFE' not in response['explanation']
     services.advisor.explain_scan.assert_not_awaited()
 
 
@@ -710,7 +711,7 @@ async def test_unknown_chat_scan_cannot_return_safe_text(consumer_api, incomplet
     }))
     response = await api.agent_chat(api.ChatRequest(message='scan token', user_id='test'),
         SimpleNamespace(client=SimpleNamespace(host='consumer-chat'), headers={}))
-    assert 'Unknown' in response['response']
+    assert response['response'].startswith('ShieldBot could not finish checking this token, so it has no verdict.')
     assert 'SAFE' not in response['response']
     assert response['scan_data']['risk_display'].startswith('Unknown')
 
@@ -929,7 +930,8 @@ const scan = {
   status: complete ? 'ok' : 'unknown',
   coverage: {honeypot: complete ? 1 : 0},
   coverage_reasons: complete ? {} : {honeypot: state},
-  honeypot: {is_honeypot: complete ? false : null, sell_tax: complete ? 0 : null},
+  honeypot: {is_honeypot: complete ? false : null, can_sell: complete ? true : null,
+    coverage: {can_sell: complete ? 1 : 0}, sell_tax: complete ? 0 : null},
 };
 if (state === 'legacy') {delete scan.status; delete scan.coverage;}
 if (state === 'failed-simulation') {
@@ -1113,7 +1115,8 @@ async def test_real_advisor_chat_keeps_text_only_for_complete_scan(consumer_api,
         assert not response['scan_data']['risk_display'].startswith('Unknown')
     else:
         assert response['response'] != 'Advisor analysis text'
-        assert 'Unknown' in response['response']
+        assert response['response'].startswith('ShieldBot could not finish checking this token, so it has no verdict.')
+        assert response['response'].endswith('\n\nAdvisor analysis text')
 
 
 @pytest.mark.asyncio
@@ -1511,11 +1514,13 @@ async def test_advisor_scan_failure_renders_unknown_chat(consumer_api):
     )
     db = SimpleNamespace(get_chat_history=AsyncMock(return_value=[]), insert_chat_message=AsyncMock(),
         get_ai_tokens_used=AsyncMock(return_value=0), add_ai_tokens_used=AsyncMock())
-    ai = SimpleNamespace(is_available=lambda: True, chat_with_usage=AsyncMock(return_value=('SAFE: this token looks fine', 100)))
+    ai = SimpleNamespace(is_available=lambda: True, chat_with_usage=AsyncMock(return_value=(
+        'The scan could not test whether the token can be sold.\n\nSAFE: this token looks fine, score 12/100.', 100)))
     services.advisor = Advisor(tools, db, ai, daily_token_budget=1_000_000)
     response = await api.agent_chat(api.ChatRequest(message='check 0x' + 'a' * 40, user_id='test'),
         SimpleNamespace(client=SimpleNamespace(host='advisor-scan-failure'), headers={}))
-    assert 'Unknown' in response['response']
+    assert response['response'].startswith('ShieldBot could not finish checking this token, so it has no verdict.')
+    assert response['response'].endswith('\n\nThe scan could not test whether the token can be sold.')
     assert 'SAFE' not in response['response']
     assert response['scan_data']['status'] == 'unknown'
     assert response['scan_data']['coverage_reasons']
@@ -1666,5 +1671,6 @@ async def test_unknown_explanation_accepts_missing_risk_score(consumer_api):
     services.advisor = SimpleNamespace(explain_scan=AsyncMock(return_value='SAFE: risk 0%'))
     response = await api.agent_explain(api.ExplainRequest(scan_result={'risk_score': None, 'status': 'unknown'}),
         SimpleNamespace(client=SimpleNamespace(host='explain-none-score'), headers={}))
-    assert 'Unknown' in response['explanation']
+    assert response['explanation'].startswith('ShieldBot could not finish checking this token, so it has no verdict.')
+    assert 'blocks' not in response['explanation'] and 'SAFE' not in response['explanation']
     services.advisor.explain_scan.assert_not_awaited()

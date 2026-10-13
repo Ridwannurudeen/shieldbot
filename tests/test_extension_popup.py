@@ -446,3 +446,50 @@ def test_extension_pages_disable_animations_when_motion_reduced(page, selectors)
         )
         assert animations and reduced_motion.start() > animations[-1].start(), (page, selector)
 
+
+def test_sidepanel_does_not_claim_provider_false_proves_sellability():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for extension JavaScript regression tests")
+    script = r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const source = fs.readFileSync('extension/sidepanel.js', 'utf8');
+const start = source.indexOf('  function renderRiskCard(scanData) {');
+const end = source.indexOf('  // -------------------------------------------------------------------', start);
+assert(start >= 0 && end > start);
+const cards = [];
+const context = vm.createContext({
+  document: {createElement: () => ({})},
+  messagesEl: {appendChild: card => cards.push(card), get scrollHeight() { return 0; }, set scrollTop(value) {}},
+  escapeHtml: value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'),
+});
+vm.runInContext(source.slice(start, end) + '\nthis.renderRiskCard = renderRiskCard;', context);
+const [uncovered, simulated, covered, hostileProvider, missingProvider] = JSON.parse(process.argv[1]);
+for (const data of [uncovered, simulated, covered, hostileProvider, missingProvider]) context.renderRiskCard(data);
+assert(cards[0].innerHTML.includes('Honeypot: <span>Not flagged by GoPlus (sell not simulated)</span>'));
+assert(cards[1].innerHTML.includes('Honeypot: <span>No</span>'));
+assert(cards[2].innerHTML.includes('Honeypot: <span>No</span>'));
+assert(cards[3].innerHTML.includes('Not flagged by &lt;img&gt; (sell not simulated)'));
+assert(cards[4].innerHTML.includes('Not flagged by a provider (sell not simulated)'));
+"""
+    cases = [
+        {"status": "unknown", "risk_score": 0, "coverage": {"honeypot": 0},
+         "honeypot": {"is_honeypot": False, "can_sell": None,
+                      "field_providers": {"is_honeypot": "goplus"}}},
+        {"status": "unknown", "risk_score": 0, "coverage": {"honeypot": 0},
+         "honeypot": {"is_honeypot": False, "can_sell": True,
+                      "field_providers": {"is_honeypot": "goplus", "can_sell": "eth_simulateV1"}}},
+        {"status": "unknown", "risk_score": 0, "coverage": {"honeypot": 0},
+         "honeypot": {"is_honeypot": False, "coverage": {"can_sell": 1},
+                      "field_providers": {"is_honeypot": "goplus"}}},
+        {"status": "unknown", "risk_score": 0, "coverage": {"honeypot": 0},
+         "honeypot": {"is_honeypot": False, "field_providers": {"is_honeypot": "<img>"}}},
+        {"status": "unknown", "risk_score": 0, "coverage": {"honeypot": 0},
+         "honeypot": {"is_honeypot": False}},
+    ]
+    result = subprocess.run(
+        [node, "-e", script, "--", json.dumps(cases)],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

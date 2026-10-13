@@ -18,6 +18,7 @@ from utils.web3_client import UnsupportedChainError
 from utils.ai_analyzer import AIEmptyResponse, AIRefused
 
 from agent.prompts import ADVISOR_SYSTEM_PROMPT, EXPLAIN_SCAN_TEMPLATE, HAIKU_MODEL, SONNET_MODEL
+from core.chat_coverage import readable_coverage_gaps
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,11 @@ class Advisor:
             if isinstance(market, Exception):
                 logger.warning("get_market_data failed: %s", type(market).__name__)
                 market = {}
-            return {"scan": scan, "deployer": deployer, "honeypot": honeypot, "market": market}
+            context = {"scan": scan, "deployer": deployer, "honeypot": honeypot, "market": market}
+            coverage_gaps = readable_coverage_gaps(scan.get("coverage_reasons", {}))
+            if coverage_gaps:
+                context["coverage_gaps"] = coverage_gaps
+            return context
 
         if intent == "THREAT_FEED":
             try:
@@ -172,6 +177,7 @@ class Advisor:
         messages.append({"role": "user", "content": user_content})
 
         # Call AI or return fallback
+        model_response_available = False
         if not self.ai.is_available():
             response_text = (
                 "AI analysis is currently unavailable. "
@@ -226,6 +232,7 @@ class Advisor:
                 logger.error("Advisor chat failed: %s", name)
                 response_text = "I encountered an error processing your request. Please try again."
             else:
+                model_response_available = True
                 try:
                     await self.db.add_ai_tokens_used(_utc_day(), tokens)
                 except Exception as e:
@@ -236,7 +243,7 @@ class Advisor:
             await self.db.insert_chat_message(user_id, "user", message)
             await self.db.insert_chat_message(user_id, "assistant", response_text)
 
-        result: Dict[str, Any] = {"text": response_text}
+        result: Dict[str, Any] = {"text": response_text, "model_response_available": model_response_available}
 
         # Attach structured scan data for CONTRACT_CHECK intents
         if intent == "CONTRACT_CHECK" and isinstance(context, dict):
