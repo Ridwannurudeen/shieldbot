@@ -6,6 +6,8 @@ Sourcify for chain 4663 and was exercised by live eth_simulateV1 runs:
   whose ExactInputSingleParams/ExactOutputSingleParams carry minHopPriceX36 before hookData.
 - PoolManager 0x8366...0951 ABI and v4-core StateLibrary (pools mapping at slot 6).
 - Permit2 0x0000...8BA3: IAllowanceTransfer.approve and solmate SafeTransferLib revert strings.
+- The same Universal Router's V3SwapRouter, Dispatcher V3_SWAP_EXACT_IN/OUT input layout (a trailing
+  uint256[] minHopPriceX36) and its V3 factory 0x1f7d...2efa and pool init code hash immutables.
 - Uniswap V2 Router02 0x89e5...9eba: swap functions, TransferHelper and UniswapV2Library strings,
   and the IUniswapV2Pair Swap event it bundles.
 - Doppler DopplerHookInitializer 0x4e34...a544: the getState(address) public getter.
@@ -56,6 +58,13 @@ USDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
 USDG_BALANCE_SLOT = 1
 # With traceTransfers, eth_simulateV1 reports native ETH movements as Transfer logs from this address.
 NATIVE_TRANSFER_LOG_ADDRESS = "0x" + "e" * 40
+# The Universal Router's own V3 factory and pool init code hash (its verified immutables, identical on
+# 0x8876...0904 and 0x204f...0498): it swaps only through pools at this CREATE2 address.
+V3_FACTORY = "0x1f7d7550b1b028f7571e69a784071f0205fd2efa"
+V3_POOL_INIT_CODE_HASH = bytes.fromhex(
+    "e34f199b19b2b4f47f68442619d55552" "7d244f78a3297ea89325f843f87b8b54"
+)
+V3_FEES = (100, 500, 3000, 10000)
 HOOKLESS_V4_FEE_TICK_SPACINGS = (
     (100, 1),
     (500, 10),
@@ -93,8 +102,15 @@ CACHE_TTL_SECONDS = 60
 MAX_UINT256 = 2**256 - 1
 MAX_UINT160 = 2**160 - 1
 MAX_UINT48 = 2**48 - 1
-ROUTES = ("v4-native", "v4-weth", "v4-doppler", "v4-usdg", "v2")
+ROUTES = ("v4-native", "v4-weth", "v4-doppler", "v4-usdg", "v3", "v2")
 
+V3_SWAP_EXACT_IN = 0x00
+V3_SWAP_EXACT_OUT = 0x01
+WRAP_ETH = 0x0B
+UNWRAP_WETH = 0x0C
+# ActionConstants.ADDRESS_THIS: the router keeps the output for the next command.
+ADDRESS_THIS = "0x" + "0" * 39 + "2"
+V3_SWAP_INPUT = ["address", "uint256", "uint256", "bytes", "bool", "uint256[]"]
 V4_SWAP = 0x10
 SWAP_EXACT_IN_SINGLE = 0x06
 SWAP_EXACT_OUT_SINGLE = 0x08
@@ -113,6 +129,8 @@ TRANSFER_TOPIC = "0x" + keccak(text="Transfer(address,address,uint256)").hex()
 SWAP_TOPIC = "0x" + keccak(text="Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)").hex()
 # IUniswapV2Pair.Swap(sender, amount0In, amount1In, amount0Out, amount1Out, to), Router02 bundle.
 V2_SWAP_TOPIC = "0x" + keccak(text="Swap(address,uint256,uint256,uint256,uint256,address)").hex()
+# IUniswapV3PoolEvents.Swap(sender, recipient, amount0, amount1, sqrtPriceX96, liquidity, tick).
+V3_SWAP_TOPIC = "0x" + keccak(text="Swap(address,address,int256,int256,uint160,uint128,int24)").hex()
 INITIALIZE_TOPIC = (
     "0x"
     + keccak(text="Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)").hex()
@@ -144,6 +162,15 @@ KNOWN_ERRORS = {
         "InsufficientETH()",
         "InvalidPortion()",
         "FromAddressIsNotOwner()",
+        # V3SwapRouter
+        "V3InvalidSwap()",
+        "V3TooLittleReceived()",
+        "V3TooMuchRequested()",
+        "V3InvalidAmountOut()",
+        "V3InvalidCaller()",
+        "V3TooLittleReceivedPerHop(uint256,uint256,uint256)",
+        "V3TooMuchRequestedPerHop(uint256,uint256,uint256)",
+        "V3HopPriceAndPathLengthMismatch()",
         # v4-periphery BaseActionsRouter, SafeCallback, CalldataDecoder, DeltaResolver, V4Router
         "InputLengthMismatch()",
         "UnsupportedAction(uint256)",
@@ -191,6 +218,7 @@ TOKEN_REFUSED = {
     "v4-weth": "TRANSFER_FROM_FAILED",
     "v4-doppler": "TRANSFER_FROM_FAILED",
     "v4-usdg": "TRANSFER_FROM_FAILED",
+    "v3": "TRANSFER_FROM_FAILED",
     "v2": "TransferHelper: TRANSFER_FROM_FAILED",
 }
 
@@ -209,6 +237,7 @@ class Pool:
     numeraire: str
     key: Optional[tuple] = None
     pair: Optional[str] = None
+    fee: Optional[int] = None
 
 
 def _fresh_address() -> str:
@@ -239,16 +268,25 @@ def _pool_field_slot(key: tuple, offset: int) -> bytes:
 
 
 def _pool_label(pool: Pool) -> str:
-    return pool.pair if pool.route == "v2" else "0x" + _pool_id(pool.key).hex()
+    return pool.pair if pool.key is None else "0x" + _pool_id(pool.key).hex()
 
 
-def _universal_router_swap(actions: list, params: list) -> bytes:
-    unlock = encode(["bytes", "bytes[]"], [bytes(actions), params])
+def _v3_pool_address(token: str, fee: int) -> str:
+    """The V3 pool the Universal Router's computePoolAddress names for (token, WETH, fee)."""
+    salt = keccak(encode(["address", "address", "uint24"], [*sorted((token, WETH)), fee]))
+    return "0x" + keccak(b"\xff" + bytes.fromhex(V3_FACTORY[2:]) + salt + V3_POOL_INIT_CODE_HASH)[12:].hex()
+
+
+def _execute(commands: list, inputs: list) -> bytes:
     return _calldata(
         "execute(bytes,bytes[],uint256)",
         ["bytes", "bytes[]", "uint256"],
-        [bytes([V4_SWAP]), [unlock], MAX_UINT256],
+        [bytes(commands), inputs, MAX_UINT256],
     )
+
+
+def _universal_router_swap(actions: list, params: list) -> bytes:
+    return _execute([V4_SWAP], [encode(["bytes", "bytes[]"], [bytes(actions), params])])
 
 
 def call_labels(pool: Pool) -> list:
@@ -287,6 +325,36 @@ def build_simulation_request(
                 "swapExactTokensForETHSupportingFeeOnTransferTokens(uint256,uint256,address[],address,uint256)",
                 ["uint256", "uint256", "address[]", "address", "uint256"],
                 [sell_amount, 0, [token, WETH], buyer, MAX_UINT256],
+            ),
+        )
+    elif pool.route == "v3":
+        # Native ETH in and out, as on the V2 route: the router wraps the budget, pays the pool from its
+        # own WETH, and unwraps what is left (the buy) or the sell's output (the sell) to the buyer.
+        # An exact-output path is written output first, so both legs use token, fee, WETH.
+        spender = PERMIT2
+        path = bytes.fromhex(token[2:]) + pool.fee.to_bytes(3, "big") + bytes.fromhex(WETH[2:])
+        buy = _call(
+            buyer,
+            UNIVERSAL_ROUTER,
+            _execute(
+                [WRAP_ETH, V3_SWAP_EXACT_OUT, UNWRAP_WETH],
+                [
+                    encode(["address", "uint256"], [ADDRESS_THIS, BUY_BUDGET_WEI]),
+                    encode(V3_SWAP_INPUT, [buyer, amount, BUY_BUDGET_WEI, path, False, []]),
+                    encode(["address", "uint256"], [buyer, 0]),
+                ],
+            ),
+            BUY_BUDGET_WEI,
+        )
+        sell = _call(
+            buyer,
+            UNIVERSAL_ROUTER,
+            _execute(
+                [V3_SWAP_EXACT_IN, UNWRAP_WETH],
+                [
+                    encode(V3_SWAP_INPUT, [ADDRESS_THIS, sell_amount, 0, path, True, []]),
+                    encode(["address", "uint256"], [buyer, 0]),
+                ],
             ),
         )
     else:
@@ -469,12 +537,12 @@ def _sell_trap(pool: Pool, data: bytes) -> Optional[str]:
         return f'the token refused the transfer to the pool (Error("{message}"))'
     if pool.route == "v2" and message == "UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT":
         return f'the pair received no tokens (Error("{message}"))'
-    if pool.route != "v2" and data[:4] == SWAP_AMOUNT_CANNOT_BE_ZERO:
+    if pool.key is not None and data[:4] == SWAP_AMOUNT_CANNOT_BE_ZERO:
         return "the pool manager was credited no tokens (SwapAmountCannotBeZero)"
     wrapped = _wrapped_error(data)
     if (
         wrapped is not None
-        and pool.route != "v2"
+        and pool.key is not None
         and pool.key[4] != NATIVE
         and wrapped[0] == pool.key[4]
         and wrapped[3][:4] == HOOK_CALL_FAILED
@@ -514,11 +582,13 @@ def _pool_swap(pool: Pool, token: str, logs) -> Optional[tuple]:
     received them, from the pool's own Swap event. None unless exactly one such event is present."""
     if not isinstance(logs, list):
         return None
+    router = "0x" + "0" * 24 + UNIVERSAL_ROUTER[2:]
     if pool.route == "v2":
         emitter, prefix, words = pool.pair, [V2_SWAP_TOPIC], 4
+    elif pool.route == "v3":
+        emitter, prefix, words = pool.pair, [V3_SWAP_TOPIC, router], 5
     else:
         # Only the router's swap: hook-internal swaps in the same pool have the hook as sender.
-        router = "0x" + "0" * 24 + UNIVERSAL_ROUTER[2:]
         emitter, prefix, words = POOL_MANAGER, [SWAP_TOPIC, "0x" + _pool_id(pool.key).hex(), router], 6
     matches = [
         log
@@ -535,6 +605,10 @@ def _pool_swap(pool: Pool, token: str, logs) -> Optional[tuple]:
         if pool.route == "v2":
             in0, in1, out0, out1 = decode(["uint256"] * 4, data)
             amount0, amount1, token_is_currency0 = out0 - in0, out1 - in1, token < WETH
+        elif pool.route == "v3":
+            # A V3 pool states amounts as its own balance changes; the router received the opposite.
+            amount0, amount1 = (-amount for amount in decode(["int256", "int256"], data[:64]))
+            token_is_currency0 = token < WETH
         else:
             amount0, amount1 = decode(["int128", "int128"], data[:64])
             token_is_currency0 = pool.key[0] == token
@@ -691,7 +765,7 @@ def evaluate_simulation(
         # Only the sell's own Swap event shows the swap ran. A hook runs after that event and can take
         # the payout, but in a hookless pool nothing sits between the payout and the seller, so a
         # hookless pool must itself have paid nothing; otherwise the trace is missing a transfer.
-        hooked = pool.route != "v2" and pool.key[4] != NATIVE
+        hooked = pool.key is not None and pool.key[4] != NATIVE
         if sold is None or (not hooked and sold[1] > 0):
             outcome["simulation_failed"] = True
             outcome["reason"] = "Malformed eth_simulateV1 sell logs"
@@ -1105,6 +1179,12 @@ class RobinhoodSimulator:
             for fields in hookless_slots
             for field_slot in fields
         ]
+        # V3 pools are looked up where the router would swap: no code there means no pool.
+        v3_pools = [(fee, _v3_pool_address(token, fee)) for fee in V3_FEES] if token != WETH else []
+        v3_calls = [
+            ("eth_call", [{"to": address, "data": "0x" + _selector("liquidity()").hex()}, "latest"])
+            for _, address in v3_pools
+        ]
         rows = await self._request(
             session,
             [
@@ -1139,6 +1219,7 @@ class RobinhoodSimulator:
                     ],
                 ),
                 *hookless_calls,
+                *v3_calls,
             ],
         )
         lookup_rows = rows
@@ -1217,12 +1298,27 @@ class RobinhoodSimulator:
             if int.from_bytes(state, "big") & MAX_UINT160:
                 depth = int.from_bytes(liquidity, "big")
                 if depth:
-                    pools.append(Pool(route, numeraire, key=key))
-                    pool_depths[key] = depth
+                    pool = Pool(route, numeraire, key=key)
+                    pools.append(pool)
+                    pool_depths[pool] = depth
                 else:
                     empty_pool_ids[route].append(_pool_id(key).hex())
                     empty_pool_keys.add(key)
                     empty_pools.append((route, numeraire, key))
+
+        v3_rows = lookup_rows[3 + len(hookless_calls) :]
+        for (fee, address), row in zip(v3_pools, v3_rows):
+            liquidity = _call_result(row, f"v3 pool {address} liquidity")
+            if not liquidity:
+                continue
+            if len(liquidity) != 32:
+                notes.append(f"v3 pool {address} liquidity lookup failed")
+            elif int.from_bytes(liquidity, "big"):
+                pool = Pool("v3", NATIVE, pair=address, fee=fee)
+                pools.append(pool)
+                pool_depths[pool] = int.from_bytes(liquidity, "big")
+            else:
+                notes.append(f"v3 pool {address} (fee {fee}) has no liquidity in range")
 
         for route, pool_ids in empty_pool_ids.items():
             if pool_ids:
@@ -1245,7 +1341,7 @@ class RobinhoodSimulator:
             pools = [Pool(route, numeraire, key=key)]
         if not pools:
             notes.append("No supported pool found")
-        pools.sort(key=lambda pool: (ROUTES.index(pool.route), -pool_depths.get(pool.key, 0)))
+        pools.sort(key=lambda pool: (ROUTES.index(pool.route), -pool_depths.get(pool, 0)))
         selected = []
         for route in ROUTES:
             if len(selected) == MAX_POOLS:
