@@ -452,8 +452,14 @@ async def test_botchain_reply_shows_other_allowances_values_escaped_labels_and_c
         "alerts": [{"title": "Dangerous Approval: hostile_*", "description": "alert [x](https://evil.example)"}],
         "revoke_txs": [],
     }
-    status = SimpleNamespace(delete=AsyncMock())
-    reply_text = AsyncMock(side_effect=[status, None, None, None])
+    events = []
+    status = SimpleNamespace(delete=AsyncMock(side_effect=lambda: events.append("delete")))
+
+    async def reply(*args, **kwargs):
+        events.append("reply")
+        return status if len(events) == 1 else None
+
+    reply_text = AsyncMock(side_effect=reply)
     update = SimpleNamespace(
         message=SimpleNamespace(reply_text=reply_text),
     )
@@ -492,6 +498,36 @@ async def test_botchain_reply_shows_other_allowances_values_escaped_labels_and_c
     assert all(link.startswith(REVOKE_PAGE + "?") for link in links)
     assert "1 more approval(s) not listed; run /rescue again a few minutes after revoking these." in text
     assert "This bot has not revoked any approvals or submitted transactions." in text
+    assert events == ["reply", "reply", "reply", "delete"]
+
+
+@pytest.mark.asyncio
+async def test_botchain_reply_send_failure_falls_back_when_progress_edit_fails(bot_module):
+    result, _ = await scan_botchain(rpc_handler([]))
+    replies = []
+    status = SimpleNamespace(
+        delete=AsyncMock(),
+        edit_text=AsyncMock(side_effect=RuntimeError("cannot edit progress message")),
+    )
+
+    async def send_reply(text, **kwargs):
+        replies.append(text)
+        if len(replies) == 1:
+            return status
+        if len(replies) == 2:
+            raise RuntimeError("reply send failed")
+
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(side_effect=send_reply)))
+    bot_module.web3_client.is_valid_address.side_effect = Web3.is_address
+    bot_module.web3_client.to_checksum_address.side_effect = Web3.to_checksum_address
+    bot_module.settings.bscscan_api_key = ""
+    bot_module.container.rescue_service.scan_approvals = AsyncMock(return_value=result)
+
+    await bot_module._scan_approvals(update, WALLET, BOTCHAIN, botchain_approval=True)
+
+    assert replies[-1] == "❌ Error scanning approvals. Please try again later."
+    status.edit_text.assert_awaited_once_with(replies[-1])
+    status.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio

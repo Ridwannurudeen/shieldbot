@@ -525,10 +525,6 @@ async def _scan_approvals(
             response, other_approvals, revoke_section = _botchain_approval_sections(address, result)
             reply_with_other_approvals = response + other_approvals
             assembled_reply = reply_with_other_approvals + revoke_section
-            try:
-                await status_msg.delete()
-            except Exception:
-                pass
             if other_approvals and len(reply_with_other_approvals) > 3900:
                 await update.message.reply_text(
                     response, parse_mode='Markdown', disable_web_page_preview=True,
@@ -551,6 +547,10 @@ async def _scan_approvals(
                 await update.message.reply_text(
                     assembled_reply, parse_mode='Markdown', disable_web_page_preview=True,
                 )
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
             return
 
         total = result.get('total_approvals', 0)
@@ -627,7 +627,14 @@ async def _scan_approvals(
         raise
     except Exception as e:
         logger.error(f"Error in /rescue: {type(e).__name__}")
-        await status_msg.edit_text("❌ Error scanning approvals. Please try again later.")
+        error_message = "❌ Error scanning approvals. Please try again later."
+        if botchain_approval:
+            try:
+                await status_msg.edit_text(error_message)
+            except Exception:
+                await update.message.reply_text(error_message)
+        else:
+            await status_msg.edit_text(error_message)
 
 
 def _botchain_approval_sections(address: str, result: dict):
