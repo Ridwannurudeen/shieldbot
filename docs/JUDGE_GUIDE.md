@@ -1,6 +1,6 @@
 # Judge guide: inspect the evidence in ten minutes
 
-**Limits first.** Version 3.1.0 of the extension has been tested with a real Rabby installation; MetaMask and wider EIP-6963 wallet testing remain outstanding. The Chrome Web Store listing for ShieldAI Transaction Firewall serves version 3.1.0, the same version as `extension/` in this repository. Version 3.1.0 asks the wallet which chain it is on. Simulation covers selected routes and amounts, not every launch. USDG support covers Doppler-hooked v4 pools and hookless v4 pools found by direct lookup at standard fee and tick-spacing pairs; V2 USDG pairs are not covered. There is no stock-issuer authenticity check. Unknown data can produce a user-overridable warning in human interfaces; it is not a blanket transaction block.
+**Limits first.** Version 3.1.0 of the extension has been tested with a real Rabby installation; version 3.3.0, in `extension/` in this repository, changes the interface and keeps the same request interception, and has been run in Chromium against the live API with a scripted test wallet, not yet with Rabby. MetaMask and wider EIP-6963 wallet testing remain outstanding. The Chrome Web Store listing for ShieldAI Transaction Firewall serves version 3.1.0. Version 3.1.0 asks the wallet which chain it is on. Simulation covers selected routes and amounts, not every launch. USDG support covers Doppler-hooked v4 pools and hookless v4 pools found by direct lookup at standard fee and tick-spacing pairs; V2 USDG pairs are not covered. There is no stock-issuer authenticity check. Unknown data can produce a user-overridable warning in human interfaces; it is not a blanket transaction block.
 
 The RPC proxy only sees requests routed through it; contract creation bypasses analysis, and raw transactions are already signed. On-chain enforcement is explicit: `ShieldBotVerdictGuard` reads the registry, and `ShieldBotGuardedTransfer` requires an allowed verdict before moving funds.
 
@@ -230,11 +230,11 @@ The verification block was checked locally against synthetic evidence and receip
 
 ## 4. Run the browser extension, unpacked
 
-The Chrome Web Store listing for ShieldAI Transaction Firewall serves version 3.1.0, the same version as `extension/` in this repository, and it loads without a build step:
+The Chrome Web Store listing for ShieldAI Transaction Firewall serves version 3.1.0; `extension/` in this repository is 3.3.0 (ShieldBot Transaction Firewall), and it loads without a build step:
 
 1. Open `chrome://extensions` and turn on Developer mode.
-2. Choose Load unpacked and select the `extension/` directory of this checkout. Without a checkout, download `shieldbot-extension-v3.1.0.zip` from the [`extension-v3.1.0` release](https://github.com/Ridwannurudeen/shieldbot/releases/tag/extension-v3.1.0), unzip it, and select the unzipped folder (the one holding `manifest.json`); it is the same build, made after the submission deadline.
-3. The card reads **ShieldAI Transaction Firewall 3.1.0** with no Errors button. Chrome warns that it cannot verify where an unpacked extension comes from; that applies to any unpacked extension.
+2. Choose Load unpacked and select the `extension/` directory of this checkout. Without a checkout, download `shieldbot-extension-v3.1.0.zip` from the [`extension-v3.1.0` release](https://github.com/Ridwannurudeen/shieldbot/releases/tag/extension-v3.1.0), unzip it, and select the unzipped folder (the one holding `manifest.json`); that is the 3.1.0 build the store serves, made after the submission deadline.
+3. The card reads **ShieldBot Transaction Firewall 3.3.0** with no Errors button (**ShieldAI Transaction Firewall 3.1.0** for the release zip). Chrome warns that it cannot verify where an unpacked extension comes from; that applies to any unpacked extension.
 
 It needs no API key and no account. Open any HTTPS page that talks to an injected wallet and ask it to sign a message or send a transaction: the firewall's decision appears **before** the wallet prompt, and declining it rejects the request so the wallet is never asked. A signature request is the cheapest thing to try, because it moves no value.
 
