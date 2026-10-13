@@ -279,3 +279,17 @@ def test_chat_coverage_reason_translation_and_clean_fallback():
     assert readable_coverage_gaps({"scan": "Initialize logs scanned over blocks 12-34; New provider check unavailable"}) == [
         "New provider check unavailable"
     ]
+
+
+def test_unknown_reply_strips_block_ranges_the_model_repeats():
+    from core.chat_coverage import unknown_reply
+
+    reply = unknown_reply(
+        {"honeypot": "Initialize logs scanned over blocks 87222191-87252190; No supported pool found"},
+        "ShieldBot found no pool it can simulate a sale on (initialize logs scanned over blocks "
+        "87222191-87252190), so selling is untested.",
+    )
+    assert "87222191" not in reply
+    assert "blocks" not in reply
+    assert reply.endswith("ShieldBot found no pool it can simulate a sale on, so selling is untested.")
+
