@@ -120,11 +120,11 @@ PICKER_CHAIN_ORDER = tuple(sorted(CHAIN_INFO, key=lambda chain_id: CHAIN_INFO[ch
 _RESCUE_CHAIN_HINT = (
     "To check another chain, add a prefix such as `/rescue eth:0x...`, or leave the prefix out to be asked."
 )
-BOTCHAIN_REVOKE_URL = "https://botchain.gudman.xyz/revoke.html"
 _REPORT_CHAIN_HINT = (
     "To report on another chain, add a prefix such as `/report eth:0x... <reason>`, "
     "or leave the prefix out to be asked."
 )
+BOTCHAIN_REVOKE_URL = "https://botchain.gudman.xyz/revoke.html"
 
 
 def _get_user_chain_id(context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -507,19 +507,14 @@ async def _scan_approvals(
 
     try:
         # Pick the best API key for the target chain
-        api_key = settings.bscscan_api_key
+        api_key = "" if botchain_approval else settings.bscscan_api_key
         if chain_id == 1:
             api_key = settings.etherscan_api_key or api_key
 
-        if botchain_approval:
-            result = await container.rescue_service.scan_approvals(
-                address, chain_id=chain_id, etherscan_api_key=api_key,
-                botchain_approval_scan=True,
-            )
-        else:
-            result = await container.rescue_service.scan_approvals(
-                address, chain_id=chain_id, etherscan_api_key=api_key,
-            )
+        result = await container.rescue_service.scan_approvals(
+            address, chain_id=chain_id, etherscan_api_key=api_key,
+            botchain_approval_scan=botchain_approval,
+        )
 
         if botchain_approval:
             response, other_approvals, revoke_section = _botchain_approval_sections(address, result)

@@ -165,6 +165,10 @@ def test_botchain_labels_are_confined_to_677_and_public_history_lists_stay_uncha
     assert BOTCHAIN not in CHAIN_INFO
     assert BOTCHAIN not in CHAIN_PREFIXES.values()
     assert BOTCHAIN not in PUBLIC_LOG_WINDOW_BLOCKS
+    assert RescueService(MagicMock()).approval_history(BOTCHAIN) == {
+        "history": "recent",
+        "window_blocks": 24_000_000,
+    }
 
 
 @pytest.mark.asyncio
@@ -525,7 +529,7 @@ async def test_botchain_reply_shows_other_allowances_values_escaped_labels_and_c
     )
     bot_module.web3_client.is_valid_address.side_effect = Web3.is_address
     bot_module.web3_client.to_checksum_address.side_effect = Web3.to_checksum_address
-    bot_module.settings.bscscan_api_key = ""
+    bot_module.settings.bscscan_api_key = "configured-bsc-key"
     bot_module.settings.etherscan_api_key = ""
     bot_module.container.rescue_service.scan_approvals = AsyncMock(return_value=result)
 

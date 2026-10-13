@@ -288,6 +288,11 @@ class RescueService:
         logs RPC (newest first, within HISTORY_DEADLINE_SECONDS; each result's scanned_blocks says
         what was read), or the newest windows from the chain's own RPC. Names no RPC, since its URL
         can carry a key."""
+        if chain_id == BOTCHAIN_CHAIN_ID:
+            return {
+                "history": "recent",
+                "window_blocks": BOTCHAIN_LOG_WINDOW_BLOCKS * RECENT_LOG_WINDOWS,
+            }
         if chain_id in self._logs_rpcs:
             return {"history": "full", "window_blocks": None}
         window = PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
