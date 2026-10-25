@@ -6,9 +6,11 @@ const complete = { verdict: 'ALLOW', score: 0, status: 'ok', coverage: { honeypo
 const wallet = '0x' + 'a'.repeat(40);
 const target = '0x' + 'b'.repeat(40);
 
-test('Robinhood Chain is a supported chain', () => {
+test('Robinhood Chain and BOT Chain are supported chains', () => {
   assert.ok(SUPPORTED_CHAIN_IDS.includes(4663));
   assert.equal(isSupportedChainId(4663), true);
+  assert.ok(SUPPORTED_CHAIN_IDS.includes(677));
+  assert.equal(isSupportedChainId(677), true);
   assert.equal(isSupportedChainId(999), false);
 });
 

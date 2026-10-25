@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 POPUP = ROOT / "extension" / "popup.js"
 SIDEPANEL = ROOT / "extension" / "sidepanel.html"
 DASHBOARDS = [ROOT / "dashboard" / "index.src.html", ROOT / "dashboard" / "index.html"]
-DASHBOARD_FILTER_ORDER = [1, 56, 8453, 42161, 137, 10, 204, 4663]
+DASHBOARD_FILTER_ORDER = [1, 56, 8453, 42161, 137, 10, 204, 4663, 677]
 
 
 def read(path: Path) -> str:

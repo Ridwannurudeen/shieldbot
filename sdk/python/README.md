@@ -120,6 +120,7 @@ ShieldBot(
 | Optimism | 10 |
 | opBNB | 204 |
 | Robinhood Chain | 4663 |
+| BOT Chain | 677 |
 
 The API rejects any other chain ID with HTTP 400, which the SDK raises as `ShieldBotError`. `GET /api/health` returns the live list as `supported_chains`.
 

@@ -75,9 +75,30 @@ def test_chains_section_lists_every_scan_chain():
     assert "Robinhood Chain" in names
 
 
+def test_mechanism_and_try_it_chain_maps_match_the_registry():
+    # Mechanism names the chains /api/stats reports; TryIt offers the chains POST /api/scan accepts.
+    mechanism = re.search(r"const chainNames: Record<number, string> = \{(.*?)\};", read(COMPONENTS / "Mechanism.tsx"), re.S)
+    mechanism_ids = [int(chain_id) for chain_id in re.findall(r"^\s+(\d+): \"[^\"]+\",$", mechanism.group(1), re.M)]
+    try_it = re.search(r"const chainOptions = \[(.*?)\];", read(COMPONENTS / "TryIt.tsx"), re.S)
+    try_it_ids = [int(chain_id) for chain_id in re.findall(r"\{ id: (\d+), name: \"[^\"]+\" \}", try_it.group(1))]
+    for ids in (mechanism_ids, try_it_ids):
+        assert len(ids) == len(set(ids))
+        assert set(ids) == set(chain_info())
+
+
+def test_bot_chain_row_does_not_claim_goplus_flags():
+    # GoPlus does not cover BOT Chain tokens and nothing simulates a sell there, so its cell reads Unknown.
+    row = re.search(r'\{\s*//[^\n]*\n\s*chainId: 677,(.*?)logo:', read(COMPONENTS / "Chains.tsx"), re.S)
+    assert row, "Chains.tsx should have a BOT Chain row"
+    assert 'simulation: null,' in row.group(1)
+    assert 'unavailableLabel: "Unknown",' in row.group(1)
+    assert 'label: chain.unavailableLabel ?? "GoPlus flags only"' in read(COMPONENTS / "Chains.tsx")
+
+
 def test_chains_section_coverage_matches_the_code():
     from adapters.arbitrum import ArbitrumAdapter
     from adapters.base_chain import BaseChainAdapter
+    from adapters.botchain import BotChainAdapter
     from adapters.bsc import BscAdapter
     from adapters.eth import EthAdapter
     from adapters.opbnb import OpBNBAdapter
@@ -94,6 +115,7 @@ def test_chains_section_coverage_matches_the_code():
             for cls in (
                 ArbitrumAdapter,
                 BaseChainAdapter,
+                BotChainAdapter,
                 BscAdapter,
                 EthAdapter,
                 OpBNBAdapter,
@@ -664,7 +686,7 @@ HERO_SECTION_COPY = {
         "did not answer.",
     ),
     "Chains.tsx": (
-        "Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is "
+        "Contract scans run on all 9 chains. The other checks depend on the chain, and a check that cannot run is "
         "reported as Unknown, never as Safe.",
         "It has been tested with Rabby; MetaMask testing is still outstanding.",
     ),

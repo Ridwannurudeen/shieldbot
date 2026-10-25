@@ -1,11 +1,11 @@
-# Chrome Web Store listing and release checklist for 3.2.0
+# Chrome Web Store listing and release checklist for 3.4.0
 
-Version 3.1.0 was uploaded to the Chrome Web Store and is now served under the listing title ShieldAI Transaction Firewall, while this repository prepares version 3.2.0 for the same listing. The version was checked on 8 October 2026 through Google's update service.
+Version 3.1.0 was uploaded to the Chrome Web Store and is now served under the listing title ShieldAI Transaction Firewall, while this repository prepares version 3.4.0 for the same listing. The version was checked on 8 October 2026 through Google's update service.
 
 The listing checked on 23 September 2026 was version 3.0.1, English only, and said the
 extension "blocks the transaction", offers "Tenderly pre-execution simulation" and "Permit2
 signature analysis". The shipped code does none of those things from the extension, so the text
-below replaces it. Everything in it is true of the 3.2.0 code in this repository.
+below replaces it. Everything in it is true of the 3.4.0 code in this repository.
 
 ## 1. Text to paste
 
@@ -19,7 +19,7 @@ ShieldAI Transaction Firewall
 in `extension/_locales` and appear automatically for those languages):
 
 ```
-Warns before you sign on 8 EVM chains, reports Unknown when a check cannot complete, and flags known phishing sites.
+Warns before you sign on 9 EVM chains, reports Unknown when a check cannot complete, and flags known phishing sites.
 ```
 
 **Description** (Store listing tab, English):
@@ -32,7 +32,7 @@ When a website asks your wallet to send a transaction, the extension shows an ov
 When a check cannot finish, for example because a data provider did not answer or a contract's age is not available, the verdict is Unknown and the overlay says why. An incomplete check is never shown as Safe.
 
 What it covers
-• Transactions on eight EVM chains. The extension's welcome page lists them.
+• Transactions on nine EVM chains. The extension's welcome page lists them.
 • Wallets that give web pages a standard provider (window.ethereum or EIP-6963).
 • Signature requests are checked by the server like transactions and shown in readable form: permits, Permit2, and Seaport and Blur marketplace orders (including Seaport bulk orders) that give your NFTs away for nothing or pay someone else. Blur listings sign only a summary of what is listed, not its prices, so they are shown as High Risk. A Sign-In with Ethereum message made for another site than the one asking is flagged Block Recommended, and so is every eth_sign request, which can sign a transaction. A message that is not readable text is flagged High Risk, and 32 bytes of it, which can be a hash signed in your name, Block Recommended. The text of a message you sign is never sent.
 • EIP-7702 delegations: a transaction that hands your account to a contract is flagged Block Recommended, with the contract's address and whether it is verified and how old it is.
@@ -63,7 +63,7 @@ Limits
 • It runs on https pages only, in Chrome 111 or later.
 ```
 
-Do not add claims the 3.2.0 extension does not make good on: no "blocks", no simulation or asset
+Do not add claims the 3.4.0 extension does not make good on: no "blocks", no simulation or asset
 change claims (they depend on a server-side Tenderly key that is not confirmed), no claim that
 signatures are analysed beyond what the text above says (the server reads permits, Permit2, Seaport
 and Blur orders; any other typed data is Unknown), no wallet approval scanning (the Health tab's
@@ -73,35 +73,40 @@ smoke test in section 3 has passed with them.
 ## 2. Release checklist (owner)
 
 1. Merge the release branches into main and run `python -m pytest -q -p no:cacheprovider`.
-2. Confirm `extension/manifest.json` says `"version": "3.2.0"`. At the time 3.1.0 was prepared,
+2. Confirm `extension/manifest.json` says `"version": "3.4.0"`. At the time 3.1.0 was prepared,
    the published version was 3.0.1, so the package version had to be higher.
 3. Build the package from the `extension` folder, leaving out `README.md`. `manifest.json` must
    sit at the root of the zip. This command,
    run from the repository root, writes it with forward-slash entry names on any system:
 
    ```
-   python -c "import pathlib, zipfile; root = pathlib.Path('extension'); z = zipfile.ZipFile('shieldbot-extension-v3.2.0.zip', 'w', zipfile.ZIP_DEFLATED); [z.write(p, p.relative_to(root).as_posix()) for p in sorted(root.rglob('*')) if p.is_file() and p.relative_to(root).as_posix() != 'README.md']; z.close()"
+   python -c "import pathlib, zipfile; root = pathlib.Path('extension'); z = zipfile.ZipFile('shieldbot-extension-v3.4.0.zip', 'w', zipfile.ZIP_DEFLATED); [z.write(p, p.relative_to(root).as_posix()) for p in sorted(root.rglob('*')) if p.is_file() and p.relative_to(root).as_posix() != 'README.md']; z.close()"
    ```
 
 4. In a clean Chrome profile (Chrome 111 or later, which the manifest now requires) open
    `chrome://extensions`, turn on Developer mode, use Load unpacked
-   on the `extension` folder, and check: name "ShieldAI Transaction Firewall", version 3.2.0,
+   on the `extension` folder, and check: name "ShieldAI Transaction Firewall", version 3.4.0,
    no Errors button. Then run the smoke test below. Its manual release gate remains outstanding on
    both MetaMask and Rabby.
-5. After owner submission, confirm the Developer Dashboard Package tab lists 3.2.0 and the update service serves it.
-6. Store listing tab: check that the description matches the text above in every listed language. Do not name the
+5. Owner gate before the upload: in a clean Chrome profile with Rabby as the only wallet and 3.4.0
+   loaded unpacked, run the firewall smoke on the [demo page](https://shieldbotsecurity.online/try/)
+   (one Robinhood Chain transaction per firewall outcome), then make one BDEX approval on BOT Chain
+   (677) at dex.botchain.ai. The upload waits on both. Until the store serves the approved 3.4.0, no
+   site or README text says the store extension supports BOT Chain or nine chains.
+6. After owner submission, confirm the Developer Dashboard Package tab lists 3.4.0 and the update service serves it.
+7. Store listing tab: check that the description matches the text above in every listed language. Do not name the
    chains one by one: the first 3.1.0 submission (2026-10-05) was rejected for keyword spam
    ("Yellow Argon") because the English, Chinese and Vietnamese descriptions listed all eight.
-   Replace the screenshots with real 3.2.0 captures
+   Replace the screenshots with real 3.4.0 captures
    (capture them at 1280×800 with the extension loaded unpacked). Do not upload any image that
    shows screens the extension does not have, such as the light "Threat Dashboard" mock.
-7. Privacy practices tab: compare the listing with the 3.2.0 wording in
+8. Privacy practices tab: compare the listing with the 3.4.0 wording in
    `docs/CHROME_WEB_STORE_DISCLOSURE.md`.
-8. The listing serves 3.1.0, as checked on 8 October 2026 through Google's update service. Still to confirm: the listing shows the new text, and an existing 3.0.1 install updates without a "Setup Required" message.
+9. The listing serves 3.1.0, as checked on 8 October 2026 through Google's update service. Still to confirm: the listing shows the new text, and an existing 3.0.1 install updates without a "Setup Required" message.
 
 ## 3. Fifteen-minute smoke test (MetaMask, then Rabby)
 
-Use a test wallet with a small balance on one cheap chain (BNB Chain or Base). Load 3.2.0 unpacked
+Use a test wallet with a small balance on one cheap chain (BNB Chain or Base). Load 3.4.0 unpacked
 with the default API. Run the list with MetaMask as the only wallet, then with Rabby as the only
 wallet. Reject every wallet popup unless you mean to spend.
 
@@ -130,7 +135,7 @@ wallet. Reject every wallet popup unless you mean to spend.
 7. **Popup** (2 minutes). In a fresh profile the dashboard (expand button) says Nothing checked yet,
    not PROTECTED 100. After the tests, History shows Unknown results in a grey hatched badge with a
    reason line. Arrow keys move between the popup tabs. Switch the language to Tiếng Việt and 中文:
-   no raw key names (such as tabFeed) appear, and the version label reads v3.2.0.
+   no raw key names (such as tabFeed) appear, and the version label reads v3.4.0.
 
 **Release gate.** Steps 8 to 29 check what the automated tests cannot: how this build's request
 handling (the frozen request copies, the chain it names, the wrapped prototypes, send and

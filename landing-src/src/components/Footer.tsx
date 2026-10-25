@@ -223,7 +223,7 @@ export default function Footer() {
         </div>
 
         <div className="mt-10 flex flex-col gap-2 border-t border-hairline py-6 text-[13px] text-secondary sm:flex-row sm:justify-between">
-          <span>© 2026 ShieldBot. Transaction security for 8 EVM chains.</span>
+          <span>© 2026 ShieldBot. Transaction security for 9 EVM chains.</span>
           <span>ShieldBot does not issue, sell or endorse any token.</span>
         </div>
       </div>
