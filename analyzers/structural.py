@@ -15,6 +15,10 @@ HOLDER_SHARE_HIGH = 90
 # The note that names a token's missing holder list. The signal only adds risk, so its absence is
 # named rather than counted as a coverage gap: core/policy.py's required coverage decides status.
 HOLDERS_UNKNOWN = 'Top-10 holder share unknown: no readable GoPlus holder list'
+CREATOR_SCORING_LABELS = {
+    'stealing_attack', 'phishing_activities', 'honeypot_related_address',
+    'number_of_malicious_contracts_created',
+}
 
 
 class StructuralAnalyzer(Analyzer):
@@ -57,6 +61,50 @@ class StructuralAnalyzer(Analyzer):
                 f'Structural data unknown: {missing}' if missing else 'Structural provider data incomplete'
             )
         notes = []
+        if ctx.chain_id == 677:
+            if data.get('coverage', {}).get('scam_database') is True:
+                if data.get('creator_address_status') == 'ok':
+                    notes.append(
+                        'Scam check: GoPlus address labels checked for the token and creator. '
+                        'GoPlus token security does not cover BOT Chain.'
+                    )
+                elif data.get('creator_address_status') == 'not_available':
+                    notes.append(
+                        'Scam check: GoPlus address labels checked for the token. '
+                        'Creator not available from Blockscout. '
+                        'GoPlus token security does not cover BOT Chain.'
+                    )
+                else:
+                    notes.append(
+                        'Scam check: GoPlus address labels checked for the token. '
+                        'Creator labels were unavailable. '
+                        'GoPlus token security does not cover BOT Chain.'
+                    )
+                notes.extend(data.get('address_label_notes', ()))
+                creator_labels = (
+                    data.get('creator_address_labels', {})
+                    if data.get('creator_address_status') == 'ok' else {}
+                )
+                selected = []
+                other = []
+                for label, value in creator_labels.items():
+                    if label in {'address', 'data_source'}:
+                        continue
+                    flagged = (
+                        str(value).isdigit() and int(value) > 0
+                        if label == 'number_of_malicious_contracts_created'
+                        else str(value) == '1'
+                    )
+                    if flagged:
+                        (selected if label in CREATOR_SCORING_LABELS else other).append(label)
+                notes.extend(
+                    f'Creator address label: {label}' for label in other
+                )
+                if selected:
+                    data['creator_address_flag'] = (
+                        f"Creator {data['creator_address']} carries GoPlus address labels: "
+                        + ', '.join(selected)
+                    )
         if exemptions:
             named = {'is_verified': 'verification', 'contract_age_days': 'contract age'}
             notes.append(
@@ -74,6 +122,9 @@ class StructuralAnalyzer(Analyzer):
             sniffer_data = await self._sniffer.fetch(ctx.address, chain_id=ctx.chain_id)
 
         score, flags = self._compute(data, sniffer_data)
+        if data.get('creator_address_flag'):
+            score = min(score + 15, 100)
+            flags.append(data['creator_address_flag'])
         # Holder concentration describes a token. A missing holder list is named in a note and adds
         # nothing, never read as a token whose supply is spread out.
         if ctx.is_token is not False and data.get('is_contract') is not False:

@@ -197,6 +197,26 @@ def test_a_firewall_verdict_links_its_stored_evidence(evidence_api):
         assert secret.lower() not in text
 
 
+def test_botchain_scope_note_is_returned_and_stored_in_evidence(evidence_api):
+    api, client, _ = evidence_api
+    note = (
+        "Scam check: GoPlus address labels checked for the token and creator. "
+        "GoPlus token security does not cover BOT Chain."
+    )
+
+    def results(ctx, **kwargs):
+        found = _results()
+        found[0].data["notes"] = [note]
+        return found
+
+    api.container.registry.run_all.side_effect = results
+    response = _firewall(client)
+    assert response.status_code == 200
+    body, stored = _stored(client, response)
+    assert note in " ".join(body["notes"])
+    assert note in " ".join(stored["evidence"]["notes"])
+
+
 def test_a_plain_call_records_no_transaction(evidence_api):
     _, client, _ = evidence_api
     _, stored = _stored(client, _firewall(client))

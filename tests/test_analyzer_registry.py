@@ -106,6 +106,42 @@ class TestStructuralAnalyzer:
         assert result.score == 60
         assert 'Contract not verified' in result.flags
 
+    @pytest.mark.asyncio
+    async def test_botchain_scope_note_survives_risk_aggregation_and_telegram_report(self):
+        from analyzers.structural import StructuralAnalyzer
+        from core.telegram_formatter import format_full_report
+
+        service = MagicMock()
+        service.fetch_contract_data = AsyncMock(return_value={
+            "is_contract": True,
+            "is_verified": True,
+            "contract_age_days": 100,
+            "coverage": {"scam_database": True},
+            "creator_address_status": "ok",
+            "creator_address_labels": {},
+            "scam_matches": [],
+        })
+        structural = await StructuralAnalyzer(service).analyze(
+            AnalysisContext(address="0x" + "a" * 40, chain_id=677, is_token=True)
+        )
+        market = {"liquidity_usd": 200000}
+        ethos = {"reputation_score": 80}
+        honeypot = {"is_honeypot": False, "can_sell": True, "buy_tax": 0, "sell_tax": 0}
+        results = [
+            structural,
+            AnalyzerResult("market", 0.25, 0, data=market),
+            AnalyzerResult("behavioral", 0.2, 0, data=ethos),
+            AnalyzerResult("honeypot", 0.15, 0, data=honeypot),
+        ]
+        output = RiskEngine().compute_from_results(results)
+        note = (
+            "Scam check: GoPlus address labels checked for the token and creator. "
+            "GoPlus token security does not cover BOT Chain."
+        )
+        report = format_full_report(output, structural.data, market, ethos, honeypot, chain_id=677)
+        assert output["notes"][0] == note
+        assert note in report
+
 
 class TestRiskEngineFromResults:
     def test_identical_output_shape(self):

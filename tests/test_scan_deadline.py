@@ -9,12 +9,15 @@ import pytest
 import utils.scam_db as scam_db
 from agent.tools import AgentTools
 from analyzers.honeypot import HoneypotAnalyzer
+from analyzers.structural import StructuralAnalyzer
 from core.analyzer import AnalysisContext, AnalyzerResult
 from core.extension_formatter import is_scan_incomplete
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS, RUN_ALL_DEADLINE_SECONDS, AnalyzerRegistry
 from core.risk_engine import RiskEngine
 from services.honeypot_service import HoneypotService
+from services.contract_service import ContractService
 from services.robinhood_simulation import RPC_BACKOFF_SECONDS, RPC_TIMEOUT_SECONDS
+from utils.scam_db import ScamDatabase
 from utils.web3_client import UnsupportedChainError
 
 # Provider timeouts on the scan path, in seconds: honeypot.is per request (adapters/evm_base.py
@@ -350,3 +353,35 @@ async def test_a_background_scan_outlasts_a_full_simulator_request_that_an_inter
     assert interactive["coverage_reasons"]["honeypot"] == "honeypot analysis unavailable (TimeoutError)"
     assert "honeypot" not in background["coverage_reasons"]
     assert background["coverage"]["honeypot"] == 1
+
+
+@pytest.mark.asyncio
+async def test_hung_botchain_address_lookup_is_cut_by_the_registry_deadline(short_deadline, mock_web3_client):
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_address_lookup(address, flight_key):
+        started.set()
+        await release.wait()
+        return {"status": "ok", "reason": None, "data": {"address": address}}
+
+    service = ContractService(mock_web3_client, ScamDatabase())
+    with (
+        patch.object(ScamDatabase, "_fetch_address_security", new=slow_address_lookup),
+        patch("services.contract_service.BSCSCAN_DELAY", 0),
+    ):
+        scan = asyncio.create_task(registry_of(
+            StructuralAnalyzer(service),
+        ).run_all(AnalysisContext(address=TOKEN, chain_id=677, is_token=True)))
+        await started.wait()
+        results = await scan
+        task = next(iter(scam_db._GOPLUS_ADDRESS_INFLIGHT.values()))
+        assert not task.done()
+        release.set()
+        await asyncio.sleep(0)
+        scam_db._GOPLUS_ADDRESS_INFLIGHT.clear()
+
+    assert results[0].error == "structural analysis unavailable (TimeoutError)"
+    risk = RiskEngine().compute_from_results(results)
+    assert risk["status"] == "unknown"
+    assert risk["coverage_reasons"]["structural"] == "structural analysis unavailable (TimeoutError)"

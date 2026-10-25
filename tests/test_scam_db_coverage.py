@@ -19,13 +19,35 @@ SCAM_MATCH = {"type": "Local Blacklist", "reason": "Known scam address", "source
 GOPLUS_OK = {"status": "ok", "reason": None, "data": {"is_honeypot": "0", "is_open_source": "1"}}
 # Recorded GoPlus reply for an address it has no token record for (chain 56 router, 2026-09-17).
 GOPLUS_NO_RECORD = {"code": 1, "message": "OK", "result": {}}
+CREATOR = "0x2222222222222222222222222222222222222222"
+GOPLUS_FLAGGED_EOA = "0x098B716B8Aaf21512996dC57EB0615e2383E2f96"
+GOPLUS_FLAGGED_EOA_REPLY = {
+    "status": "ok",
+    "reason": None,
+    "data": {
+        "address": GOPLUS_FLAGGED_EOA,
+        "data_source": "SlowMist,BlockSec",
+        "blacklist_doubt": "1",
+        "stealing_attack": "1",
+        "sanctioned": "1",
+    },
+}
+BOTCHAIN_ADDRESS_RECORD = {
+    "address": ADDRESS,
+    "data_source": "",
+    "stealing_attack": "0",
+    "phishing_activities": "0",
+    "sanctioned": "0",
+}
 
 
 @pytest.fixture(autouse=True)
 def goplus_cache():
     scam_module._GOPLUS_CACHE.clear()
+    scam_module._GOPLUS_ADDRESS_CACHE.clear()
     yield
     scam_module._GOPLUS_CACHE.clear()
+    scam_module._GOPLUS_ADDRESS_CACHE.clear()
 
 
 async def _lookup(db, goplus=GOPLUS_OK):
@@ -193,32 +215,35 @@ async def _structural(mock_web3_client, lookup, is_token=True):
 
 
 @pytest.mark.asyncio
-async def test_botchain_goplus_gap_keeps_contract_and_engine_status_unknown(mock_web3_client):
-    http, _ = _goplus_http(GOPLUS_NO_RECORD)
+async def test_botchain_address_labels_answer_coverage_without_token_security(mock_web3_client):
     service = ContractService(mock_web3_client, ScamDatabase())
-    with http as factory, patch("services.contract_service.BSCSCAN_DELAY", 0):
-        factory.return_value.__aenter__ = AsyncMock()
-        factory.return_value.__aexit__ = AsyncMock(return_value=False)
+    with patch.object(
+        ScamDatabase, "fetch_address_security",
+        new=AsyncMock(return_value={"status": "ok", "reason": None, "data": BOTCHAIN_ADDRESS_RECORD}),
+    ), patch("services.contract_service.BSCSCAN_DELAY", 0):
         data = await service.fetch_contract_data(ADDRESS, chain_id=677)
         structural = await StructuralAnalyzer(service).analyze(
             AnalysisContext(ADDRESS, chain_id=677, is_token=True)
         )
 
-    assert factory.call_count == 0
-    assert data["coverage"] == {"scam_database": False}
-    assert data["reason"] == "Scam database unavailable: GoPlus does not cover BOT Chain"
-    assert structural.data["coverage"]["scam_database"] is False
+    assert data["coverage"] == {"scam_database": True}
+    assert data["token_security_unsupported"] is True
+    assert structural.data["coverage"]["scam_database"] is True
+    assert structural.data["scam_matches"] == []
+    assert structural.data["notes"][0] == (
+        "Scam check: GoPlus address labels checked for the token. "
+        "Creator not available from Blockscout. "
+        "GoPlus token security does not cover BOT Chain."
+    )
     risk = RiskEngine().compute_from_results([
         structural,
         AnalyzerResult("market", 0.25, 0, data={"liquidity_usd": 200000, "pair_age_hours": 100}),
         AnalyzerResult("behavioral", 0.2, 0, data={"reputation_score": 80}),
         AnalyzerResult("honeypot", 0.15, 0, data=_complete_honeypot()),
     ])
-    assert risk["status"] == "unknown"
-    assert risk["risk_level"] != "LOW"
-    assert risk["coverage_reasons"]["structural"] == (
-        "Scam database unavailable: GoPlus does not cover BOT Chain"
-    )
+    assert risk["status"] == "ok"
+    assert risk["coverage"]["structural"] == 1
+    assert risk["risk_level"] in {"LOW", "MEDIUM", "HIGH"}
 
 
 def _complete_honeypot():
@@ -410,3 +435,177 @@ async def test_verification_stays_unknown_without_a_goplus_answer(mock_web3_clie
     data = await _fill(mock_web3_client, None, goplus)
     assert data["is_verified"] is None
     assert "field_providers" not in data
+
+
+@pytest.mark.asyncio
+async def test_botchain_address_label_severity_and_token_record_separation():
+    db = ScamDatabase()
+    response = {
+        "status": "ok", "reason": None,
+        "data": {
+            "address": ADDRESS, "data_source": "SlowMist",
+            "stealing_attack": "1", "phishing_activities": "1",
+            "sanctioned": "1", "gas_abuse": "1", "number_of_malicious_contracts_created": "2",
+        },
+    }
+    with patch.object(ScamDatabase, "fetch_address_security", new=AsyncMock(return_value=response)):
+        matches = await db.check_address(ADDRESS, chain_id=677)
+
+    assert [match["severity"] for match in matches] == ["block", "high"]
+    assert "stealing_attack, phishing_activities" in matches[0]["reason"]
+    assert "sanctioned" in matches[1]["reason"]
+    assert "number_of_malicious_contracts_created: 2" in matches[1]["reason"]
+    assert matches.goplus_record == {}
+    assert matches.address_record == response["data"]
+    assert matches.address_notes == ("GoPlus address label on token: gas_abuse",)
+    assert matches.failed_providers == ()
+
+
+@pytest.mark.asyncio
+async def test_recorded_goplus_flagged_address_fixture_uses_direct_label_severity():
+    with patch.object(
+        ScamDatabase, "fetch_address_security",
+        new=AsyncMock(return_value=GOPLUS_FLAGGED_EOA_REPLY),
+    ):
+        matches = await ScamDatabase().check_address(GOPLUS_FLAGGED_EOA, chain_id=677)
+    assert [match["severity"] for match in matches] == ["block", "high"]
+    assert "stealing_attack" in matches[0]["reason"]
+    assert "sanctioned" in matches[1]["reason"]
+    assert matches.address_notes == ("GoPlus address label on token: blacklist_doubt",)
+    assert matches.goplus_record == {}
+
+
+@pytest.mark.asyncio
+async def test_botchain_address_failure_keeps_local_matches_and_names_source():
+    db = ScamDatabase()
+    db.known_scams[(677, ADDRESS.lower())] = {
+        "source": "admin", "reports": 0, "expires_at": time.time() + 60,
+    }
+    with patch.object(
+        ScamDatabase, "fetch_address_security",
+        new=AsyncMock(return_value={"status": "unknown", "reason": "GoPlus HTTP 503", "data": {}}),
+    ):
+        matches = await db.check_address(ADDRESS, chain_id=677)
+    assert matches[0]["type"] == "Local Blacklist"
+    assert matches.failed_providers == ("GoPlus address security: GoPlus HTTP 503",)
+    assert matches.goplus_record == {}
+
+
+@pytest.mark.asyncio
+async def test_botchain_address_failure_sets_existing_coverage_reason(mock_web3_client):
+    service = ContractService(mock_web3_client, ScamDatabase())
+    with patch.object(
+        ScamDatabase, "fetch_address_security",
+        new=AsyncMock(return_value={"status": "unknown", "reason": "GoPlus HTTP 503", "data": {}}),
+    ), patch("services.contract_service.BSCSCAN_DELAY", 0):
+        data = await service.fetch_contract_data(ADDRESS, chain_id=677)
+        structural = await StructuralAnalyzer(service).analyze(
+            AnalysisContext(ADDRESS, chain_id=677, is_token=True)
+        )
+    assert data["coverage"]["scam_database"] is False
+    assert data["reason"] == "Scam database unavailable: GoPlus address security: GoPlus HTTP 503"
+    assert structural.data["coverage"]["scam_database"] is False
+    assert structural.data["token_security_unsupported"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [1, 10, 56, 137, 204, 8453, 42161, 4663])
+async def test_other_chains_keep_token_security_lookup(chain_id):
+    token = AsyncMock(return_value={
+        "status": "ok", "reason": None, "data": {"is_open_source": "1"},
+    })
+    address = AsyncMock()
+    with (
+        patch.object(ScamDatabase, "fetch_token_security", new=token),
+        patch.object(ScamDatabase, "fetch_address_security", new=address),
+    ):
+        matches = await ScamDatabase().check_address(ADDRESS, chain_id=chain_id)
+    token.assert_awaited_once_with(ADDRESS, chain_id)
+    address.assert_not_awaited()
+    assert matches.goplus_record == {"is_open_source": "1"}
+
+
+@pytest.mark.asyncio
+async def test_creator_address_is_checked_only_when_creation_lookup_supplies_it(mock_web3_client):
+    mock_web3_client.get_contract_creation_info.return_value = {
+        "creator": CREATOR, "age_days": 138,
+    }
+    scam_db = MagicMock(
+        check_address=AsyncMock(return_value=ScamMatches()),
+        fetch_address_security=AsyncMock(return_value={
+            "status": "ok", "reason": None,
+            "data": {"address": CREATOR, "data_source": "SlowMist", "phishing_activities": "1"},
+        }),
+    )
+    with patch("services.contract_service.BSCSCAN_DELAY", 0):
+        data = await ContractService(mock_web3_client, scam_db).fetch_contract_data(ADDRESS, chain_id=677)
+    scam_db.fetch_address_security.assert_awaited_once_with(CREATOR)
+    assert data["contract_age_days"] == 138
+    assert data["creator_address"] == CREATOR
+    assert data["creator_address_labels"]["phishing_activities"] == "1"
+    assert data["scam_matches"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "label",
+    ["stealing_attack", "phishing_activities", "honeypot_related_address", "number_of_malicious_contracts_created"],
+)
+async def test_creator_scoring_labels_add_one_bounded_structural_signal(mock_web3_client, label):
+    data = {
+        "is_contract": True, "is_verified": True, "contract_age_days": 100,
+        "coverage": {"scam_database": True}, "creator_address_status": "ok",
+        "creator_address": CREATOR,
+        "creator_address_labels": {label: "2" if label.startswith("number_") else "1"},
+        "scam_matches": [],
+    }
+    structural = await StructuralAnalyzer(MagicMock(fetch_contract_data=AsyncMock(return_value=data))).analyze(
+        AnalysisContext(ADDRESS, chain_id=677, is_token=True)
+    )
+    assert structural.score == 15
+    assert len([flag for flag in structural.flags if flag.startswith("Creator ")]) == 1
+    assert structural.data["scam_matches"] == []
+
+
+@pytest.mark.asyncio
+async def test_other_creator_labels_are_notes_without_score(mock_web3_client):
+    data = {
+        "is_contract": True, "is_verified": True, "contract_age_days": 100,
+        "coverage": {"scam_database": True}, "creator_address_status": "ok",
+        "creator_address": CREATOR, "creator_address_labels": {"gas_abuse": "1"},
+        "scam_matches": [],
+    }
+    structural = await StructuralAnalyzer(MagicMock(fetch_contract_data=AsyncMock(return_value=data))).analyze(
+        AnalysisContext(ADDRESS, chain_id=677, is_token=True)
+    )
+    assert structural.score == 0
+    assert "Creator address label: gas_abuse" in structural.data["notes"]
+    assert structural.data["scam_matches"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status, expected",
+    [
+        (
+            "unknown",
+            "Scam check: GoPlus address labels checked for the token. "
+            "Creator labels were unavailable. GoPlus token security does not cover BOT Chain.",
+        ),
+        (
+            "not_available",
+            "Scam check: GoPlus address labels checked for the token. "
+            "Creator not available from Blockscout. GoPlus token security does not cover BOT Chain.",
+        ),
+    ],
+)
+async def test_botchain_scope_note_names_creator_availability(mock_web3_client, status, expected):
+    data = {
+        "is_contract": True, "is_verified": True, "contract_age_days": 100,
+        "coverage": {"scam_database": True}, "creator_address_status": status,
+        "scam_matches": [],
+    }
+    structural = await StructuralAnalyzer(MagicMock(fetch_contract_data=AsyncMock(return_value=data))).analyze(
+        AnalysisContext(ADDRESS, chain_id=677, is_token=True)
+    )
+    assert structural.data["notes"][0] == expected

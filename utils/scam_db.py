@@ -82,13 +82,18 @@ class ScamMatches(list):
     Matches with a non-empty ``failed_providers`` are incomplete, never clean.
     """
 
-    def __init__(self, matches=(), failed_providers=(), observed_at=0, goplus_record=None):
+    def __init__(
+        self, matches=(), failed_providers=(), observed_at=0, goplus_record=None,
+        address_record=None, address_notes=(),
+    ):
         super().__init__(matches)
         self.failed_providers = tuple(failed_providers)
         self.observed_at = observed_at
         # GoPlus's token record, empty when it gave none: the contract service reads facts from it
         # that are not scam findings.
         self.goplus_record = goplus_record or {}
+        self.address_record = address_record or {}
+        self.address_notes = tuple(address_notes)
 
 
 class ScamDatabase:
@@ -128,13 +133,86 @@ class ScamDatabase:
         if blacklist_match:
             matches.append(blacklist_match)
 
-        # Check GoPlus Security
-        goplus_results = await self._check_goplus(address, chain_id)
+        # Check GoPlus token security, or address security on BOT Chain.
+        if chain_id == 677:
+            goplus_results = await self._check_goplus_address(address)
+        else:
+            goplus_results = await self._check_goplus(address, chain_id)
         matches.extend(goplus_results)
         failed_providers.extend(goplus_results.failed_providers)
 
         return ScamMatches(
-            matches, failed_providers, min(observed_at, goplus_results.observed_at), goplus_results.goplus_record
+            matches,
+            failed_providers,
+            min(observed_at, goplus_results.observed_at),
+            goplus_results.goplus_record,
+            goplus_results.address_record,
+            goplus_results.address_notes,
+        )
+
+    async def _check_goplus_address(self, address: str) -> ScamMatches:
+        response = await self.fetch_address_security(address)
+        record = response.get('data')
+        valid_record = (
+            isinstance(record, dict)
+            and bool(record)
+            and all(
+                isinstance(label, str) and isinstance(value, (str, int, float, bool))
+                for label, value in record.items()
+            )
+        )
+        if response.get('status') != 'ok' or not valid_record:
+            reason = response.get('reason') or 'GoPlus returned no address record'
+            return ScamMatches(
+                failed_providers=(f'GoPlus address security: {reason}',),
+                observed_at=response.get('observed_at', 0),
+            )
+
+        block_labels = []
+        high_labels = []
+        note_labels = []
+        for label, value in record.items():
+            if label in {'address', 'data_source'}:
+                continue
+            flagged = (
+                int(value) > 0 if label == 'number_of_malicious_contracts_created'
+                and str(value).isdigit()
+                else str(value) == '1'
+            )
+            if not flagged:
+                continue
+            rendered = (
+                f'{label}: {value}' if label == 'number_of_malicious_contracts_created'
+                else label
+            )
+            if label in {'stealing_attack', 'phishing_activities'}:
+                block_labels.append(rendered)
+            elif label in {
+                'honeypot_related_address', 'number_of_malicious_contracts_created',
+                'fake_token', 'cybercrime', 'financial_crime', 'sanctioned',
+                'blackmail_activities',
+            }:
+                high_labels.append(rendered)
+            else:
+                note_labels.append(label)
+
+        matches = []
+        for labels, severity in ((block_labels, 'block'), (high_labels, 'high')):
+            if labels:
+                matches.append({
+                    'type': 'GoPlus address security',
+                    'reason': 'GoPlus address labels on token: ' + ', '.join(labels),
+                    'source': 'gopluslabs.io',
+                    'severity': severity,
+                })
+        address_notes = tuple(
+            f'GoPlus address label on token: {label}' for label in note_labels
+        )
+        return ScamMatches(
+            matches,
+            observed_at=response.get('observed_at', 0),
+            address_record=record,
+            address_notes=address_notes,
         )
     
     @staticmethod
