@@ -82,7 +82,7 @@ class BotChainAdapter(EvmAdapter):
         return {
             'is_honeypot': None,
             'status': 'unknown',
-            'reason': 'Sellability unknown: no sell simulation on BOT Chain yet',
+            'reason': 'no sell simulation on BOT Chain yet',
             'field_providers': {},
         }
 
@@ -91,7 +91,7 @@ class BotChainAdapter(EvmAdapter):
             'buy_tax': None,
             'sell_tax': None,
             'status': 'unknown',
-            'reason': 'Sellability unknown: no sell simulation on BOT Chain yet',
+            'reason': 'no sell simulation on BOT Chain yet',
             'field_providers': {},
         }
 

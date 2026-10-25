@@ -73,7 +73,7 @@ async def test_botchain_honeypot_fields_are_unknown_without_a_provider():
     session.assert_not_called()
     assert honeypot["status"] == taxes["status"] == "unknown"
     assert honeypot["reason"] == taxes["reason"] == (
-        "Sellability unknown: no sell simulation on BOT Chain yet"
+        "no sell simulation on BOT Chain yet"
     )
     assert adapter.capabilities()["sell_simulation"] == "none"
 
@@ -168,7 +168,8 @@ async def test_scan_bot_prefix_runs_analyzers_and_reports_unknown_sellability(mo
     from core.analyzer import AnalyzerResult
     from core.risk_engine import RiskEngine
 
-    reason = "Sellability unknown: no sell simulation on BOT Chain yet"
+    reason = "no sell simulation on BOT Chain yet"
+    rendered_flag = "Sellability unknown: no sell simulation on BOT Chain yet"
     service = SimpleNamespace(fetch_honeypot_data=AsyncMock(return_value={"status": "unknown", "reason": reason}))
     honeypot = HoneypotAnalyzer(service)
     results = [
@@ -199,7 +200,7 @@ async def test_scan_bot_prefix_runs_analyzers_and_reports_unknown_sellability(mo
     service.fetch_honeypot_data.assert_awaited_once_with(TOKEN, chain_id=677)
     report = reply_text.await_args_list[-1].args[0]
     assert "*Chain:* BOT Chain (677)" in report
-    assert reason in report
+    assert report.count(rendered_flag) == 1
 
 
 def test_api_scan_accepts_chain_677(api_client, monkeypatch):

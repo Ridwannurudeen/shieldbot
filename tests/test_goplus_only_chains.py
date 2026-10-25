@@ -84,6 +84,6 @@ async def test_botchain_has_no_own_simulation_or_goplus_claim():
     assert adapter._honeypot_chain_id is None
     assert honeypot["status"] == taxes["status"] == "unknown"
     assert honeypot["reason"] == taxes["reason"] == (
-        "Sellability unknown: no sell simulation on BOT Chain yet"
+        "no sell simulation on BOT Chain yet"
     )
     assert "goplus" not in adapter.capabilities()["sell_simulation"]
