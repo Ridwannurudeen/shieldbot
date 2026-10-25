@@ -62,7 +62,7 @@ On Thu 29, send 0.05 BOT to the `robinhood-owner` address. Confirm that address 
 cast wallet address --account robinhood-owner
 ```
 
-On Fri, immediately after step 1, send 0.25 BOT to the recorder address. Both transfers come from the demo wallet `0xF150...fC5F` in the browser wallet on BOT Chain. The team offered mainnet gas on 2 Oct if more funding is needed.
+Immediately after step 1, send 0.25 BOT to the recorder address. Both transfers come from the demo wallet `0xF150...fC5F` in the browser wallet on BOT Chain. The team offered mainnet gas on 2 Oct if more funding is needed.
 
 Measured at 20 gwei, deployment uses 638,314 gas, about 0.0128 BOT, and a record uses 99,431 gas, about 0.002 BOT. BOT was about $12.40 in the live check dated 25 Oct 2026. These are estimates, not a promise of future fees or price.
 
