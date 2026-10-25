@@ -116,6 +116,7 @@ RATE_WINDOW_SECONDS = 3600
 SETTLED_STATUSES = ("pending", "sending", "confirmed")
 # About 18x the 0.056 gwei base fee of a recorded 4663 block. Arbitrum chains ignore priority fees.
 MAX_FEE_PER_GAS_WEI = 10**9
+BOTCHAIN_MAX_GAS_PRICE_WEI = 50 * 10**9
 # gas * max_fee reserves about 2.4x a record's real cost: 1,000 reservations cover roughly 2,400 records,
 # about nine days at the 2026-10-09 rate.
 # Arbitrum Nitro's eth_estimateGas includes the L1 data fee as gas, so leave room above the ~140k execution cost.
@@ -967,6 +968,10 @@ class VerdictPublisher:
             ("eth_estimateGas", [{"from": sender, "to": self.registry, "data": data}]),
             ("eth_getBalance", [sender, "latest"]),
         ]
+        if self.chain_id == 677:
+            calls.append(("eth_gasPrice", []))
+        receipt_offset = 5 if self.chain_id == 4663 else 6
+        latest_index = receipt_offset - 1
         if hashes:
             calls.append(("eth_getTransactionCount", [sender, "latest"]))
             calls += [("eth_getTransactionReceipt", [tx_hash]) for tx_hash in hashes]
@@ -977,17 +982,20 @@ class VerdictPublisher:
         if None in (nonce, estimate, balance, base_fee):
             raise RecordFailed("MalformedRPCResponse")
         if hashes:
-            for tx_hash, receipt in zip(hashes, results[5:]):
+            latest_index = 4 if self.chain_id == 4663 else 5
+            receipt_offset = latest_index + 1
+            for tx_hash, receipt in zip(hashes, results[receipt_offset:]):
                 status = _receipt_outcome(receipt)
                 if status is not None:
                     return "mined", status, tx_hash
-            latest = _quantity(results[4])
+            latest = _quantity(results[latest_index])
             if latest is None:
                 raise RecordFailed("MalformedRPCResponse")
             nonces = [transaction["nonce"] for transaction in transactions]
             if row["nonce"] is not None:
                 nonces.append(row["nonce"])
             last = max(nonces)
+            stored = []
             if latest <= last:
                 # Nonce `last` is unused, so our transaction there may still be mined: anything sent now takes
                 # nonce `last` too, and only while nothing is pending there.
@@ -995,7 +1003,7 @@ class VerdictPublisher:
                     raise RecordFailed("PreviousTransactionPending")
                 stored = [t for t in transactions if t["nonce"] == last and t["raw_tx"]]
                 fee = stored[-1]["max_fee_per_gas"] if stored else None
-                if fee is not None and fee >= base_fee:
+                if self.chain_id == 4663 and fee is not None and fee >= base_fee:
                     return "send", bytes.fromhex(stored[-1]["raw_tx"]), last, fee
                 # Without usable stored bytes (none kept, or a fee that is unknown or below the base fee, which
                 # the node would refuse), sign a replacement at nonce `last` at the current fee: at most one
@@ -1003,12 +1011,25 @@ class VerdictPublisher:
                 # twice.
             # Every nonce the row used is taken, and no transaction of the row is mined, so none of them can
             # ever be: a new transaction at the next nonce is safe.
-        if base_fee > MAX_FEE_PER_GAS_WEI:
+        if self.chain_id == 4663 and base_fee > MAX_FEE_PER_GAS_WEI:
             raise RecordFailed("FeeCapExceeded")
         gas = estimate * 6 // 5
         if gas > MAX_GAS_LIMIT:
             raise RecordFailed("GasCapExceeded")
-        max_fee = min(base_fee * 2, MAX_FEE_PER_GAS_WEI)
+        if self.chain_id == 677:
+            gas_price = _quantity(results[4])
+            if gas_price is None:
+                raise RecordFailed("MalformedRPCResponse")
+            if gas_price > BOTCHAIN_MAX_GAS_PRICE_WEI:
+                raise RecordFailed("FeeCapExceeded")
+            if hashes and stored and stored[-1]["max_fee_per_gas"] is not None:
+                minimum_bump = (stored[-1]["max_fee_per_gas"] * 110 + 99) // 100
+                gas_price = max(gas_price, minimum_bump)
+                if gas_price > BOTCHAIN_MAX_GAS_PRICE_WEI:
+                    raise RecordFailed("FeeCapExceeded")
+            max_fee = gas_price
+        else:
+            max_fee = min(base_fee * 2, MAX_FEE_PER_GAS_WEI)
         reservation = gas * max_fee
         if balance < self._low_balance_records * reservation and not self._low_funds_alerted:
             self._low_funds_alerted = True
@@ -1033,10 +1054,16 @@ class VerdictPublisher:
                 "value": 0,
                 "data": data,
                 "gas": gas,
+            }
+        if self.chain_id == 677:
+            transaction["gasPrice"] = max_fee
+        else:
+            transaction.update({
+                "type": 2,
                 "maxFeePerGas": max_fee,
                 "maxPriorityFeePerGas": 0,
-            }
-        )
+            })
+        signed = self._account.sign_transaction(transaction)
         # eth-account renamed rawTransaction to raw_transaction; HexBytes.hex() changed prefix, so use bytes.
         raw = bytes(getattr(signed, "raw_transaction", None) or signed.rawTransaction)
         return "send", raw, nonce, max_fee

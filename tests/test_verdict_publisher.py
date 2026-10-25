@@ -92,6 +92,7 @@ class FakeChain:
         # A lagging view (a read replica behind the sequencer) does not see what was mined.
         self.lagging = False
         self.base_fee = base_fee
+        self.gas_price = 20 * 10**9
         self.estimate = estimate
         self.balance = balance
         self.posts = []
@@ -146,6 +147,8 @@ class FakeChain:
             result = hex(self.estimate)
         elif method == "eth_getBalance":
             result = hex(self.balance)
+        elif method == "eth_gasPrice":
+            result = hex(self.gas_price)
         elif method == "eth_sendRawTransaction":
             raw = bytes.fromhex(params[0][2:])
             if decode_record(raw)["max_fee"] < self.base_fee:
@@ -251,21 +254,25 @@ def backoffs(sleep):
 
 
 def decode_record(raw):
-    """Decode a signed type-2 record() transaction into its fields and record() arguments."""
-    assert raw[0] == 2
-    chain_id, nonce, tip, max_fee, gas, to, value, data, access_list, *_ = rlp.decode(raw[1:])
+    """Decode a signed record() transaction into its fields and record() arguments."""
+    if raw[0] == 2:
+        chain_id, nonce, tip, max_fee, gas, to, value, data, access_list, *_ = rlp.decode(raw[1:])
+    else:
+        nonce, max_fee, gas, to, value, data, v, _, _ = rlp.decode(raw)
+        v = int.from_bytes(v, "big")
+        chain_id, tip, access_list = (v - 35) // 2, 0, None
     assert data[:4] == keccak(text="record(address,uint8,bytes32,uint64)")[:4]
     subject, verdict, evidence_hash, observed_block = decode(
         ["address", "uint8", "bytes32", "uint64"], data[4:]
     )
 
     def number(field):
-        return int.from_bytes(field, "big")
+        return field if isinstance(field, int) else int.from_bytes(field, "big")
 
     return {
         "chain_id": number(chain_id),
         "nonce": number(nonce),
-        "tip": number(tip),
+        "tip": number(tip) if isinstance(tip, bytes) else tip,
         "max_fee": number(max_fee),
         "gas": number(gas),
         "to": "0x" + to.hex(),
@@ -338,7 +345,7 @@ async def test_publishing_never_reads_the_recorder_key(monkeypatch, db):
 async def test_start_reads_the_key_from_the_environment(monkeypatch, db):
     monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
     publisher = make_publisher(db)
-    with patch.object(VerdictPublisher, "_drain_loop", new=AsyncMock()):
+    with patch.object(VerdictPublisher, "_drain_publishers_loop", new=AsyncMock()):
         publisher.start()
         assert publisher.recorder == RECORDER
         assert publisher._drain_task is not None
@@ -1094,6 +1101,104 @@ async def test_gas_limit_at_the_cap_and_max_fee_cap(db):
         await drain_all(publisher)
     tx = decode_record(chain.sent[0])
     assert (tx["gas"], tx["max_fee"]) == (vp.MAX_GAS_LIMIT, vp.MAX_FEE_PER_GAS_WEI)
+
+
+@pytest.mark.asyncio
+async def test_botchain_uses_legacy_gas_price_transaction(db):
+    chain = FakeChain(base_fee=0)
+    publisher = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, chain_id=677)
+    publisher._account = Account.from_key(KEY)
+    publisher.recorder = publisher._account.address
+    evidence = await publisher.publish(677, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "done"
+    [stored] = (await db.get_verdict_transactions([evidence["evidence_id"]]))[evidence["evidence_id"]]
+    raw = bytes.fromhex(stored["raw_tx"])
+    transaction = decode_record(raw)
+    assert raw[0] != 2
+    assert transaction["chain_id"] == 677
+    assert transaction["max_fee"] == 20 * 10**9
+    assert "eth_gasPrice" in chain.methods()[0]
+
+
+@pytest.mark.asyncio
+async def test_botchain_defers_when_gas_price_exceeds_cap(db):
+    chain = FakeChain(base_fee=0)
+    chain.gas_price = vp.BOTCHAIN_MAX_GAS_PRICE_WEI + 1
+    publisher = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, chain_id=677)
+    publisher._account = Account.from_key(KEY)
+    publisher.recorder = publisher._account.address
+    evidence = await publisher.publish(677, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "retry"
+    assert ["eth_sendRawTransaction"] not in chain.methods()
+
+
+@pytest.mark.asyncio
+async def test_botchain_replacement_bumps_gas_price_at_same_nonce(db, reconcile_now):
+    chain = FakeChain(base_fee=0)
+    chain.raise_on["eth_sendRawTransaction"] = aiohttp.ClientConnectionError()
+    publisher = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, chain_id=677)
+    publisher._account = Account.from_key(KEY)
+    publisher.recorder = publisher._account.address
+    evidence = await publisher.publish(677, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "done"
+        [stored] = (await db.get_verdict_transactions([evidence["evidence_id"]]))[evidence["evidence_id"]]
+        chain.raise_on.clear()
+        assert await publisher._reconcile() == 1
+        assert await publisher.drain_once() == "done"
+    replacement = decode_record(chain.sent[-1])
+    assert replacement["nonce"] == 7
+    assert replacement["max_fee"] >= stored["max_fee_per_gas"] * 110 // 100
+
+
+@pytest.mark.asyncio
+async def test_chain_publishers_hold_separate_leases_and_a_botchain_failure_keeps_robinhood_row(db):
+    robinhood = sender(db)
+    botchain = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, chain_id=677)
+    botchain._account = Account.from_key(KEY)
+    botchain.recorder = botchain._account.address
+    assert (await robinhood._take_lease())[0]
+    assert (await botchain._take_lease())[0]
+    assert await db.take_sender_lease("verdict-drain:4663", robinhood._lease_holder, vp.LEASE_SECONDS)
+    assert await db.take_sender_lease("verdict-drain:677", botchain._lease_holder, vp.LEASE_SECONDS)
+    await robinhood.publish(4663, TOKEN, COMPLETE)
+    await botchain.publish(677, TOKEN, COMPLETE)
+    chain = FakeChain()
+    chain.raise_on["eth_sendRawTransaction"] = aiohttp.ClientConnectionError()
+    with rpc_node(chain):
+        assert await botchain.drain_once() == "done"
+        await settle_publisher_tasks(botchain)
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "pending"
+    assert (await db.get_latest_verdict_evidence(677, TOKEN))["onchain_status"] == "unconfirmed"
+    chain.raise_on.clear()
+    with rpc_node(chain):
+        assert await robinhood.drain_once() == "done"
+    await settle_publisher_tasks(robinhood)
+    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "confirmed"
+    assert (await db.get_latest_verdict_evidence(677, TOKEN))["onchain_status"] == "unconfirmed"
+
+
+def test_low_balance_record_threshold_is_chain_specific():
+    assert VerdictPublisher(None, registry_address="")._low_balance_records == 1000
+    assert VerdictPublisher(None, registry_address="", chain_id=677)._low_balance_records == 100
+
+
+@pytest.mark.asyncio
+async def test_botchain_low_balance_alert_names_bot_and_bot_chain(db):
+    chain = FakeChain(base_fee=0, balance=10**17)
+    alert = AsyncMock()
+    publisher = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, alert=alert, chain_id=677)
+    publisher._account = Account.from_key(KEY)
+    publisher.recorder = publisher._account.address
+    await publisher.publish(677, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "done"
+    await settle_publisher_tasks(publisher)
+    [message] = [call.args[0] for call in alert.await_args_list]
+    assert "on BOT Chain (677)" in message
+    assert " BOT;" in message
 
 
 @pytest.mark.asyncio
