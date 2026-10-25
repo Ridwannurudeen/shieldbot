@@ -210,7 +210,9 @@ async def lifespan(app: FastAPI):
     _background_workers = settings.background_workers
     if _background_workers == "api":
         await container.start_mempool_monitor()
-        container.verdict_publisher.start()
+        container.verdict_publishers[4663].start_publishers(
+            list(container.verdict_publishers.values())
+        )
     else:
         logger.info("Background work runs in workers.py (BACKGROUND_WORKERS=external)")
 
@@ -263,7 +265,7 @@ async def lifespan(app: FastAPI):
     await container.launch_watch.stop()
     await container.hunter.stop()
     await container.phishing_service.stop()
-    await container.verdict_publisher.stop()
+    await container.verdict_publishers[4663].stop()
     await container.shutdown()
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
     if rpc_proxy:

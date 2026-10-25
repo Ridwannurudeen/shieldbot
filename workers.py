@@ -43,7 +43,9 @@ async def run(container: ServiceContainer, stop: asyncio.Event) -> int:
     container. Returns the exit status: 0 after `stop`, 1 when background work ended on its own or a stop failed."""
     await container.startup()
     await container.start_mempool_monitor()
-    container.verdict_publisher.start()
+    container.verdict_publishers[4663].start_publishers(
+        list(container.verdict_publishers.values())
+    )
     await container.hunter.start()
     await container.launch_watch.start()
     logger.info("ShieldBot workers started")
@@ -54,7 +56,7 @@ async def run(container: ServiceContainer, stop: asyncio.Event) -> int:
         for name, task in (
             ("deployer indexer", container.indexer._task),
             ("mempool monitor", container.mempool_monitor._task),
-            ("verdict drain", container.verdict_publisher._drain_task),
+            ("verdict drain", container.verdict_publishers[4663]._drain_task),
             ("hunter", container.hunter._task),
             ("launch watch", container.launch_watch._task),
         )
@@ -78,7 +80,7 @@ async def run(container: ServiceContainer, stop: asyncio.Event) -> int:
     for name, stop_service in (
         ("launch watch", container.launch_watch.stop),
         ("hunter", container.hunter.stop),
-        ("verdict drain", container.verdict_publisher.stop),
+        ("verdict drain", container.verdict_publishers[4663].stop),
         ("service container", container.shutdown),
     ):
         try:
