@@ -62,7 +62,7 @@ Create the encrypted keystore and capture only the address it prints:
 cast wallet new ~/.foundry/keystores botchain-recorder
 ```
 
-Never run a bare `cast wallet new`. Create the root-owned, mode 600 environment file used by the active sender. In a private terminal, decrypt the keystore directly into that file. The pipeline below writes the environment variable name and the decrypted key without printing the key or putting it in shell history:
+Never run a bare `cast wallet new`. Use the existing root-owned, mode 600 environment file loaded by the active sender. Do not recreate that file. In a private terminal, decrypt the keystore directly into it. The pipeline below writes the environment variable name and the decrypted key without printing the key or putting it in shell history:
 
 ```bash
 sudo install -d -m 700 -o root -g root /etc/shieldbot

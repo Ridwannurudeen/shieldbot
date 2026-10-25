@@ -1262,27 +1262,58 @@ async def test_a_hung_rpc_before_signing_times_out_and_waits(db, monkeypatch):
 @pytest.mark.asyncio
 async def test_the_production_coordinator_backs_off_exponentially_and_resets_after_a_record(db, monkeypatch):
     publisher = sender(db)
-    outcomes = iter(["retry", "retry", "retry", "done", "retry"] + ["retry"] * 10)
-    calls = []
+    outcomes = iter(["retry", "retry", "retry", "done"] + ["retry"] * 9)
+    clock = [100.0]
+    waits = []
 
     async def drain_once():
-        calls.append(time.monotonic())
-        try:
-            return next(outcomes)
-        except StopIteration:
-            raise asyncio.CancelledError
+        return next(outcomes)
 
-    monkeypatch.setattr(vp, "DRAIN_BACKOFF_SECONDS", 0.05)
-    monkeypatch.setattr(vp, "DRAIN_MAX_BACKOFF_SECONDS", 0.2)
-    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 0.001)
+    async def advance_wait(tasks, timeout=None, return_when=None):
+        waits.append(timeout)
+        clock[0] += timeout or 0.0
+        await asyncio.sleep(0)
+        if len(waits) == 13:
+            raise asyncio.CancelledError
+        return set(), set(tasks)
+
+    monkeypatch.setattr(vp.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(vp.asyncio, "wait", advance_wait)
+    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 3600)
     monkeypatch.setattr(publisher, "drain_once", drain_once)
     publisher.start_publishers([publisher], recorder_key=KEY)
     with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(publisher._drain_task, 5)
+        await publisher._drain_task
     await publisher.stop()
-    waits = [later - earlier for earlier, later in zip(calls, calls[1:])]
-    assert waits[:4] == pytest.approx([0.05, 0.1, 0.2, 0.0], abs=0.02)
-    assert waits[4:8] == pytest.approx([0.05, 0.1, 0.2, 0.2], abs=0.02)
+    assert waits == [
+        5.0,
+        10.0,
+        20.0,
+        0.0,
+        5.0,
+        10.0,
+        20.0,
+        40.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+    ]
+    assert [timeout for timeout in waits if timeout] == [
+        5.0,
+        10.0,
+        20.0,
+        5.0,
+        10.0,
+        20.0,
+        40.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+    ]
 
 
 @pytest.mark.asyncio
@@ -1638,7 +1669,7 @@ async def test_production_coordinator_recovers_a_returned_send_error(db, monkeyp
 async def test_the_drain_recovers_claims_after_an_error(db, monkeypatch):
     publisher = sender(db)
     publisher._wake = asyncio.Event()
-    outcomes = iter(["error"])
+    outcomes = iter(["error", "done", "retry"])
 
     async def drain_once():
         try:
@@ -1651,10 +1682,9 @@ async def test_the_drain_recovers_claims_after_an_error(db, monkeypatch):
     monkeypatch.setattr(publisher, "_reconcile", AsyncMock(return_value=0))
     monkeypatch.setattr(publisher, "_recover_claims", AsyncMock(side_effect=lambda: recoveries.append("recover")))
     monkeypatch.setattr(vp, "DRAIN_BACKOFF_SECONDS", 0.001)
-    with patch("services.verdict_publisher.asyncio.sleep", new=AsyncMock()):
-        publisher.start_publishers([publisher], recorder_key=KEY)
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(publisher._drain_task, 5)
+    publisher.start_publishers([publisher], recorder_key=KEY)
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(publisher._drain_task, 5)
     await publisher.stop()
     # Once at start and once after the error; a plain retry does not trigger recovery.
     assert recoveries == ["recover", "recover"]

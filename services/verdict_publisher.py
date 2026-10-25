@@ -515,7 +515,7 @@ class VerdictPublisher:
                         else:
                             logger.error(
                                 "%s verdict registry: drain failed: %s\n%s",
-                                publisher._chain_name,
+                                publisher._log_chain_name,
                                 type(e).__name__,
                                 stack,
                             )

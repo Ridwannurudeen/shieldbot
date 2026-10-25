@@ -242,7 +242,10 @@ async def test_4663_coordinator_keeps_original_lease_and_drain_error_logs(
         with pytest.raises(asyncio.CancelledError):
             await publisher._drain_task
         await publisher.stop()
-    assert "not sending, the sender lease could not be taken" in caplog.text
+    assert (
+        "Robinhood verdict registry: not sending, the sender lease could not be taken: RuntimeError"
+        in caplog.text
+    )
     assert "Verdict drain failed: RuntimeError" in caplog.text
     assert "_drain_publishers_loop" in caplog.text
 
