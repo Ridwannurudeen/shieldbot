@@ -96,4 +96,8 @@ class BotChainAdapter(EvmAdapter):
         }
 
     def capabilities(self) -> Dict:
-        return {**super().capabilities(), 'sell_simulation': 'none'}
+        return {
+            **super().capabilities(),
+            'sell_simulation': 'none',
+            'verification': 'blockscout',
+        }
