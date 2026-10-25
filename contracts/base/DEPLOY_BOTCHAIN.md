@@ -69,16 +69,24 @@ sudo install -d -m 700 -o root -g root /etc/shieldbot
 sudo -v
 sudo grep -c '^ROBINHOOD_RECORDER_PRIVATE_KEY=' /etc/shieldbot/recorder.env
 sudo grep -c '^BOTCHAIN_RECORDER_PRIVATE_KEY=' /etc/shieldbot/recorder.env || true
+sudo awk -F= '/^ROBINHOOD_RECORDER_PRIVATE_KEY=/{print length($2)}' /etc/shieldbot/recorder.env
+```
+
+Before continuing, the expected values are Robinhood key count `1`, Robinhood value length `66`, and BOT Chain key count `0`. Stop if any value differs. Ensure the existing file ends with a newline without rewriting it, then append the BOT Chain key:
+
+```bash
+sudo sh -c 'tail -c1 /etc/shieldbot/recorder.env | od -An -tu1 | tr -d " " | grep -qx "10" || echo >> /etc/shieldbot/recorder.env'
 cast wallet decrypt-keystore botchain-recorder | sed -n 's/^.*private key is: \(0x[0-9a-fA-F]*\)$/BOTCHAIN_RECORDER_PRIVATE_KEY=\1/p' | sudo tee -a /etc/shieldbot/recorder.env >/dev/null
 sudo grep -c '^ROBINHOOD_RECORDER_PRIVATE_KEY=' /etc/shieldbot/recorder.env
 sudo grep -c '^BOTCHAIN_RECORDER_PRIVATE_KEY=' /etc/shieldbot/recorder.env
+sudo awk -F= '/^ROBINHOOD_RECORDER_PRIVATE_KEY=/{print length($2)}' /etc/shieldbot/recorder.env
 sudo awk -F= '/^BOTCHAIN_RECORDER_PRIVATE_KEY=/{print length($2)}' /etc/shieldbot/recorder.env
 sudo chown root:root /etc/shieldbot/recorder.env
 sudo chmod 600 /etc/shieldbot/recorder.env
 ```
 
 Enter the keystore password only at the prompt. Clear the terminal after the command. Do not copy the key into chat, shell history, `/opt/shieldbot/.env`, or any other file. The recorder key belongs only in the environment file loaded by the single active sender.
-Stop if either recorder key count is not exactly `1`, or if the private key value length is not `66`.
+After appending, both key counts must be `1` and both private key value lengths must be `66`. Stop otherwise. Do not display the key value.
 
 ## 2. Fund the owner and recorder
 
@@ -167,7 +175,7 @@ BOTCHAIN_VERDICT_REGISTRY=<registry address>
 BOTCHAIN_RPC_URL=https://rpc.botchain.ai
 ```
 
-The `BOTCHAIN_RECORDER_PRIVATE_KEY` line stays in the root-owned, mode 600 recorder environment file loaded only by the active sender unit. Restart that one sender unit and read its log. Confirm the `recorder ready` line names chain 677 and there are no repeated restarts for 20 seconds:
+The `BOTCHAIN_RECORDER_PRIVATE_KEY` line stays in the root-owned, mode 600 recorder environment file loaded only by the active sender unit. Restart that one sender unit and read its log. Confirm the `BOT Chain verdict registry: recorder ready ...` line names chain 677, look for `sending as recorder` for both chains, and confirm there are no repeated restarts for 20 seconds:
 
 ```bash
 if systemctl is-active --quiet shieldbot-workers; then
