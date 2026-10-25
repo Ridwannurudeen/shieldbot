@@ -124,7 +124,7 @@ def parse_price_reply(answer, token: str) -> Optional[float]:
         return None
     try:
         price = float(raw_price)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if not math.isfinite(price) or price <= 0:
         return None

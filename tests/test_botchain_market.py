@@ -454,6 +454,7 @@ def mutated(**changes):
         mutated(price=True),
         mutated(price=None),
         mutated(price="twelve"),
+        mutated(price=10**400),
         {**PRICES[WBOT], "success": False},
         {"success": True, "data": None},
         None,
@@ -748,6 +749,18 @@ async def test_a_price_reply_without_success_is_not_kept(clock):
     second, server = await scan(COW, market=market)
     assert second["price_usd"] == float(PRICES[COW]["data"]["price"])
     assert COW in server.prices_asked()
+
+
+@pytest.mark.asyncio
+async def test_a_price_too_large_for_a_float_is_unpriced_not_a_failed_read(clock):
+    huge = copy.deepcopy(PRICES[COW])
+    huge["data"]["price"] = 10**400
+    result, _ = await scan(COW, Server(prices={**PRICES, COW: huge}))
+
+    assert result["price_usd"] is None
+    assert result["liquidity_usd"] is None
+    assert "Price unknown: BDEX prices no route from this token to USDT" in result["reason"]
+    assert "market read failed" not in result["reason"]
 
 
 def test_the_price_cache_is_bounded():
