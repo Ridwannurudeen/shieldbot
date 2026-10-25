@@ -23,7 +23,7 @@ interface Chain {
 }
 
 // Chains the scanner accepts (utils/chain_info.py). tests/test_website_claims.py keeps this in sync.
-const SUPPORTED_CHAINS = 8;
+const SUPPORTED_CHAINS = 9;
 
 const chains: Chain[] = [
   {
@@ -138,6 +138,20 @@ const chains: Chain[] = [
       </svg>
     ),
   },
+  {
+    // Generic block mark: no third-party logo.
+    chainId: 677,
+    name: "BOT Chain",
+    simulation: null,
+    mempool: false,
+    launches: false,
+    logo: (
+      <svg viewBox="0 0 32 32" fill="none" className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" aria-hidden="true">
+        <circle cx="16" cy="16" r="16" fill="#0C2A3A"/>
+        <rect x="10" y="10" width="12" height="12" rx="2" stroke="#38BDF8" strokeWidth="2"/>
+      </svg>
+    ),
+  },
 ];
 
 
@@ -210,7 +224,7 @@ function launchCell(chain: Chain): { state: CellState; label: string } {
 // The chains in orbit (index.css, "Orbits"): each chain on its own ellipse, inner ones faster, logos upright; the
 // magenta ellipse is Robinhood Chain's, the registry's chain. A picture of the table below, which carries the facts,
 // so it is hidden from assistive technology. It moves only while on screen (useAlive). Below 1024 px the planets
-// carry no names (the table does): eight labels do not fit those rings without clipping or overlapping.
+// carry no names (the table does): nine labels do not fit those rings without clipping or overlapping.
 function Orbits() {
   const { ref, on, paused, setPaused } = useAlive<HTMLDivElement>();
   return (
@@ -231,7 +245,7 @@ function Orbits() {
           </div>
         ))}
         <p className="absolute inset-0 grid place-content-center text-center font-mono text-[11px] uppercase tracking-[0.08em] text-secondary">
-          <span className="font-sans text-[44px] font-medium normal-case leading-none tracking-[-0.03em] text-ink">8</span>
+          <span className="font-sans text-[44px] font-medium normal-case leading-none tracking-[-0.03em] text-ink">9</span>
           chains
         </p>
       </div>
@@ -258,9 +272,9 @@ export default function Chains() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <div className="mx-auto max-w-3xl text-center">
           <p className="text-sm font-medium text-accent">Coverage</p>
-          <h2 id="chains-title" className="mt-3 text-h2-sm md:text-h2 text-ink">8 chains</h2>
+          <h2 id="chains-title" className="mt-3 text-h2-sm md:text-h2 text-ink">9 chains</h2>
           <p className="mt-4 text-[17px] md:text-lg leading-relaxed text-secondary">
-            Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is reported as Unknown, never as Safe.
+            Contract scans run on all 9 chains. The other checks depend on the chain, and a check that cannot run is reported as Unknown, never as Safe.
           </p>
         </div>
 

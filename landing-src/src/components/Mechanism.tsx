@@ -14,6 +14,7 @@ const chainNames: Record<number, string> = {
   10: "Optimism",
   204: "opBNB",
   4663: "Robinhood Chain",
+  677: "BOT Chain",
 };
 
 const CHECK_MEANINGS: Record<CheckKey, string> = {

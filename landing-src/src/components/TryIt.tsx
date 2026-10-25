@@ -17,6 +17,7 @@ const chainOptions = [
   { id: 10, name: "Optimism" },
   { id: 204, name: "opBNB" },
   { id: 4663, name: "Robinhood Chain" },
+  { id: 677, name: "BOT Chain" },
 ];
 
 type ScanResult = ScanReply & {

@@ -457,11 +457,11 @@
 }
 
 /* Orbits (Chains.tsx): each chain on its own ellipse, a hairline (Robinhood Chain's magenta), periods 18 s (inner) to
-   60 s (outer), each starting at its own angle (137.5 deg apart). 2D only: an arm squashed by --k turns, and the logo
+   66 s (outer), each starting at its own angle (137.5 deg apart). 2D only: an arm squashed by --k turns, and the logo
    turns back and un-squashes, so it stays upright and crisp; nothing tilts, blurs or fades. With reduced motion the
    planets stand at their starting angles. The only motion on the page that repeats: it runs only while on screen and
    the tab is visible, and its Pause button holds it (data-paused). */
-.orbits { container-type: inline-size; aspect-ratio: 2 / 1; --k: 0.5; --r0: 0.3; --dr: 0.09; }
+.orbits { container-type: inline-size; aspect-ratio: 2 / 1; --k: 0.5; --r0: 0.29; --dr: 0.08; }
 .orbit {
   --r: calc(var(--r0) + var(--o) * var(--dr));
   --a: calc(var(--o) * 137.5deg);
