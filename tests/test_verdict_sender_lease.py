@@ -188,6 +188,66 @@ async def test_start_publishers_runs_one_drain_task_in_chain_order(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_stop_leaves_no_publisher_wake_wait_tasks(two_processes, short_lease, monkeypatch):
+    db, _ = two_processes
+    monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
+    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 3600)
+    publisher = publisher_on(db)
+    waiting = asyncio.Event()
+    wake_tasks = []
+    publisher.start_publishers([publisher])
+    original_wait = publisher._wake.wait
+
+    async def track_wake_wait():
+        wake_tasks.append(asyncio.current_task())
+        waiting.set()
+        return await original_wait()
+
+    publisher._wake.wait = track_wake_wait
+    with rpc_node(FakeChain()):
+        await asyncio.wait_for(waiting.wait(), 5)
+        await publisher.stop()
+    assert len(wake_tasks) == 1
+    assert all(task.done() for task in wake_tasks)
+    assert not any(task in asyncio.all_tasks() for task in wake_tasks)
+
+
+@pytest.mark.asyncio
+async def test_4663_coordinator_keeps_original_lease_and_drain_error_logs(
+    two_processes, short_lease, monkeypatch, caplog
+):
+    db, _ = two_processes
+    monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
+    monkeypatch.setattr(vp, "LEASE_SECONDS", 0.001)
+    monkeypatch.setattr(vp, "DRAIN_BACKOFF_SECONDS", 0.001)
+    publisher = publisher_on(db)
+    takes = 0
+
+    async def take_lease():
+        nonlocal takes
+        takes += 1
+        if takes == 1:
+            raise RuntimeError("database locked")
+        return True, time.time() + 90
+
+    async def keep_lease(_expiry):
+        await asyncio.Event().wait()
+
+    publisher._take_lease = take_lease
+    publisher._keep_lease = keep_lease
+    publisher.drain_once = AsyncMock(side_effect=[RuntimeError("database locked"), asyncio.CancelledError()])
+    caplog.set_level("ERROR")
+    with rpc_node(FakeChain()):
+        publisher.start_publishers([publisher])
+        with pytest.raises(asyncio.CancelledError):
+            await publisher._drain_task
+        await publisher.stop()
+    assert "not sending, the sender lease could not be taken" in caplog.text
+    assert "Verdict drain failed: RuntimeError" in caplog.text
+    assert "_drain_publishers_loop" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_production_loop_ignores_wake_during_backoff(two_processes, short_lease, monkeypatch):
     db, _ = two_processes
     monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
@@ -249,8 +309,9 @@ async def test_production_loop_stops_claiming_after_send_finds_lost_lease(
         await until(lambda: asyncio.sleep(0, bool(claimed)))
         await asyncio.sleep(0.08)
         assert claimed == [4663]
-        assert await db.get_latest_verdict_evidence(4663, TOKEN) is not None
-        assert await db.get_latest_verdict_evidence(4663, TOKENS[0]) is not None
+        assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "pending"
+        assert (await db.get_latest_verdict_evidence(4663, TOKENS[0]))["onchain_status"] == "pending"
+        assert chain.sent == []
         await publisher.stop()
 
 
@@ -612,7 +673,7 @@ async def test_a_waiting_drain_asks_again_when_the_lease_expires_not_a_whole_per
         second.start_publishers([second], recorder_key=KEY)
         await until(lambda: holds(second_db, second))
         await second.stop()
-    assert len(attempts) >= 2
+    assert 2 <= len(attempts) <= 4
 
 
 @pytest.mark.asyncio

@@ -4,13 +4,13 @@ Every process (API, hunter, bot) calls publish(), which only STORES the canonica
 (core.verdict_evidence). When a chain's verdict registry is set, a row for that chain is stored as
 `pending`: an outbox entry for ShieldBotVerdictRegistry.record().
 
-Exactly one process sends: the API process calls start(), which reads ROBINHOOD_RECORDER_PRIVATE_KEY and runs a
-drain that records pending rows oldest-first. With BACKGROUND_WORKERS=external workers.py calls it instead and
-the API does not. No other code path reads the key, so the bot never sends. If two drains run on one database by
-mistake, only the holder of the sender lease stores and broadcasts: after signing, a send takes the lease again and
-goes on only if the lease is its own and still has a lock wait and PHASE_TIMEOUT_SECONDS to run; otherwise it
-discards what it signed and returns the row to the queue. A send that passed that check can finish its broadcast
-before the lease can pass to another drain.
+Exactly one process sends: the API process starts one coordinator for all configured chains, or workers.py does
+instead when BACKGROUND_WORKERS=external. Each chain has its own recorder key, sender lease, rate window and nonce
+lock. The coordinator records pending rows oldest-first only while each chain's sender lease is held. No other code
+path reads the keys, so the bot never sends. After signing, a send takes its chain's lease again and goes on only if
+the lease is its own and still has a lock wait and PHASE_TIMEOUT_SECONDS to run; otherwise it discards what it signed
+and returns the row to the queue. A send that passed that check can finish its broadcast before the lease can pass
+to another drain.
 
 A row is queued for the registry configured when it is stored, and it is only ever sent there: after the
 registry address changes, a row queued for the old one is dropped (RegistryChanged) and deduplication only
@@ -353,27 +353,8 @@ class VerdictPublisher:
     # ------------------------------------------------------------------
 
     def start(self, recorder_key: Optional[str] = None) -> None:
-        """Start the drain. Only the API process, or workers.py in its place, calls this: the one on-chain sender."""
-        if self._drain_task is not None or not self.is_onchain_enabled():
-            return
-        key = recorder_key if recorder_key is not None else os.getenv(f"{self._env_prefix}_RECORDER_PRIVATE_KEY", "")
-        if not key:
-            logger.warning(
-                "%s verdict registry: not sending (%s_RECORDER_PRIVATE_KEY is not set); verdicts stay pending",
-                self._log_chain_name,
-                self._env_prefix,
-            )
-            return
-        try:
-            self._account = Account.from_key(key)
-        except Exception as e:
-            logger.error("%s verdict registry: not sending (invalid recorder key: %s)", self._log_chain_name, type(e).__name__)
-            return
-        self.recorder = self._account.address
-        self._wake = asyncio.Event()
-        self._drain_publishers = [self]
-        logger.info("%s verdict registry: recorder ready %s", self._log_chain_name, self.recorder)
-        self._drain_task = asyncio.create_task(self._drain_under_lease())
+        """Start this publisher through the same coordinator used by the API and workers process."""
+        self.start_publishers([self], recorder_key=recorder_key)
 
     def start_publishers(
         self, publishers: list["VerdictPublisher"], recorder_key: Optional[str] = None
@@ -451,50 +432,6 @@ class VerdictPublisher:
                 len(unfinished),
             )
 
-    async def _drain_under_lease(self) -> None:
-        """Run the drain only while this process holds the sender lease, renewing it as the drain runs.
-
-        The lease is renewed beside the drain rather than between its turns: one send can take longer than
-        LEASE_SECONDS, and so can the drain's waits after a failure or at the rate cap. When the lease is lost, or a
-        send finds it too short to broadcast under, the drain returns before it claims another row. A send under way
-        that already passed the check at the send finishes; one that had not is discarded, its row back in the
-        queue. The drain is stopped that way rather than cancelled, so no write of its own is cut off between a
-        statement and its commit. Then this process takes the lease again, or waits for it.
-        """
-        while True:
-            try:
-                held, expires_at = await self._take_lease()
-            except Exception as e:
-                logger.error(
-                    "%s verdict registry: not sending, the sender lease could not be taken: %s",
-                    self._log_chain_name,
-                    type(e).__name__,
-                )
-                await asyncio.sleep(LEASE_SECONDS)
-                continue
-            if not held:
-                # Ask again when the other drain's lease runs out, unless it is renewed before then.
-                await asyncio.sleep(min(LEASE_SECONDS, max(0.0, expires_at - time.time())))
-                continue
-            logger.info("%s verdict registry: sending as recorder %s", self._log_chain_name, self.recorder)
-            drain = asyncio.create_task(self._drain_loop())
-            keeper = asyncio.create_task(self._keep_lease(expires_at))
-            try:
-                # The keeper returns once the lease is lost; the drain returns once a send found the lease too short.
-                await asyncio.wait({drain, keeper}, return_when=asyncio.FIRST_COMPLETED)
-                self._lease_lost = True
-                self._wake.set()
-                await drain
-            finally:
-                keeper.cancel()
-                drain.cancel()
-                await asyncio.wait({keeper, drain})
-                self._lease_lost = False
-            logger.error(
-                "%s verdict registry: stopped sending until this process holds the sender lease again",
-                self._log_chain_name,
-            )
-
     async def _drain_publishers_loop(self) -> None:
         publishers = self._drain_publishers
         retry_after = {publisher: 0.0 for publisher in publishers}
@@ -512,11 +449,17 @@ class VerdictPublisher:
                     try:
                         acquired, expiry = await publisher._take_lease()
                     except Exception as e:
-                        logger.error(
-                            "%s verdict registry: sender lease could not be taken: %s",
-                            publisher._log_chain_name,
-                            type(e).__name__,
-                        )
+                        if publisher.chain_id == 4663:
+                            logger.error(
+                                "Robinhood verdict registry: not sending, the sender lease could not be taken: %s",
+                                type(e).__name__,
+                            )
+                        else:
+                            logger.error(
+                                "%s verdict registry: not sending, the sender lease could not be taken: %s",
+                                publisher._log_chain_name,
+                                type(e).__name__,
+                            )
                         lease_retry_after[publisher] = now + LEASE_SECONDS
                         continue
                     if not acquired:
@@ -544,10 +487,15 @@ class VerdictPublisher:
                     keeper = keepers[publisher]
                     if publisher._lease_lost or keeper.done():
                         publisher._lease_lost = True
-                        logger.error(
-                            "%s verdict registry: stopped sending until this process holds the sender lease again",
-                            publisher._log_chain_name,
-                        )
+                        if publisher.chain_id == 4663:
+                            logger.error(
+                                "Robinhood verdict registry: stopped sending until this process holds the sender lease again"
+                            )
+                        else:
+                            logger.error(
+                                "%s verdict registry: stopped sending until this process holds the sender lease again",
+                                publisher._log_chain_name,
+                            )
                         held.remove(publisher)
                         keeper.cancel()
                         await asyncio.gather(keeper, return_exceptions=True)
@@ -561,9 +509,19 @@ class VerdictPublisher:
                     try:
                         outcome = await publisher.drain_once()
                     except Exception as e:
-                        logger.error("Verdict drain failed on %s: %s", publisher._chain_name, type(e).__name__)
-                        await publisher._recover_claims()
+                        stack = "".join(traceback.format_tb(e.__traceback__))
+                        if publisher.chain_id == 4663:
+                            logger.error("Verdict drain failed: %s\n%s", type(e).__name__, stack)
+                        else:
+                            logger.error(
+                                "%s verdict registry: drain failed: %s\n%s",
+                                publisher._chain_name,
+                                type(e).__name__,
+                                stack,
+                            )
                         outcome = "error"
+                    if outcome == "error":
+                        await publisher._recover_claims()
                     if publisher._lease_lost:
                         immediate = True
                         continue
@@ -600,11 +558,13 @@ class VerdictPublisher:
                 tasks = [*wakes, *(keepers[publisher] for publisher in held)]
                 if tasks:
                     wake_set = set(wakes)
-                    _, pending = await asyncio.wait(tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
-                    pending_wakes = [task for task in pending if task in wake_set]
-                    for task in pending_wakes:
-                        task.cancel()
-                    await asyncio.gather(*pending_wakes, return_exceptions=True)
+                    try:
+                        await asyncio.wait(tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+                    finally:
+                        pending_wakes = [task for task in wake_set if not task.done()]
+                        for task in pending_wakes:
+                            task.cancel()
+                        await asyncio.gather(*wakes, return_exceptions=True)
                 else:
                     await asyncio.sleep(timeout)
         finally:
@@ -659,40 +619,6 @@ class VerdictPublisher:
         """True once a renewal that waits the whole DB_LOCK_WAIT_SECONDS for the lock and then fails would leave
         less than one renewal period of the lease."""
         return time.time() + DB_LOCK_WAIT_SECONDS >= held_until - LEASE_RENEW_SECONDS
-
-    async def _drain_loop(self) -> None:
-        await self._recover_claims()
-        await self._reconcile()
-        backoff = 0.0
-        while not self._lease_lost:
-            self._wake.clear()
-            try:
-                outcome = await self.drain_once()
-            except Exception as e:
-                logger.error(
-                    "Verdict drain failed: %s\n%s",
-                    type(e).__name__,
-                    "".join(traceback.format_tb(e.__traceback__)),
-                )
-                outcome = "error"
-            if outcome == "done":
-                backoff = 0.0
-            elif outcome in ("retry", "error"):
-                if outcome == "error":
-                    # A database failure can leave a claim `sending`; resolve old ones before going on.
-                    await self._recover_claims()
-                backoff = min(max(backoff * 2, DRAIN_BACKOFF_SECONDS), DRAIN_MAX_BACKOFF_SECONDS)
-                await asyncio.sleep(backoff)
-            elif outcome == "capped":
-                await asyncio.sleep(self._rate_wait())
-            else:
-                released = await self._recover_claims()
-                requeued = await self._reconcile()
-                if not (released or requeued):
-                    try:
-                        await asyncio.wait_for(self._wake.wait(), DRAIN_POLL_SECONDS)
-                    except asyncio.TimeoutError:
-                        pass
 
     def _rate_wait(self) -> float:
         """Seconds until a send slot frees up in the MAX_RECORDS_PER_HOUR window, 0 if one is free."""
