@@ -474,14 +474,6 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     raw = context.args[0]
-    prefix, separator, prefixed_address = raw.partition(":")
-    if separator and prefix.lower() in {"bot", "botchain"}:
-        if not web3_client.is_valid_address(prefixed_address):
-            await update.message.reply_text("❌ Invalid address format.")
-            return
-        await _scan_approvals(update, prefixed_address, 677, botchain_approval=True)
-        return
-
     prefix_chain_id, address = parse_chain_prefix(raw)
     if prefix_chain_id:
         web3_client.validate_chain_id(prefix_chain_id)
@@ -494,11 +486,9 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _ask_chain(update, context, 'r', address)
 
 
-async def _scan_approvals(
-    update: Update, address: str, chain_id: int, *, botchain_approval: bool = False,
-):
+async def _scan_approvals(update: Update, address: str, chain_id: int):
     """Scan a wallet's token approvals on chain_id and report the risky ones."""
-    chain_name = "BOT Chain" if botchain_approval else get_chain_name(chain_id)
+    chain_name = get_chain_name(chain_id)
     status_msg = await update.message.reply_text(
         f"🚨 **Scanning approvals on {chain_name}...**\n\n"
         "⏳ Checking token allowances for risky spenders...",
@@ -507,16 +497,15 @@ async def _scan_approvals(
 
     try:
         # Pick the best API key for the target chain
-        api_key = "" if botchain_approval else settings.bscscan_api_key
+        api_key = "" if chain_id == 677 else settings.bscscan_api_key
         if chain_id == 1:
             api_key = settings.etherscan_api_key or api_key
 
         result = await container.rescue_service.scan_approvals(
             address, chain_id=chain_id, etherscan_api_key=api_key,
-            botchain_approval_scan=botchain_approval,
         )
 
-        if botchain_approval:
+        if chain_id == 677:
             response, other_approvals, revoke_section = _botchain_approval_sections(address, result)
             reply_with_other_approvals = response + other_approvals
             assembled_reply = reply_with_other_approvals + revoke_section
@@ -623,7 +612,7 @@ async def _scan_approvals(
     except Exception as e:
         logger.error(f"Error in /rescue: {type(e).__name__}")
         error_message = "❌ Error scanning approvals. Please try again later."
-        if botchain_approval:
+        if chain_id == 677:
             try:
                 await status_msg.edit_text(error_message)
             except Exception:
