@@ -641,6 +641,48 @@ async def test_an_unsupported_log_method_is_unknown(clock):
 
 
 @pytest.mark.asyncio
+async def test_an_eth_call_error_row_is_unknown_and_named_once(clock):
+    server = Server()
+
+    def unsupported(body):
+        if body[0]["method"] == "eth_call":
+            return Response(200, [{**UNSUPPORTED, "id": row["id"]} for row in body])
+        return None
+
+    server.rpc_fault = unsupported
+    result, _ = await scan(LK2E, server)
+
+    assert result["liquidity_usd"] is None
+    assert result["fdv"] is None
+    assert result["token_name"] is None
+    assert result["status"] == "unknown"
+    notes = [note for note in result["reason"].split("; ") if "eth_call" in note]
+    assert notes == ["BOT Chain RPC does not support eth_call on 6 of 6 reads"]
+
+
+@pytest.mark.asyncio
+async def test_a_reverted_call_row_names_its_error_code(clock):
+    server = Server()
+
+    def revert_reserves(body):
+        if body[0]["method"] == "eth_call":
+            rows = [server.answer(row) for row in body]
+            for row in rows:
+                if body[row["id"]]["params"][0]["data"] == "0x0902f1ac":
+                    row.pop("result", None)
+                    row["error"] = {"code": 3, "message": "execution reverted"}
+            return Response(200, rows)
+        return None
+
+    server.rpc_fault = revert_reserves
+    result, _ = await scan(LK2E, server)
+
+    assert result["liquidity_usd"] is None
+    assert result["token_symbol"] == "LK2E"
+    assert "BOT Chain RPC answered eth_call error 3 on 1 of 6 reads" in result["reason"]
+
+
+@pytest.mark.asyncio
 async def test_an_unexpected_error_is_unknown_not_raised(clock):
     client = MagicMock(side_effect=RuntimeError("boom"))
     with patch("services.botchain_market.aiohttp.ClientSession", client):

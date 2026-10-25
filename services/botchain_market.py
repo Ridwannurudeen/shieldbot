@@ -593,6 +593,7 @@ class BotChainMarket:
 
         reads = {}
         failures = []
+        error_codes = []
         chunks = [
             wanted[i : i + RPC_BATCH_SIZE]
             for i in range(0, len(wanted), RPC_BATCH_SIZE)
@@ -611,7 +612,9 @@ class BotChainMarket:
                 failures.append(str(e))
                 return
             for (key, _to, _data, types), row in zip(chunk, rows):
-                if row.get("error") is not None:
+                error = row.get("error")
+                if error is not None:
+                    error_codes.append(error.get("code") if isinstance(error, dict) else None)
                     continue
                 values = _decode(types, row.get("result"))
                 if values is None:
@@ -623,6 +626,16 @@ class BotChainMarket:
         await asyncio.gather(*(read(chunk) for chunk in chunks))
         if failures:
             notes.append(f"BOT Chain reads failed: {failures[0]}")
+        if error_codes:
+            first = error_codes[0]
+            cause = (
+                "does not support eth_call"
+                if first == RPC_UNSUPPORTED
+                else f"answered eth_call error {first}"
+            )
+            notes.append(
+                f"BOT Chain RPC {cause} on {len(error_codes)} of {len(wanted)} reads"
+            )
         return reads
 
     @staticmethod
