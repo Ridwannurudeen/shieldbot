@@ -10,8 +10,10 @@ from typing import Optional
 from eth_utils import keccak
 
 from adapters.evm_base import BURN_ADDRESSES
+from core.unknown_ledger import unknown_ledger
 from services.launch_discovery import SOURCES, LaunchDiscoveryError, _decode_log, _quantity
 from services.robinhood_assets import OFFICIAL_LIST_WAIT_SECONDS
+from utils.scam_db import address_security_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +344,7 @@ class ContractService:
             # and cached, so one still running at the deadline fills the caches when it ends.
             # Verification starts first; it does not depend on the launch table.
             lookups = {}
+            creator_security_task = None
             if exemption is None:
                 lookups['is_verified'] = start(self.web3_client.is_verified_contract(address, chain_id=chain_id))
 
@@ -354,7 +357,22 @@ class ContractService:
                 results['contract_age_days'] = launch
                 results['field_providers'] = {'contract_age_days': 'launch_table'}
             elif exemption is None:
-                lookups['contract_age_days'] = start(creation_lookup())
+                creation_task = start(creation_lookup())
+                lookups['contract_age_days'] = creation_task
+                if chain_id == 677:
+                    async def creator_lookup():
+                        creation = await creation_task
+                        creator = creation.get('creator') if isinstance(creation, dict) else None
+                        if not isinstance(creator, str) or not re.fullmatch(r'0x[0-9a-fA-F]{40}', creator):
+                            return None
+                        response = await self.scam_db.fetch_address_security(creator)
+                        unknown_ledger.record('goplus_address', 677, address_security_outcome(response))
+                        return creator, response
+
+                    creator_security_task = start(creator_lookup())
+
+            if chain_id == 677:
+                results['token_security_unsupported'] = True
 
             # Scam DB (external APIs, not BscScan — no delay needed)
             scam_matches = await self.scam_db.check_address(address, chain_id=chain_id)
@@ -364,6 +382,11 @@ class ContractService:
             if failed_providers:
                 results['coverage'] = {'scam_database': False}
                 results['reason'] = 'Scam database unavailable: ' + '; '.join(failed_providers)
+            elif chain_id == 677:
+                results['coverage'] = {'scam_database': True}
+            if chain_id == 677:
+                results['address_labels'] = getattr(scam_matches, 'address_record', {})
+                results['address_label_notes'] = getattr(scam_matches, 'address_notes', ())
 
             goplus = getattr(scam_matches, 'goplus_record', {})
 
@@ -423,10 +446,14 @@ class ContractService:
                 results['coverage'] = {**results.get('coverage', {}), 'bytecode': False}
                 results['reason'] = '; '.join(filter(None, (results.get('reason'), 'Bytecode scan unavailable')))
 
-            if lookups:
-                await asyncio.wait(lookups.values(), timeout=wait_timeout())
+            pending_lookups = list(lookups.values())
+            if creator_security_task is not None:
+                pending_lookups.append(creator_security_task)
+            if pending_lookups:
+                await asyncio.wait(pending_lookups, timeout=wait_timeout())
             if exemption is not None:
                 results['coverage_exemptions'] = exemption
+            creation_lookup_answered = False
             # The official list answered after the lookups started: it exempts only the fields they
             # left unanswered.
             late = (
@@ -450,7 +477,35 @@ class ContractService:
                 elif field == 'is_verified':
                     results['is_verified'], source_code = lookup.result()
                 elif lookup.result():
+                    if chain_id == 677:
+                        creation_lookup_answered = True
                     results['contract_age_days'] = lookup.result().get('age_days')
+
+            if chain_id == 677:
+                if creator_security_task is not None:
+                    if (
+                        creator_security_task.done()
+                        and not creator_security_task.cancelled()
+                        and creator_security_task.exception() is None
+                    ):
+                        creator_result = creator_security_task.result()
+                        if creator_result is not None:
+                            creator, creator_response = creator_result
+                            results['creator_address'] = creator
+                            results['creator_address_status'] = creator_response.get('status')
+                            results['creator_address_labels'] = creator_response.get('data', {})
+                            results['creator_address_reason'] = creator_response.get('reason')
+                        else:
+                            results['creator_address_status'] = (
+                                'not_available' if creation_lookup_answered else 'unknown'
+                            )
+                    else:
+                        results['creator_address_status'] = 'unknown'
+                        results['creator_address_pending'] = not creator_security_task.done()
+                else:
+                    results['creator_address_status'] = (
+                        'not_available' if creation_lookup_answered else 'unknown'
+                    )
 
             # GoPlus's token record, fetched by the scam check. When the explorer did not answer, it
             # says whether the source is open, which is the same fact.

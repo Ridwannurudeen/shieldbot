@@ -1,5 +1,6 @@
 """Integration tests for the FastAPI endpoints (/api/health, /api/firewall fallback)."""
 
+import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 from types import SimpleNamespace
@@ -570,6 +571,39 @@ async def test_strict_blocks_a_provider_unknown_cold_and_warm(cached_firewall_ap
     assert cold["policy_mode"] == warm["policy_mode"] == "STRICT"
     assert warm.get("cached") is not True
     assert services.registry.run_all.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_firewall_deadline_returns_structural_pending_for_a_hung_lookup(monkeypatch):
+    import time
+    import api
+
+    request = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, chainId=677)
+    progress = api.FirstVerdictProgress(["structural"], "BALANCED")
+    progress.pending.add("structural")
+
+    async def slow_verdict(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    async def no_evidence(response, *args, **kwargs):
+        return response
+
+    monkeypatch.setattr(api, "FIREWALL_REQUEST_DEADLINE_SECONDS", 0.08)
+    monkeypatch.setattr(api, "FIREWALL_RESPONSE_RESERVE_SECONDS", 0.01)
+    monkeypatch.setattr(api, "_firewall_verdict", slow_verdict)
+    monkeypatch.setattr(api, "_with_evidence", no_evidence)
+    response = await api._firewall_response(
+        request,
+        SimpleNamespace(headers={}),
+        progress=progress,
+        deadline=time.monotonic() + 0.08,
+    )
+    assert response["risk_display"] == "Unknown (provider deadline reached)"
+    assert response["coverage"]["structural"] == 0
+    assert response["coverage_reasons"]["structural"] == (
+        "Provider timed out at the firewall request deadline"
+    )
+    assert response["pending_sources"] == ["structural"]
 
 
 @pytest.mark.asyncio

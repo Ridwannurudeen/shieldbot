@@ -249,7 +249,11 @@ class RiskEngine:
 
             # A failed scam lookup or bytecode scan is not a clean one, so it earns no positive signal.
             contract_coverage = contract_data.get('coverage', {})
-            checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
+            checks_covered = (
+                contract_coverage.get('scam_database', True)
+                and contract_coverage.get('bytecode', True)
+                and not contract_data.get('token_security_unsupported', False)
+            )
             # A community report does not withhold the discount: its only effect is its floor below.
             if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not hard_matches and checks_covered:
                 composite = max(composite - 20, 0)
@@ -407,7 +411,11 @@ class RiskEngine:
             # community report does not withhold it: its only effect is its floor below.
             liquidity_info = dex_data.get('liquidity_usd')
             contract_coverage = contract_data.get('coverage', {})
-            checks_covered = contract_coverage.get('scam_database', True) and contract_coverage.get('bytecode', True)
+            checks_covered = (
+                contract_coverage.get('scam_database', True)
+                and contract_coverage.get('bytecode', True)
+                and not contract_data.get('token_security_unsupported', False)
+            )
             if ownership_renounced and liquidity_info is not None and liquidity_info > 100_000 and honeypot_data.get('is_honeypot') is False and not required_unknown and not hard_matches and checks_covered:
                 composite = max(composite - 20, tx_share)
 

@@ -287,6 +287,56 @@ async def test_missing_creation_evidence_unknown(http, payload):
 
 
 @pytest.mark.asyncio
+async def test_botchain_accepts_absent_creation_status_with_matching_evidence(http):
+    payload = {key: value for key, value in BLOCKSCOUT_ADDRESS.items() if key != "creation_status"}
+    http[0](payload)
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        result = await ExplorerService().get_contract_creation_info(ADDRESS, 677)
+    assert result.status == "known"
+    assert result.data == {"creator": FUNDER, "tx_hash": TX_HASH}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"is_contract": False},
+        {"creator_address_hash": "0xnot-an-address"},
+        {"creation_transaction_hash": "0x1234"},
+        {"hash": FUNDER},
+    ],
+)
+async def test_botchain_absent_status_still_requires_matching_creation_evidence(http, changes):
+    payload = {key: value for key, value in BLOCKSCOUT_ADDRESS.items() if key != "creation_status"}
+    http[0]({**payload, **changes})
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        result = await ExplorerService().get_contract_creation_info(ADDRESS, 677)
+    assert result.status == "unknown"
+    assert result.reason == "Missing or mismatched creation evidence"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [56, 4663])
+async def test_absent_creation_status_remains_rejected_on_other_chains(http, chain_id):
+    payload = {key: value for key, value in BLOCKSCOUT_ADDRESS.items() if key != "creation_status"}
+    http[0](payload)
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        result = await ExplorerService().get_contract_creation_info(ADDRESS, chain_id)
+    assert result.status == "unknown"
+    assert result.reason == "Missing or mismatched creation evidence"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["failed", "error", "pending"])
+async def test_botchain_explicit_non_success_creation_status_is_rejected(http, status):
+    http[0]({**BLOCKSCOUT_ADDRESS, "creation_status": status})
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        result = await ExplorerService().get_contract_creation_info(ADDRESS, 677)
+    assert result.status == "unknown"
+    assert result.reason == "Missing or mismatched creation evidence"
+
+
+@pytest.mark.asyncio
 async def test_blockscout_429_backoff_then_success(http):
     http[0]({}, 429)
     http[0](BLOCKSCOUT_ADDRESS)
