@@ -231,7 +231,7 @@ class VerdictPublisher:
         if not registry:
             logger.info(
                 "%s verdict registry: disabled (set %s_VERDICT_REGISTRY to enable)",
-                self._chain_name,
+                self._log_chain_name,
                 self._env_prefix,
             )
             return
@@ -240,18 +240,22 @@ class VerdictPublisher:
         except ValueError as e:
             logger.error(
                 "%s verdict registry: disabled (invalid %s_VERDICT_REGISTRY: %s)",
-                self._chain_name,
+                self._log_chain_name,
                 self._env_prefix,
                 type(e).__name__,
             )
             return
-        logger.info("%s verdict registry: verdicts queued for %s", self._chain_name, self.registry)
+        logger.info("%s verdict registry: verdicts queued for %s", self._log_chain_name, self.registry)
 
     @property
     def _chain_name(self) -> str:
         from utils.chain_info import get_chain_name
 
         return get_chain_name(self.chain_id)
+
+    @property
+    def _log_chain_name(self) -> str:
+        return "Robinhood" if self.chain_id == 4663 else self._chain_name
 
     @property
     def _alert_chain_label(self) -> str:
@@ -356,19 +360,19 @@ class VerdictPublisher:
         if not key:
             logger.warning(
                 "%s verdict registry: not sending (%s_RECORDER_PRIVATE_KEY is not set); verdicts stay pending",
-                self._chain_name,
+                self._log_chain_name,
                 self._env_prefix,
             )
             return
         try:
             self._account = Account.from_key(key)
         except Exception as e:
-            logger.error("%s verdict registry: not sending (invalid recorder key: %s)", self._chain_name, type(e).__name__)
+            logger.error("%s verdict registry: not sending (invalid recorder key: %s)", self._log_chain_name, type(e).__name__)
             return
         self.recorder = self._account.address
         self._wake = asyncio.Event()
         self._drain_publishers = [self]
-        logger.info("%s verdict registry: recorder ready %s", self._chain_name, self.recorder)
+        logger.info("%s verdict registry: recorder ready %s", self._log_chain_name, self.recorder)
         self._drain_task = asyncio.create_task(self._drain_under_lease())
 
     def start_publishers(
@@ -387,7 +391,7 @@ class VerdictPublisher:
             if not key:
                 logger.warning(
                     "%s verdict registry: not sending (%s_RECORDER_PRIVATE_KEY is not set); verdicts stay pending",
-                    publisher._chain_name,
+                    publisher._log_chain_name,
                     publisher._env_prefix,
                 )
                 continue
@@ -396,13 +400,13 @@ class VerdictPublisher:
             except Exception as e:
                 logger.error(
                     "%s verdict registry: not sending (invalid recorder key: %s)",
-                    publisher._chain_name,
+                    publisher._log_chain_name,
                     type(e).__name__,
                 )
                 continue
             publisher.recorder = publisher._account.address
             publisher._wake = asyncio.Event()
-            logger.info("%s verdict registry: recorder ready %s", publisher._chain_name, publisher.recorder)
+            logger.info("%s verdict registry: recorder ready %s", publisher._log_chain_name, publisher.recorder)
             enabled.append(publisher)
         self._drain_publishers = enabled
         if enabled:
@@ -434,7 +438,7 @@ class VerdictPublisher:
             try:
                 await publisher._db.release_sender_lease(publisher._lease_name, publisher._lease_holder)
             except Exception as e:
-                logger.warning("%s verdict registry: sender lease not released: %s", publisher._chain_name, type(e).__name__)
+                logger.warning("%s verdict registry: sender lease not released: %s", publisher._log_chain_name, type(e).__name__)
 
     async def _settle_sends(self) -> None:
         tasks = list(self._tasks)
@@ -463,7 +467,7 @@ class VerdictPublisher:
             except Exception as e:
                 logger.error(
                     "%s verdict registry: not sending, the sender lease could not be taken: %s",
-                    self._chain_name,
+                    self._log_chain_name,
                     type(e).__name__,
                 )
                 await asyncio.sleep(LEASE_SECONDS)
@@ -472,7 +476,7 @@ class VerdictPublisher:
                 # Ask again when the other drain's lease runs out, unless it is renewed before then.
                 await asyncio.sleep(min(LEASE_SECONDS, max(0.0, expires_at - time.time())))
                 continue
-            logger.info("%s verdict registry: sending as recorder %s", self._chain_name, self.recorder)
+            logger.info("%s verdict registry: sending as recorder %s", self._log_chain_name, self.recorder)
             drain = asyncio.create_task(self._drain_loop())
             keeper = asyncio.create_task(self._keep_lease(expires_at))
             try:
@@ -488,89 +492,125 @@ class VerdictPublisher:
                 self._lease_lost = False
             logger.error(
                 "%s verdict registry: stopped sending until this process holds the sender lease again",
-                self._chain_name,
+                self._log_chain_name,
             )
 
     async def _drain_publishers_loop(self) -> None:
         publishers = self._drain_publishers
-        for publisher in publishers:
-            await publisher._recover_claims()
-            await publisher._reconcile()
         retry_after = {publisher: 0.0 for publisher in publishers}
         backoffs = {publisher: 0.0 for publisher in publishers}
-        while True:
-            held = []
-            keepers = {}
-            for publisher in publishers:
-                try:
-                    acquired, expiry = await publisher._take_lease()
-                except Exception as e:
-                    logger.error("%s verdict registry: sender lease could not be taken: %s", publisher._chain_name, type(e).__name__)
-                    continue
-                if acquired:
-                    held.append(publisher)
-                    keepers[publisher] = asyncio.create_task(publisher._keep_lease(expiry))
-            if not held:
-                await asyncio.sleep(DRAIN_POLL_SECONDS)
-                continue
-            try:
-                while True:
-                    idle = True
-                    reacquire = False
-                    for publisher in held:
-                        if keepers[publisher].done():
-                            publisher._lease_lost = True
-                            reacquire = True
-                            idle = False
-                            break
-                        if time.monotonic() < retry_after[publisher]:
-                            continue
-                        publisher._wake.clear()
-                        try:
-                            outcome = await publisher.drain_once()
-                        except Exception as e:
-                            logger.error("Verdict drain failed on %s: %s", publisher._chain_name, type(e).__name__)
-                            await publisher._recover_claims()
-                            outcome = "error"
-                        if outcome in ("retry", "error"):
-                            backoffs[publisher] = min(
-                                max(backoffs[publisher] * 2, DRAIN_BACKOFF_SECONDS),
-                                DRAIN_MAX_BACKOFF_SECONDS,
-                            )
-                            retry_after[publisher] = time.monotonic() + backoffs[publisher]
-                            idle = False
-                            continue
-                        if outcome == "capped":
-                            retry_after[publisher] = time.monotonic() + publisher._rate_wait()
-                            idle = False
-                            continue
-                        if outcome == "done":
-                            backoffs[publisher] = 0.0
-                            idle = False
-                            continue
-                        if await publisher._recover_claims() or await publisher._reconcile():
-                            idle = False
-                    if idle:
-                        wakes = [asyncio.create_task(publisher._wake.wait()) for publisher in held if not publisher._lease_lost]
-                        if not wakes:
-                            break
-                        wake_set = set(wakes)
-                        done, pending = await asyncio.wait(
-                            [*wakes, *keepers.values()],
-                            timeout=DRAIN_POLL_SECONDS,
-                            return_when=asyncio.FIRST_COMPLETED,
+        lease_retry_after = {publisher: 0.0 for publisher in publishers}
+        held = set()
+        keepers = {}
+        try:
+            while True:
+                now = time.monotonic()
+                immediate = False
+                for publisher in publishers:
+                    if publisher in held or now < lease_retry_after[publisher]:
+                        continue
+                    try:
+                        acquired, expiry = await publisher._take_lease()
+                    except Exception as e:
+                        logger.error(
+                            "%s verdict registry: sender lease could not be taken: %s",
+                            publisher._log_chain_name,
+                            type(e).__name__,
                         )
-                        pending_wakes = [task for task in pending if task in wake_set]
-                        for task in pending_wakes:
-                            task.cancel()
-                        await asyncio.gather(*pending_wakes, return_exceptions=True)
-                    if reacquire:
-                        break
-            finally:
-                for publisher, keeper in keepers.items():
+                        lease_retry_after[publisher] = now + LEASE_SECONDS
+                        continue
+                    if not acquired:
+                        until_expiry = expiry - time.time()
+                        retry_delay = (
+                            min(LEASE_SECONDS, until_expiry)
+                            if until_expiry > 0
+                            else min(LEASE_SECONDS, DRAIN_POLL_SECONDS)
+                        )
+                        lease_retry_after[publisher] = now + retry_delay
+                        continue
+                    held.add(publisher)
+                    lease_retry_after[publisher] = 0.0
                     publisher._lease_lost = False
-                    keeper.cancel()
-                await asyncio.gather(*keepers.values(), return_exceptions=True)
+                    logger.info("%s verdict registry: sending as recorder %s", publisher._log_chain_name, publisher.recorder)
+                    keepers[publisher] = asyncio.create_task(publisher._keep_lease(expiry))
+                    await publisher._recover_claims()
+                    await publisher._reconcile()
+
+                now = time.monotonic()
+                for publisher in publishers:
+                    if publisher not in held:
+                        continue
+                    keeper = keepers[publisher]
+                    if publisher._lease_lost or keeper.done():
+                        publisher._lease_lost = True
+                        logger.error(
+                            "%s verdict registry: stopped sending until this process holds the sender lease again",
+                            publisher._log_chain_name,
+                        )
+                        held.remove(publisher)
+                        keeper.cancel()
+                        await asyncio.gather(keeper, return_exceptions=True)
+                        keepers.pop(publisher)
+                        publisher._lease_lost = False
+                        lease_retry_after[publisher] = 0.0
+                        continue
+                    if now < retry_after[publisher]:
+                        continue
+                    publisher._wake.clear()
+                    try:
+                        outcome = await publisher.drain_once()
+                    except Exception as e:
+                        logger.error("Verdict drain failed on %s: %s", publisher._chain_name, type(e).__name__)
+                        await publisher._recover_claims()
+                        outcome = "error"
+                    if publisher._lease_lost:
+                        immediate = True
+                        continue
+                    if outcome in ("retry", "error"):
+                        backoffs[publisher] = min(
+                            max(backoffs[publisher] * 2, DRAIN_BACKOFF_SECONDS),
+                            DRAIN_MAX_BACKOFF_SECONDS,
+                        )
+                        retry_after[publisher] = time.monotonic() + backoffs[publisher]
+                    elif outcome == "capped":
+                        retry_after[publisher] = time.monotonic() + publisher._rate_wait()
+                    elif outcome == "done":
+                        backoffs[publisher] = 0.0
+                        immediate = True
+                    else:
+                        recovered = await publisher._recover_claims()
+                        reconciled = await publisher._reconcile()
+                        if recovered or reconciled:
+                            immediate = True
+
+                now = time.monotonic()
+                waits = [0.0 if immediate else DRAIN_POLL_SECONDS]
+                for publisher in publishers:
+                    if publisher not in held:
+                        waits.append(max(0.0, lease_retry_after[publisher] - now))
+                    elif retry_after[publisher] > now:
+                        waits.append(retry_after[publisher] - now)
+                timeout = min(waits)
+                wakes = [
+                    asyncio.create_task(publisher._wake.wait())
+                    for publisher in held
+                    if retry_after[publisher] <= now and not publisher._lease_lost
+                ]
+                tasks = [*wakes, *(keepers[publisher] for publisher in held)]
+                if tasks:
+                    wake_set = set(wakes)
+                    _, pending = await asyncio.wait(tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+                    pending_wakes = [task for task in pending if task in wake_set]
+                    for task in pending_wakes:
+                        task.cancel()
+                    await asyncio.gather(*pending_wakes, return_exceptions=True)
+                else:
+                    await asyncio.sleep(timeout)
+        finally:
+            for publisher, keeper in keepers.items():
+                publisher._lease_lost = False
+                keeper.cancel()
+            await asyncio.gather(*keepers.values(), return_exceptions=True)
 
     async def _take_lease(self) -> Tuple[bool, float]:
         """Take or renew the sender lease. Returns whether this process holds it, and when it expires (Unix time)."""
@@ -581,7 +621,7 @@ class VerdictPublisher:
         if holder is not None and holder != self._lease_holder:
             logger.warning(
                 "%s verdict registry: not sending, %s holds the sender lease until %s UTC",
-                self._chain_name,
+                self._log_chain_name,
                 holder,
                 time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(expires_at)),
             )
@@ -603,7 +643,7 @@ class VerdictPublisher:
             except Exception as e:
                 logger.error(
                     "%s verdict registry: sender lease not renewed: %s",
-                    self._chain_name,
+                    self._log_chain_name,
                     type(e).__name__,
                 )
                 if self._lease_running_out(held_until):
@@ -823,7 +863,11 @@ class VerdictPublisher:
                     if reason in ("InsufficientFunds", "FeeCapExceeded") and not self._failure_alerted:
                         self._failure_alerted = True
                         detail = (
-                            "the base fee is above the configured cap"
+                            (
+                                "the gas price is above the configured cap"
+                                if self.chain_id == 677
+                                else "the base fee is above the configured cap"
+                            )
                             if reason == "FeeCapExceeded"
                             else "the recorder has insufficient funds"
                         )
@@ -981,8 +1025,6 @@ class VerdictPublisher:
         ]
         if self.chain_id == 677:
             calls.append(("eth_gasPrice", []))
-        receipt_offset = 5 if self.chain_id == 4663 else 6
-        latest_index = receipt_offset - 1
         if hashes:
             calls.append(("eth_getTransactionCount", [sender, "latest"]))
             calls += [("eth_getTransactionReceipt", [tx_hash]) for tx_hash in hashes]
@@ -1029,7 +1071,7 @@ class VerdictPublisher:
             raise RecordFailed("GasCapExceeded")
         if self.chain_id == 677:
             gas_price = _quantity(results[4])
-            if gas_price is None:
+            if gas_price is None or gas_price <= 0:
                 raise RecordFailed("MalformedRPCResponse")
             if gas_price > BOTCHAIN_MAX_GAS_PRICE_WEI:
                 raise RecordFailed("FeeCapExceeded")

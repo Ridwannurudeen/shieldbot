@@ -345,7 +345,7 @@ async def test_publishing_never_reads_the_recorder_key(monkeypatch, db):
 async def test_start_reads_the_key_from_the_environment(monkeypatch, db):
     monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
     publisher = make_publisher(db)
-    with patch.object(VerdictPublisher, "_drain_publishers_loop", new=AsyncMock()):
+    with patch.object(VerdictPublisher, "_drain_under_lease", new=AsyncMock()):
         publisher.start()
         assert publisher.recorder == RECORDER
         assert publisher._drain_task is not None
@@ -1135,6 +1135,21 @@ async def test_botchain_defers_when_gas_price_exceeds_cap(db):
 
 
 @pytest.mark.asyncio
+async def test_botchain_defers_when_gas_price_is_zero(db):
+    chain = FakeChain(base_fee=0)
+    chain.gas_price = 0
+    publisher = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, chain_id=677)
+    publisher._account = Account.from_key(KEY)
+    publisher.recorder = publisher._account.address
+    evidence = await publisher.publish(677, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "retry"
+    assert ["eth_sendRawTransaction"] not in chain.methods()
+    stored = await db.get_verdict_evidence(evidence["evidence_id"])
+    assert stored["onchain_status"] == "pending"
+
+
+@pytest.mark.asyncio
 async def test_botchain_replacement_bumps_gas_price_at_same_nonce(db, reconcile_now):
     chain = FakeChain(base_fee=0)
     chain.raise_on["eth_sendRawTransaction"] = aiohttp.ClientConnectionError()
@@ -1154,30 +1169,60 @@ async def test_botchain_replacement_bumps_gas_price_at_same_nonce(db, reconcile_
 
 
 @pytest.mark.asyncio
-async def test_chain_publishers_hold_separate_leases_and_a_botchain_failure_keeps_robinhood_row(db):
+@pytest.mark.parametrize("failure", ["rejected", "rpc_error", "rollback", "transport"])
+async def test_chain_publishers_isolate_botchain_failures_from_robinhood_rows(db, failure):
     robinhood = sender(db)
-    botchain = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, chain_id=677)
+    botchain_registry = "0x" + "d1" * 20
+    botchain = VerdictPublisher(db, rpc_url=RPC, registry_address=botchain_registry, chain_id=677)
     botchain._account = Account.from_key(KEY)
     botchain.recorder = botchain._account.address
-    assert (await robinhood._take_lease())[0]
-    assert (await botchain._take_lease())[0]
-    assert await db.take_sender_lease("verdict-drain:4663", robinhood._lease_holder, vp.LEASE_SECONDS)
-    assert await db.take_sender_lease("verdict-drain:677", botchain._lease_holder, vp.LEASE_SECONDS)
-    await robinhood.publish(4663, TOKEN, COMPLETE)
-    await botchain.publish(677, TOKEN, COMPLETE)
+    assert await robinhood._take_lease() == (True, pytest.approx(time.time() + vp.LEASE_SECONDS, abs=1))
+    assert await botchain._take_lease() == (True, pytest.approx(time.time() + vp.LEASE_SECONDS, abs=1))
+    robinhood_id = (await robinhood.publish(4663, TOKEN, COMPLETE))["evidence_id"]
+    botchain_id = (await botchain.publish(677, TOKEN, COMPLETE))["evidence_id"]
     chain = FakeChain()
-    chain.raise_on["eth_sendRawTransaction"] = aiohttp.ClientConnectionError()
+    if failure == "rejected":
+        chain.errors["eth_sendRawTransaction"] = {"code": -32000, "message": "execution rejected"}
+    elif failure == "rpc_error":
+        chain.errors["eth_estimateGas"] = {"code": -32000, "message": "temporary node error"}
+    elif failure == "transport":
+        chain.raise_on["eth_sendRawTransaction"] = aiohttp.ClientConnectionError()
+    else:
+        await db._db.execute(
+            f"CREATE TRIGGER force_verdict_tx_rollback BEFORE INSERT ON verdict_transactions "
+            f"WHEN NEW.evidence_id = {botchain_id} BEGIN SELECT RAISE(ABORT, 'forced rollback'); END"
+        )
+        await db._db.commit()
     with rpc_node(chain):
-        assert await botchain.drain_once() == "done"
+        result = await botchain.drain_once()
         await settle_publisher_tasks(botchain)
-    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "pending"
-    assert (await db.get_latest_verdict_evidence(677, TOKEN))["onchain_status"] == "unconfirmed"
-    chain.raise_on.clear()
-    with rpc_node(chain):
-        assert await robinhood.drain_once() == "done"
-    await settle_publisher_tasks(robinhood)
-    assert (await db.get_latest_verdict_evidence(4663, TOKEN))["onchain_status"] == "confirmed"
-    assert (await db.get_latest_verdict_evidence(677, TOKEN))["onchain_status"] == "unconfirmed"
+    robinhood_row = await db.get_verdict_evidence(robinhood_id)
+    botchain_row = await db.get_verdict_evidence(botchain_id)
+    assert (robinhood_row["onchain_status"], robinhood_row["registry"], robinhood_row["tx_hash"]) == (
+        "pending",
+        robinhood.registry,
+        None,
+    )
+    assert botchain_row["registry"] == botchain.registry
+    botchain_transactions = (await db.get_verdict_transactions([botchain_id]))[botchain_id]
+    if failure == "rejected":
+        assert result == "done"
+        assert botchain_row["onchain_status"] == "failed"
+        assert decode_record(bytes.fromhex(botchain_transactions[0]["raw_tx"]))["to"].lower() == botchain.registry.lower()
+    elif failure == "rpc_error":
+        assert result == "retry"
+        assert botchain_row["onchain_status"] == "pending"
+        assert botchain_transactions == []
+    elif failure == "rollback":
+        assert result == "error"
+        assert botchain_row["onchain_status"] == "sending"
+        assert botchain_transactions == []
+        await db._db.execute("DROP TRIGGER force_verdict_tx_rollback")
+        await db._db.commit()
+    else:
+        assert result == "done"
+        assert botchain_row["onchain_status"] == "unconfirmed"
+        assert decode_record(bytes.fromhex(botchain_transactions[0]["raw_tx"]))["to"].lower() == botchain.registry.lower()
 
 
 def test_low_balance_record_threshold_is_chain_specific():

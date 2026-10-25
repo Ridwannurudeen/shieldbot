@@ -6,6 +6,7 @@ node and the dummy key come from tests/test_verdict_publisher.py; no test touche
 """
 
 import asyncio
+import json
 import logging
 import sqlite3
 import time
@@ -36,7 +37,7 @@ from tests.test_verdict_storage import insert
 TOKENS = ["0x" + f"{n:040x}" for n in range(1, 4)]
 RPC_A = "https://rpc-a.invalid/4663"
 RPC_B = "https://rpc-b.invalid/4663"
-DRAIN_TASKS = ("VerdictPublisher._drain_under_lease", "VerdictPublisher._drain_loop")
+DRAIN_TASKS = ("VerdictPublisher._drain_publishers_loop",)
 
 
 class WallClock:
@@ -184,6 +185,137 @@ async def test_start_publishers_runs_one_drain_task_in_chain_order(monkeypatch):
     await robinhood.stop()
     await database.close()
     assert order[:2] == [4663, 677]
+
+
+@pytest.mark.asyncio
+async def test_production_loop_ignores_wake_during_backoff(two_processes, short_lease, monkeypatch):
+    db, _ = two_processes
+    monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
+    monkeypatch.setattr(vp, "DRAIN_BACKOFF_SECONDS", 0.4)
+    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 0.02)
+    publisher = publisher_on(db)
+    chain = FakeChain()
+    chain.errors["eth_getTransactionCount"] = {"code": -32000, "message": "temporary error"}
+    original_drain = publisher.drain_once
+    calls = 0
+
+    async def counted_drain():
+        nonlocal calls
+        calls += 1
+        return await original_drain()
+
+    publisher.drain_once = counted_drain
+    await publisher.publish(4663, TOKEN, scan())
+    with rpc_node(chain):
+        publisher.start_publishers([publisher])
+        await until(lambda: asyncio.sleep(0, calls == 1))
+        publisher._wake.set()
+        await asyncio.sleep(0.08)
+        assert calls == 1
+        await publisher.stop()
+
+
+@pytest.mark.asyncio
+async def test_production_loop_stops_claiming_after_send_finds_lost_lease(
+    two_processes, short_lease, monkeypatch
+):
+    db, _ = two_processes
+    monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
+    publisher = publisher_on(db)
+    chain = FakeChain()
+    original_take = publisher._take_lease
+    take_calls = 0
+
+    async def lose_lease_on_send():
+        nonlocal take_calls
+        take_calls += 1
+        if take_calls == 1:
+            return await original_take()
+        return False, time.time() + 0.25
+
+    publisher._take_lease = lose_lease_on_send
+    claimed = []
+    original_claim = db.claim_next_pending_verdict
+
+    async def counted_claim(chain_id):
+        claimed.append(chain_id)
+        return await original_claim(chain_id)
+
+    db.claim_next_pending_verdict = counted_claim
+    await publisher.publish(4663, TOKEN, scan())
+    await publisher.publish(4663, TOKENS[0], scan())
+    with rpc_node(chain):
+        publisher.start_publishers([publisher])
+        await until(lambda: asyncio.sleep(0, bool(claimed)))
+        await asyncio.sleep(0.08)
+        assert claimed == [4663]
+        assert await db.get_latest_verdict_evidence(4663, TOKEN) is not None
+        assert await db.get_latest_verdict_evidence(4663, TOKENS[0]) is not None
+        await publisher.stop()
+
+
+@pytest.mark.asyncio
+async def test_production_loop_retries_other_chain_lease_while_robinhood_is_held(
+    two_processes, short_lease, monkeypatch
+):
+    db, _ = two_processes
+    monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
+    monkeypatch.setenv("BOTCHAIN_RECORDER_PRIVATE_KEY", KEY)
+    robinhood = publisher_on(db)
+    botchain = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, chain_id=677)
+    await db.take_sender_lease(botchain._lease_name, "foreign:1:holder", 0.2)
+    chain = FakeChain(base_fee=0)
+    with rpc_node(chain):
+        robinhood.start_publishers([robinhood, botchain])
+        await until(lambda: holds(db, robinhood))
+        assert not await holds(db, botchain)
+        await until(lambda: holds(db, botchain))
+        assert robinhood._drain_task is not None
+        await robinhood.stop()
+
+
+@pytest.mark.asyncio
+async def test_production_loop_keeps_the_4663_recovery_reconcile_and_drain_path(
+    two_processes, short_lease, monkeypatch
+):
+    db, _ = two_processes
+    monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
+    monkeypatch.setattr(vp, "RECONCILE_AFTER_SECONDS", 0.01)
+    stale = await insert(
+        db, subject=TOKENS[0], chain_id=4663, onchain_status="sending", registry=REGISTRY
+    )
+    reconciled = await insert(
+        db,
+        subject=TOKENS[1],
+        chain_id=4663,
+        onchain_status="unconfirmed",
+        registry=REGISTRY,
+    )
+    await db._db.execute(
+        "UPDATE verdict_evidence SET updated_at = ?, tx_hash = CASE id WHEN ? THEN NULL ELSE ? END, canonical = ? WHERE id IN (?, ?)",
+        (time.time() - 1, stale, "0x" + "44" * 32, json.dumps(scan()), stale, reconciled),
+    )
+    await db._db.commit()
+    publisher = publisher_on(db)
+    chain = FakeChain()
+    chain.receipts["0x" + "44" * 32] = {"transactionHash": "0x" + "44" * 32, "status": "0x1"}
+    await publisher.publish(4663, TOKEN, scan())
+    with rpc_node(chain):
+        publisher.start_publishers([publisher])
+        await until(lambda: _three_4663_outcomes(db, TOKENS), tries=500)
+        await publisher.stop()
+    assert len(chain.sent) == 2
+
+
+async def _three_4663_outcomes(db, tokens):
+    recovered = await db.get_latest_verdict_evidence(4663, tokens[0])
+    reconciled = await db.get_latest_verdict_evidence(4663, tokens[1])
+    drained = await db.get_latest_verdict_evidence(4663, TOKEN)
+    return (
+        recovered["onchain_status"] == "confirmed"
+        and reconciled["onchain_status"] == "confirmed"
+        and drained["onchain_status"] == "confirmed"
+    )
 
 
 def running_drains():
@@ -409,9 +541,9 @@ async def test_of_two_drains_on_one_database_only_the_lease_holder_sends(
     second._rpc = AsyncMock(side_effect=AssertionError("only the lease holder may contact the RPC"))
     chain = FakeChain()
     with rpc_node(chain):
-        first.start(recorder_key=KEY)
+        first.start_publishers([first], recorder_key=KEY)
         await until(lambda: holds(first_db, first))
-        second.start(recorder_key=KEY)
+        second.start_publishers([second], recorder_key=KEY)
         # Several lease periods: the holder keeps renewing, so the waiting drain never takes over.
         await asyncio.sleep(1.0)
         assert await holds(first_db, first)
@@ -423,8 +555,8 @@ async def test_of_two_drains_on_one_database_only_the_lease_holder_sends(
         await first.stop()
     assert len(chain.sent) == len(TOKENS)
     second._rpc.assert_not_called()
-    assert f"sending as recorder {first.recorder}" in caplog.text
-    assert f"not sending, {first._lease_holder} holds the sender lease" in caplog.text
+    assert f"Robinhood verdict registry: sending as recorder {first.recorder}" in caplog.text
+    assert f"Robinhood verdict registry: not sending, {first._lease_holder} holds the sender lease" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -435,9 +567,9 @@ async def test_a_dead_holders_lease_expires_and_the_waiting_drain_takes_over(
     first, second = publisher_on(first_db), publisher_on(second_db)
     chain = FakeChain()
     with rpc_node(chain):
-        first.start(recorder_key=KEY)
+        first.start_publishers([first], recorder_key=KEY)
         await until(lambda: holds(first_db, first))
-        second.start(recorder_key=KEY)
+        second.start_publishers([second], recorder_key=KEY)
         await asyncio.sleep(0.1)
         # The holder dies without releasing the lease, and its connection closes with it.
         first._drain_task.cancel()
@@ -459,8 +591,17 @@ async def test_a_waiting_drain_asks_again_when_the_lease_expires_not_a_whole_per
     monkeypatch.setattr(vp, "LEASE_SECONDS", 60.0)
     first_db, second_db = two_processes
     first, second = publisher_on(first_db), publisher_on(second_db)
+    attempts = []
+    original_take = second._take_lease
+
+    async def noted_take():
+        result = await original_take()
+        attempts.append((time.monotonic(), result))
+        return result
+
+    second._take_lease = noted_take
     with rpc_node(FakeChain()):
-        first.start(recorder_key=KEY)
+        first.start_publishers([first], recorder_key=KEY)
         await until(lambda: holds(first_db, first))
         # The holder dies with its lease a moment from expiring.
         first._drain_task.cancel()
@@ -468,9 +609,10 @@ async def test_a_waiting_drain_asks_again_when_the_lease_expires_not_a_whole_per
         await first_db.close()
         await second_db._db.execute("UPDATE sender_leases SET expires_at = ?", (time.time() + 0.3,))
         await second_db._db.commit()
-        second.start(recorder_key=KEY)
+        second.start_publishers([second], recorder_key=KEY)
         await until(lambda: holds(second_db, second))
         await second.stop()
+    assert len(attempts) >= 2
 
 
 @pytest.mark.asyncio
@@ -481,7 +623,7 @@ async def test_a_holder_that_finds_another_holder_stops_sending_until_it_can_tak
     publisher = publisher_on(db)
     chain = FakeChain()
     with rpc_node(chain):
-        publisher.start(recorder_key=KEY)
+        publisher.start_publishers([publisher], recorder_key=KEY)
         await until(lambda: holds(db, publisher))
         # Another drain holds it now, as it may once this one has gone a whole lease period unrenewed.
         await other_process._db.execute(
@@ -499,6 +641,7 @@ async def test_a_holder_that_finds_another_holder_stops_sending_until_it_can_tak
         await until(lambda: confirmed(db, TOKEN))
         await publisher.stop()
     assert len(chain.sent) == 1
+    assert "Robinhood verdict registry: stopped sending until this process holds the sender lease again" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -517,7 +660,7 @@ async def test_a_holder_whose_renewals_hang_then_fail_stops_while_its_lease_is_s
         raise sqlite3.OperationalError("database is locked")
 
     with rpc_node(FakeChain()):
-        publisher.start(recorder_key=KEY)
+        publisher.start_publishers([publisher], recorder_key=KEY)
         await until(lambda: holds(db, publisher))
         monkeypatch.setattr(db, "take_sender_lease", locked)
         await until(lambda: asyncio.sleep(0, "stopped sending" in caplog.text), tries=400)
@@ -572,7 +715,7 @@ async def test_a_drain_that_lost_the_lease_neither_stores_nor_broadcasts_what_it
     broadcasts, _ = watch_broadcasts(chain)
     reads = hold_calls(chain, RPC_A, "eth_getTransactionCount")
     with rpc_node(chain):
-        first.start(recorder_key=KEY)
+        first.start_publishers([first], recorder_key=KEY)
         await until(lambda: holds(first_db, first))
         # The first drain claims a row while it holds the lease, and its reads before signing are held up.
         await first.publish(4663, TOKEN, scan())
@@ -581,7 +724,7 @@ async def test_a_drain_that_lost_the_lease_neither_stores_nor_broadcasts_what_it
         )
         # Meanwhile its lease runs out unrenewed and a second drain takes it.
         wall_clock.advance(vp.LEASE_SECONDS)
-        second.start(recorder_key=KEY)
+        second.start_publishers([second], recorder_key=KEY)
         await until(lambda: holds(second_db, second))
         reads.set()
         await until(
@@ -625,9 +768,9 @@ async def test_a_new_holder_never_broadcasts_while_the_old_holders_broadcast_is_
     # The first drain's broadcast hangs until its phase timeout.
     broadcasts, _ = watch_broadcasts(chain, gated_url=RPC_A, on_broadcast=on_broadcast)
     with rpc_node(chain):
-        first.start(recorder_key=KEY)
+        first.start_publishers([first], recorder_key=KEY)
         await until(lambda: holds(first_db, first))
-        second.start(recorder_key=KEY)
+        second.start_publishers([second], recorder_key=KEY)
         await first.publish(4663, TOKEN, scan())
         await until(lambda: asyncio.sleep(0, RPC_A in broadcasts))
         # Then its renewals break, so its lease runs out and the second drain takes over.
@@ -664,9 +807,9 @@ async def test_a_send_that_cannot_renew_the_lease_is_not_broadcast_so_a_new_hold
 
     broadcasts, _ = watch_broadcasts(chain, gated_url=RPC_A, on_broadcast=on_broadcast)
     with rpc_node(chain):
-        first.start(recorder_key=KEY)
+        first.start_publishers([first], recorder_key=KEY)
         await until(lambda: holds(first_db, first))
-        second.start(recorder_key=KEY)
+        second.start_publishers([second], recorder_key=KEY)
         # The first drain's renewals break; its lease now runs out at a fixed time.
         monkeypatch.setattr(
             first_db, "take_sender_lease", AsyncMock(side_effect=RuntimeError("database is locked"))
@@ -798,7 +941,7 @@ async def test_a_drain_stopped_by_the_check_at_a_send_takes_the_lease_again_and_
 
     publisher._take_lease = one_short_take
     with rpc_node(chain):
-        publisher.start(recorder_key=KEY)
+        publisher.start_publishers([publisher], recorder_key=KEY)
         await until(lambda: holds(db, publisher))
         short.append(True)
         await publisher.publish(4663, TOKEN, scan())
@@ -823,7 +966,7 @@ async def test_a_stop_releases_a_lease_the_database_still_names_this_process_for
     # The lease is taken, but the stop comes before this process learns it holds it.
     monkeypatch.setattr(db, "take_sender_lease", answer_never_arrives)
     with rpc_node(FakeChain()):
-        publisher.start(recorder_key=KEY)
+        publisher.start_publishers([publisher], recorder_key=KEY)
         await until(lambda: holds(db, publisher))
         await publisher.stop()
     assert await lease(db, publisher) is None
@@ -834,7 +977,7 @@ async def test_a_clean_stop_releases_the_lease(two_processes, short_lease):
     db, _ = two_processes
     publisher = publisher_on(db)
     with rpc_node(FakeChain()):
-        publisher.start(recorder_key=KEY)
+        publisher.start_publishers([publisher], recorder_key=KEY)
         await until(lambda: holds(db, publisher))
         await publisher.stop()
     assert await lease(db, publisher) is None
@@ -855,7 +998,7 @@ async def test_a_stop_releases_the_lease_only_once_the_drain_has_ended(
 
     monkeypatch.setattr(db, "release_sender_lease", noted_release)
     with rpc_node(FakeChain()):
-        publisher.start(recorder_key=KEY)
+        publisher.start_publishers([publisher], recorder_key=KEY)
         await until(lambda: holds(db, publisher))
         await publisher.stop()
     assert drains_at_release == []
@@ -872,7 +1015,7 @@ async def test_a_stop_with_a_send_still_under_way_leaves_the_lease_to_expire(
     chain = FakeChain()
     gate = gate_method(chain, "eth_getTransactionReceipt")
     with rpc_node(chain):
-        publisher.start(recorder_key=KEY)
+        publisher.start_publishers([publisher], recorder_key=KEY)
         await until(lambda: holds(db, publisher))
         await publisher.publish(4663, TOKEN, scan())
         await until(lambda: asyncio.sleep(0, bool(chain.sent)))
