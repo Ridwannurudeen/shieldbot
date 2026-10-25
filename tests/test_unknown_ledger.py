@@ -449,6 +449,27 @@ async def test_goplus_token_lookups_are_counted_once_per_request(
 
 
 @pytest.mark.asyncio
+async def test_unsupported_goplus_chain_is_unknown_without_a_request_or_breaker_call(
+    ledger, monkeypatch
+):
+    import utils.scam_db
+    from utils.scam_db import ScamDatabase
+
+    monkeypatch.setattr(utils.scam_db, "_GOPLUS_CACHE", {})
+    with patch("utils.scam_db.aiohttp.ClientSession") as session, patch.object(
+        utils.scam_db.provider_breakers, "check"
+    ) as breaker_check:
+        result = await ScamDatabase.fetch_token_security(TOKEN, 677)
+
+    assert result["status"] == "unknown"
+    assert result["reason"] == "GoPlus does not cover BOT Chain"
+    assert result["data"] == {}
+    session.assert_not_called()
+    breaker_check.assert_not_called()
+    assert _chain_counts(ledger, 677) == {"goplus_token": _counts(unknown=1)}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "reply, outcome",
     [
