@@ -138,7 +138,8 @@ async def test_bot_token_returns_still_running_unknown_at_the_request_deadline(m
 
 
 @pytest.mark.asyncio
-async def test_bot_contract_scan_passes_a_request_deadline_to_analyzers(monkeypatch, bot_module):
+@pytest.mark.parametrize("chain_id", [56, 677])
+async def test_bot_contract_scan_passes_a_request_deadline_to_analyzers(monkeypatch, bot_module, chain_id):
     from core.analyzer import AnalysisContext
 
     registry = MagicMock(run_all=AsyncMock(return_value=[]))
@@ -154,7 +155,7 @@ async def test_bot_contract_scan_passes_a_request_deadline_to_analyzers(monkeypa
     update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=status)))
     before = time.monotonic()
 
-    await bot_module.scan_contract(update, TOKEN, chain_id=677)
+    await bot_module.scan_contract(update, TOKEN, chain_id=chain_id)
 
     context = registry.run_all.await_args.args[0]
     assert isinstance(context, AnalysisContext)

@@ -1313,7 +1313,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
 
             ctx = AnalysisContext(
                 address=address, chain_id=chain_id,
-                extra={'deadline': time.monotonic() + 25},
+                extra={'deadline': time.monotonic() + RUN_ALL_DEADLINE_SECONDS},
             )
             reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
@@ -1446,7 +1446,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
 
             ctx = AnalysisContext(
                 address=address, chain_id=chain_id,
-                extra={'deadline': time.monotonic() + 25},
+                extra={'deadline': time.monotonic() + RUN_ALL_DEADLINE_SECONDS},
             )
             reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
