@@ -411,6 +411,8 @@ async def test_botchain_is_registered_in_picker_and_prefix_table(bot_module):
     update.message.reply_text = AsyncMock()
     await bot_module._ask_chain(update, SimpleNamespace(user_data={}), "r", WALLET)
     buttons = update.message.reply_text.await_args.kwargs["reply_markup"].inline_keyboard
+    assert [len(row) for row in buttons] == [2, 2, 2, 2, 1]
+    assert buttons[-1][0].text == "BOT Chain"
     assert any("pick_r_677_" in button.callback_data for row in buttons for button in row)
 
 

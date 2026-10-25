@@ -161,6 +161,98 @@ async def test_bot_contract_scan_passes_a_request_deadline_to_analyzers(monkeypa
     assert context.extra["deadline"] - before == pytest.approx(25, abs=0.1)
 
 
+@pytest.mark.asyncio
+async def test_scan_bot_prefix_runs_analyzers_and_reports_unknown_sellability(monkeypatch, bot_module):
+    from analyzers.honeypot import HoneypotAnalyzer
+    from core.analyzer import AnalyzerResult
+    from core.risk_engine import RiskEngine
+
+    reason = "Sellability unknown: no sell simulation on BOT Chain yet"
+    service = SimpleNamespace(fetch_honeypot_data=AsyncMock(return_value={"status": "unknown", "reason": reason}))
+    honeypot = HoneypotAnalyzer(service)
+    results = [
+        AnalyzerResult("structural", 0.4, 0, data={"status": "ok", "is_verified": True}),
+        AnalyzerResult("market", 0.25, 0, data={"status": "unknown", "liquidity_usd": None}),
+        AnalyzerResult("behavioral", 0.2, 0, data={"status": "ok", "reputation_score": 80}),
+    ]
+
+    async def run_all(context):
+        assert context.chain_id == 677
+        return [*results, await honeypot.analyze(context)]
+
+    registry = SimpleNamespace(run_all=AsyncMock(side_effect=run_all))
+    bot_module.container.registry = registry
+    bot_module.risk_engine = RiskEngine()
+    bot_module._get_token_info_with_timeout = AsyncMock(return_value={})
+    bot_module.ai_analyzer = SimpleNamespace(is_available=lambda: False)
+    monkeypatch.setattr(bot_module, "_get_cached", lambda *args: None)
+    monkeypatch.setattr(bot_module, "_set_cache", lambda *args: None)
+    bot_module.web3_client.is_valid_address.return_value = True
+    progress = SimpleNamespace(delete=AsyncMock())
+    reply_text = AsyncMock(return_value=progress)
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=reply_text))
+
+    await bot_module.scan_command(update, SimpleNamespace(args=["bot:" + TOKEN], user_data={}))
+
+    registry.run_all.assert_awaited_once()
+    service.fetch_honeypot_data.assert_awaited_once_with(TOKEN, chain_id=677)
+    report = reply_text.await_args_list[-1].args[0]
+    assert "*Chain:* BOT Chain (677)" in report
+    assert reason in report
+
+
+def test_api_scan_accepts_chain_677(api_client, monkeypatch):
+    import api
+
+    result = {
+        "address": TOKEN, "is_verified": None, "is_contract": True, "risk_level": "medium",
+        "risk_score": 45, "confidence": 60, "checks": {}, "warnings": [], "scam_matches": [],
+        "coverage": {}, "coverage_reasons": {}, "is_honeypot": None,
+    }
+    api.web3_client.validate_chain_id.side_effect = lambda chain_id: chain_id
+    api.tx_scanner.scan_address = AsyncMock(return_value=result)
+
+    response = api_client.post("/api/scan", json={"address": TOKEN, "chainId": 677})
+
+    assert response.status_code == 200
+    api.web3_client.validate_chain_id.assert_any_call(677)
+    api.tx_scanner.scan_address.assert_awaited_once_with(TOKEN, chain_id=677, forensic=False)
+
+
+def test_counterparty_allowlist_uses_the_botchain_adapter_for_approval_tokens():
+    from services.counterparty_service import CounterpartyService
+
+    adapter = BotChainAdapter("https://rpc.invalid")
+    web3 = SimpleNamespace(_get_adapter=lambda chain_id: adapter if chain_id == 677 else None)
+    service = CounterpartyService(web3, MagicMock())
+
+    assert service.allowlisted_name(next(iter(WHITELISTED_ROUTERS)), 677) == "BDEX V2 Router02"
+    assert service.allowlisted_name(next(iter(WHITELISTED_ROUTERS)), 56) is None
+
+
+@pytest.mark.asyncio
+async def test_api_firewall_approval_enrichment_uses_botchain_token_and_spender(monkeypatch):
+    import api
+    from services.counterparty_service import CounterpartyService
+
+    spender = next(iter(WHITELISTED_ROUTERS))
+    adapter = BotChainAdapter("https://rpc.invalid")
+    web3 = SimpleNamespace(_get_adapter=lambda chain_id: adapter if chain_id == 677 else None)
+    api.container = SimpleNamespace(counterparty_service=CounterpartyService(web3, MagicMock()))
+    resolve_token = AsyncMock(return_value={"name": "Token", "symbol": "TKN", "decimals": 18})
+    monkeypatch.setattr(api, "_resolve_token", resolve_token)
+    decoded = {
+        "selector": "095ea7b3", "is_approval": True, "function_name": "approve",
+        "params": {"param_0": spender, "param_1": 1},
+    }
+
+    await api._enrich_decoded(decoded, TOKEN, chain_id=677)
+
+    resolve_token.assert_awaited_once_with(TOKEN, chain_id=677)
+    assert decoded["token_symbol"] == "TKN"
+    assert decoded["spender_label"] == "BDEX V2 Router02"
+
+
 def test_firewall_deadline_follows_adapter_simulation_support(monkeypatch):
     import api
 
