@@ -65,7 +65,6 @@ cast wallet new ~/.foundry/keystores botchain-recorder
 Never run a bare `cast wallet new`. Use the existing root-owned, mode 600 environment file loaded by the active sender. Do not recreate that file. In a private terminal, decrypt the keystore directly into it. The pipeline below writes the environment variable name and the decrypted key without printing the key or putting it in shell history:
 
 ```bash
-sudo install -d -m 700 -o root -g root /etc/shieldbot
 sudo -v
 sudo grep -c '^ROBINHOOD_RECORDER_PRIVATE_KEY=' /etc/shieldbot/recorder.env
 sudo grep -c '^BOTCHAIN_RECORDER_PRIVATE_KEY=' /etc/shieldbot/recorder.env || true
@@ -175,7 +174,7 @@ BOTCHAIN_VERDICT_REGISTRY=<registry address>
 BOTCHAIN_RPC_URL=https://rpc.botchain.ai
 ```
 
-The `BOTCHAIN_RECORDER_PRIVATE_KEY` line stays in the root-owned, mode 600 recorder environment file loaded only by the active sender unit. Restart that one sender unit and read its log. Confirm the `BOT Chain verdict registry: recorder ready ...` line names chain 677, look for `sending as recorder` for both chains, and confirm there are no repeated restarts for 20 seconds:
+The `BOTCHAIN_RECORDER_PRIVATE_KEY` line stays in the root-owned, mode 600 recorder environment file loaded only by the active sender unit. Restart the active sender and the bot because each process reads its registry setting at startup. Read the sender log and the bot log. Confirm the sender shows `BOT Chain verdict registry: recorder ready 0x...`, look for `sending as recorder` for both chains, and confirm there are no repeated restarts for 20 seconds. In the bot log, confirm `BOT Chain verdict registry: verdicts queued for 0x...`:
 
 ```bash
 if systemctl is-active --quiet shieldbot-workers; then
@@ -185,6 +184,8 @@ else
   sudo systemctl restart shieldbot
   sudo journalctl -u shieldbot -n 100 --no-pager
 fi
+sudo systemctl restart shieldbot-bot
+sudo journalctl -u shieldbot-bot -n 100 --no-pager
 ```
 
 ## 8. Smoke check
@@ -193,7 +194,7 @@ In Telegram, run `/token bot:<USDT address>` as the first scan in the bot's cach
 
 ```bash
 cast receipt <transaction hash> --rpc-url https://rpc.botchain.ai
-cast call "$REGISTRY" 'latestRecord(address)' "$USDT" --rpc-url https://rpc.botchain.ai
+cast call "$REGISTRY" 'latestRecord(address)((uint8,uint64,uint64,bytes32))' "$USDT" --rpc-url https://rpc.botchain.ai
 ```
 
 The receipt must contain `VerdictRecorded`. Its evidence hash must match `/api/verdict/677/<USDT address>`, and `latestRecord` must agree with that verdict and evidence hash. A failed check is not a recorded smoke result.
@@ -238,4 +239,11 @@ sudo sed -i '/^BOTCHAIN_VERDICT_REGISTRY=/d; /^BOTCHAIN_RPC_URL=/d' /opt/shieldb
 sudo sed -i '/^BOTCHAIN_RECORDER_PRIVATE_KEY=/d' /etc/shieldbot/recorder.env
 ```
 
-Do not remove or recreate `/etc/shieldbot/recorder.env`. Restart the active sender as shown in step 7 and verify health. Confirm 4663 publishing remains on and 677 publishing is off. The 677 registry remains onchain. Its deployment is not reversible.
+Do not remove or recreate `/etc/shieldbot/recorder.env`. Restart the active sender as shown in step 7, then restart the bot and read its log:
+
+```bash
+sudo systemctl restart shieldbot-bot
+sudo journalctl -u shieldbot-bot -n 100 --no-pager
+```
+
+Confirm 4663 publishing remains on and 677 publishing is off. The bot log should show `BOT Chain verdict registry: disabled (set BOTCHAIN_VERDICT_REGISTRY to enable)`. The 677 registry remains onchain. Its deployment is not reversible.
