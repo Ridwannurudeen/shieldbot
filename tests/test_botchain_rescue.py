@@ -562,5 +562,5 @@ async def test_help_describes_botchain_approval_scanning_without_changing_suppor
     text = update.message.reply_text.await_args.args[0]
     assert "/rescue bot:<wallet>" in text
     assert "BDEX names, dollar values and revoke links" in text
-    assert "BOT Chain has approval scanning only" in text
-    assert "Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain" in text
+    assert "BOT Chain: contract checks, approvals and revoke links. Checks that cannot run are reported as Unknown." in text
+    assert "Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain, BOT Chain" in text

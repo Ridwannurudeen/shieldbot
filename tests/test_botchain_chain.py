@@ -1,3 +1,6 @@
+import asyncio
+import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,6 +15,7 @@ from adapters.botchain import (
     WHITELISTED_ROUTERS,
     BotChainAdapter,
 )
+from tests.test_bot_app import bot_module  # noqa: F401 (pytest fixture)
 
 TOKEN = "0x" + "ab" * 20
 
@@ -71,3 +75,86 @@ async def test_botchain_honeypot_fields_are_unknown_without_a_provider():
         "Sellability unknown: no sell simulation on BOT Chain yet"
     )
     assert adapter.capabilities()["sell_simulation"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_bot_token_returns_still_running_unknown_at_the_request_deadline(monkeypatch, bot_module):
+    from analyzers.honeypot import HoneypotAnalyzer, STILL_RUNNING
+    from core.analyzer import AnalyzerResult
+    from core.registry import AnalyzerRegistry
+
+    pending_result = asyncio.get_running_loop().create_future()
+
+    async def never_finishes(*args, **kwargs):
+        return await pending_result
+
+    service = MagicMock(fetch_honeypot_data=AsyncMock(side_effect=never_finishes))
+    registry = AnalyzerRegistry()
+    structural_result = AnalyzerResult(
+        name="structural", weight=0.4, score=0, data={"status": "ok"},
+    )
+    structural = MagicMock()
+    structural.name = "structural"
+    structural.weight = 0.4
+    structural.analyze = AsyncMock(return_value=structural_result)
+    registry.register(structural)
+    registry.register(HoneypotAnalyzer(service))
+    bot_module.container.registry = registry
+    bot_module._get_token_info_with_timeout = AsyncMock(return_value={})
+    captured = []
+
+    def compute(results):
+        captured.extend(results)
+        return {
+            "status": "unknown", "risk_level": "unknown",
+            "coverage": {"honeypot": 0}, "coverage_reasons": {"honeypot": STILL_RUNNING},
+        }
+
+    bot_module.risk_engine = SimpleNamespace(compute_from_results=compute)
+    monkeypatch.setattr(bot_module, "format_full_report", lambda *args, **kwargs: "report")
+    monkeypatch.setattr("core.registry.RUN_ALL_DEADLINE_SECONDS", 0.1)
+    clock_now = time.monotonic()
+    monkeypatch.setattr(
+        bot_module, "time", SimpleNamespace(
+            monotonic=lambda: clock_now - 24.95, time=time.time,
+        ),
+    )
+    status = SimpleNamespace(delete=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=status)))
+
+    await bot_module.check_token(update, TOKEN, chain_id=677)
+    pending_result.set_result({"status": "unknown"})
+    await asyncio.sleep(0)
+
+    structural_row, honeypot_row = captured
+    assert structural_row is structural_result
+    assert honeypot_row.name == "honeypot"
+    assert honeypot_row.error is None
+    assert honeypot_row.data["status"] == "unknown"
+    assert honeypot_row.data["reason"] == STILL_RUNNING
+    service.fetch_honeypot_data.assert_awaited_once_with(TOKEN, chain_id=677)
+    assert update.message.reply_text.await_args_list[-1].args[0] == "report"
+
+
+@pytest.mark.asyncio
+async def test_bot_contract_scan_passes_a_request_deadline_to_analyzers(monkeypatch, bot_module):
+    from core.analyzer import AnalysisContext
+
+    registry = MagicMock(run_all=AsyncMock(return_value=[]))
+    bot_module.container.registry = registry
+    bot_module._get_token_info_with_timeout = AsyncMock(return_value={})
+    bot_module.risk_engine = MagicMock(compute_from_results=MagicMock(return_value={
+        "status": "unknown", "risk_level": "unknown",
+        "coverage": {}, "coverage_reasons": {},
+    }))
+    bot_module.ai_analyzer = MagicMock(is_available=MagicMock(return_value=False))
+    monkeypatch.setattr(bot_module, "format_full_report", lambda *args, **kwargs: "report")
+    status = SimpleNamespace(delete=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=status)))
+    before = time.monotonic()
+
+    await bot_module.scan_contract(update, TOKEN, chain_id=677)
+
+    context = registry.run_all.await_args.args[0]
+    assert isinstance(context, AnalysisContext)
+    assert context.extra["deadline"] - before == pytest.approx(25, abs=0.1)

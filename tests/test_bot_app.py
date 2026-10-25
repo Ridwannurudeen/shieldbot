@@ -21,7 +21,7 @@ from core.database import Database
 from utils.chain_info import CHAIN_PREFIXES
 
 
-LISTED_PREFIXES = "`eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`"
+LISTED_PREFIXES = "`eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`, `bot:0x...`"
 
 
 @pytest.fixture
@@ -230,7 +230,8 @@ class TestHelpCommand:
 **/token <address>** - Check if a token is safe to trade
 **/chain** - Switch active chain
 **/rescue <wallet>** - Scan wallet for risky token approvals
-**/rescue bot:<wallet>** - Scan BOT Chain token approvals with BDEX names, dollar values and revoke links; BOT Chain has approval scanning only
+**/rescue bot:<wallet>** - Scan BOT Chain token approvals with BDEX names, dollar values and revoke links
+BOT Chain: contract checks, approvals and revoke links. Checks that cannot run are reported as Unknown.
 **/threats** - Live mempool threat alerts
 **/campaign <address>** - Check if address is part of a scam campaign
 **/report <address> <reason>** - Report a scam address
@@ -240,9 +241,9 @@ class TestHelpCommand:
 
 **Quick Tips:**
 • Send any address and I'll ask which chain it is on, then auto-detect what to scan; a chain prefix skips the question
-• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
+• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`, `bot:0x...`
 • Use /chain to set the default chain for the advisor chat
-• Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain
+• Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain, BOT Chain
 
 Stay safe! 🛡️
 """

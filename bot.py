@@ -229,7 +229,7 @@ Send me a token address, and I'll analyze:
 
 **How to use:**
 Send any address and I'll ask which chain it is on, then auto-detect what to scan! A chain prefix skips the question.
-Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
+Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`, `bot:0x...`
 
 Commands:
 /scan — Scan a contract
@@ -264,7 +264,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **/token <address>** - Check if a token is safe to trade
 **/chain** - Switch active chain
 **/rescue <wallet>** - Scan wallet for risky token approvals
-**/rescue bot:<wallet>** - Scan BOT Chain token approvals with BDEX names, dollar values and revoke links; BOT Chain has approval scanning only
+**/rescue bot:<wallet>** - Scan BOT Chain token approvals with BDEX names, dollar values and revoke links
+BOT Chain: contract checks, approvals and revoke links. Checks that cannot run are reported as Unknown.
 **/threats** - Live mempool threat alerts
 **/campaign <address>** - Check if address is part of a scam campaign
 **/report <address> <reason>** - Report a scam address
@@ -274,7 +275,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **Quick Tips:**
 • Send any address and I'll ask which chain it is on, then auto-detect what to scan; a chain prefix skips the question
-• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
+• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`, `bot:0x...`
 • Use /chain to set the default chain for the advisor chat
 • Supported: {supported_chains}
 
@@ -1310,7 +1311,10 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
         try:
             from core.analyzer import AnalysisContext
 
-            ctx = AnalysisContext(address=address, chain_id=chain_id)
+            ctx = AnalysisContext(
+                address=address, chain_id=chain_id,
+                extra={'deadline': time.monotonic() + 25},
+            )
             reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
                 # The official-token check reads symbol() and name() itself, alongside the analyzers, as the
@@ -1440,7 +1444,10 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
         try:
             from core.analyzer import AnalysisContext
 
-            ctx = AnalysisContext(address=address, chain_id=chain_id)
+            ctx = AnalysisContext(
+                address=address, chain_id=chain_id,
+                extra={'deadline': time.monotonic() + 25},
+            )
             reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
                 # The official-token check reads symbol() and name() itself, alongside the analyzers, as the
