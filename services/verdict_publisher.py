@@ -1,7 +1,7 @@
-"""Publishes ShieldBot verdicts: stores every evidence document and records Robinhood Chain verdicts on-chain.
+"""Publishes ShieldBot verdicts: stores every evidence document and records configured chain verdicts on-chain.
 
 Every process (API, hunter, bot) calls publish(), which only STORES the canonical evidence document
-(core.verdict_evidence). When ROBINHOOD_VERDICT_REGISTRY is set, a Robinhood Chain (4663) row is stored as
+(core.verdict_evidence). When a chain's verdict registry is set, a row for that chain is stored as
 `pending`: an outbox entry for ShieldBotVerdictRegistry.record().
 
 Exactly one process sends: the API process calls start(), which reads ROBINHOOD_RECORDER_PRIVATE_KEY and runs a
@@ -91,8 +91,11 @@ from core.verdict_evidence import Verdict, build_evidence, canonical_bytes
 
 logger = logging.getLogger(__name__)
 
-CHAIN_ID = 4663
 DEFAULT_RPC_URL = "https://rpc.mainnet.chain.robinhood.com"
+CHAIN_CONFIG = {
+    4663: ("ROBINHOOD", DEFAULT_RPC_URL, 1000),
+    677: ("BOTCHAIN", "https://rpc.botchain.ai", 100),
+}
 # `cast sig "record(address,uint8,bytes32,uint64)"` = 0xf160da27
 RECORD_SELECTOR = keccak(text="record(address,uint8,bytes32,uint64)")[:4]
 
@@ -115,7 +118,6 @@ SETTLED_STATUSES = ("pending", "sending", "confirmed")
 MAX_FEE_PER_GAS_WEI = 10**9
 # gas * max_fee reserves about 2.4x a record's real cost: 1,000 reservations cover roughly 2,400 records,
 # about nine days at the 2026-10-09 rate.
-LOW_BALANCE_RECORDS = 1000
 # Arbitrum Nitro's eth_estimateGas includes the L1 data fee as gas, so leave room above the ~140k execution cost.
 MAX_GAS_LIMIT = 1_000_000
 RPC_ATTEMPTS = 3
@@ -152,7 +154,6 @@ STOP_TIMEOUT_SECONDS = 30
 # let it run out. Each send takes the lease again after signing and goes on only if the lease is its own and has at
 # least DB_LOCK_WAIT_SECONDS + PHASE_TIMEOUT_SECONDS left to run. A holder that dies keeps the lease until
 # LEASE_SECONDS after it last took it; a drain waiting for it asks again when it expires.
-LEASE_NAME = f"verdict-drain:{CHAIN_ID}"
 LEASE_SECONDS = 90.0
 LEASE_RENEW_SECONDS = 15.0
 # The lease a send has just taken must outlast what follows: the freshness reads, storing the transaction (one lock
@@ -188,18 +189,25 @@ class ObservationDropped(Exception):
 
 
 class VerdictPublisher:
-    """Stores verdict evidence; in the process that runs the drain, also records Robinhood Chain verdicts on-chain."""
+    """Stores verdict evidence and records it on the configured chain when enabled."""
 
     def __init__(
-        self, db, rpc_url: Optional[str] = None, registry_address: Optional[str] = None, alert=None
+        self, db, rpc_url: Optional[str] = None, registry_address: Optional[str] = None,
+        alert=None,
+        chain_id: int = 4663,
     ):
         self._db = db
-        self._rpc_url = rpc_url or os.getenv("ROBINHOOD_RPC_URL") or DEFAULT_RPC_URL
+        if chain_id not in CHAIN_CONFIG:
+            raise ValueError(f"unsupported verdict publisher chain: {chain_id}")
+        self.chain_id = chain_id
+        self._lease_name = f"verdict-drain:{chain_id}"
+        self._env_prefix, default_rpc_url, self._low_balance_records = CHAIN_CONFIG[chain_id]
+        self._rpc_url = rpc_url or os.getenv(f"{self._env_prefix}_RPC_URL") or default_rpc_url
         self._alert_callback = alert
         registry = (
             registry_address
             if registry_address is not None
-            else os.getenv("ROBINHOOD_VERDICT_REGISTRY", "")
+            else os.getenv(f"{self._env_prefix}_VERDICT_REGISTRY", "")
         )
         self.registry = None
         self.recorder = None
@@ -208,6 +216,7 @@ class VerdictPublisher:
         self._sent_at = deque()
         self._tasks = set()
         self._drain_task = None
+        self._drain_publishers = [self]
         self._wake = None
         self._lease_holder = f"{socket.gethostname()}:{os.getpid()}:{secrets.token_hex(4)}"
         # Set when the lease is lost, or when a send found it too short: the drain loop then returns before it
@@ -220,21 +229,35 @@ class VerdictPublisher:
         self._resends = {}
         if not registry:
             logger.info(
-                "Robinhood verdict registry: disabled (set ROBINHOOD_VERDICT_REGISTRY to enable)"
+                "%s verdict registry: disabled (set %s_VERDICT_REGISTRY to enable)",
+                self._chain_name,
+                self._env_prefix,
             )
             return
         try:
             self.registry = to_checksum_address(registry)
         except ValueError as e:
             logger.error(
-                "Robinhood verdict registry: disabled (invalid ROBINHOOD_VERDICT_REGISTRY: %s)",
+                "%s verdict registry: disabled (invalid %s_VERDICT_REGISTRY: %s)",
+                self._chain_name,
+                self._env_prefix,
                 type(e).__name__,
             )
             return
-        logger.info("Robinhood verdict registry: verdicts queued for %s", self.registry)
+        logger.info("%s verdict registry: verdicts queued for %s", self._chain_name, self.registry)
+
+    @property
+    def _chain_name(self) -> str:
+        from utils.chain_info import get_chain_name
+
+        return get_chain_name(self.chain_id)
+
+    @property
+    def _alert_chain_label(self) -> str:
+        return f"chain {self.chain_id}" if self.chain_id == 4663 else f"{self._chain_name} ({self.chain_id})"
 
     def is_onchain_enabled(self) -> bool:
-        """True when Robinhood Chain verdicts are queued for the registry."""
+        """True when this chain's verdicts are queued for the registry."""
         return self.registry is not None
 
     # ------------------------------------------------------------------
@@ -251,7 +274,7 @@ class VerdictPublisher:
         self, chain_id: int, subject: str, scan_result: dict, honeypot_data: Optional[dict] = None,
         onchain: bool = True,
     ) -> Optional[dict]:
-        """Store the evidence for one scan; a Robinhood Chain verdict is queued for the drain.
+        """Store the evidence for one scan; a configured chain verdict is queued for the drain.
 
         With `onchain` False it is stored as `off`, like a verdict on another chain, and never sent.
         Returns the stored evidence id, hash, verdict and on-chain status, or None if nothing could be
@@ -266,7 +289,7 @@ class VerdictPublisher:
             payload = build_evidence(chain_id, subject, scan_result, honeypot_data)
             canonical = canonical_bytes(payload)
             evidence_hash = "0x" + keccak(canonical).hex()
-            queued = onchain and chain_id == CHAIN_ID and self.is_onchain_enabled()
+            queued = onchain and chain_id == self.chain_id and self.is_onchain_enabled()
             status = "pending" if queued else "off"
             if queued:
                 previous = await self._db.get_newest_verdict_observation(
@@ -328,29 +351,61 @@ class VerdictPublisher:
         """Start the drain. Only the API process, or workers.py in its place, calls this: the one on-chain sender."""
         if self._drain_task is not None or not self.is_onchain_enabled():
             return
-        key = (
-            recorder_key
-            if recorder_key is not None
-            else os.getenv("ROBINHOOD_RECORDER_PRIVATE_KEY", "")
-        )
+        key = recorder_key if recorder_key is not None else os.getenv(f"{self._env_prefix}_RECORDER_PRIVATE_KEY", "")
         if not key:
             logger.warning(
-                "Robinhood verdict registry: not sending (ROBINHOOD_RECORDER_PRIVATE_KEY is not set); "
-                "verdicts stay pending"
+                "%s verdict registry: not sending (%s_RECORDER_PRIVATE_KEY is not set); verdicts stay pending",
+                self._chain_name,
+                self._env_prefix,
             )
             return
         try:
             self._account = Account.from_key(key)
         except Exception as e:
-            # An invalid key is an input boundary; the key or its error text is never logged.
-            logger.error(
-                "Robinhood verdict registry: not sending (invalid recorder key: %s)",
-                type(e).__name__,
-            )
+            logger.error("%s verdict registry: not sending (invalid recorder key: %s)", self._chain_name, type(e).__name__)
             return
         self.recorder = self._account.address
         self._wake = asyncio.Event()
+        self._drain_publishers = [self]
+        logger.info("%s verdict registry: recorder ready %s", self._chain_name, self.recorder)
         self._drain_task = asyncio.create_task(self._drain_under_lease())
+
+    def start_publishers(
+        self, publishers: list["VerdictPublisher"], recorder_key: Optional[str] = None
+    ) -> None:
+        """Start one sequential drain task for the configured chain publishers."""
+        if self._drain_task is not None:
+            return
+        enabled = []
+        for publisher in publishers:
+            if not publisher.is_onchain_enabled():
+                continue
+            key = recorder_key if publisher is self and len(publishers) == 1 and recorder_key else os.getenv(
+                f"{publisher._env_prefix}_RECORDER_PRIVATE_KEY", ""
+            )
+            if not key:
+                logger.warning(
+                    "%s verdict registry: not sending (%s_RECORDER_PRIVATE_KEY is not set); verdicts stay pending",
+                    publisher._chain_name,
+                    publisher._env_prefix,
+                )
+                continue
+            try:
+                publisher._account = Account.from_key(key)
+            except Exception as e:
+                logger.error(
+                    "%s verdict registry: not sending (invalid recorder key: %s)",
+                    publisher._chain_name,
+                    type(e).__name__,
+                )
+                continue
+            publisher.recorder = publisher._account.address
+            publisher._wake = asyncio.Event()
+            logger.info("%s verdict registry: recorder ready %s", publisher._chain_name, publisher.recorder)
+            enabled.append(publisher)
+        self._drain_publishers = enabled
+        if enabled:
+            self._drain_task = asyncio.create_task(self._drain_publishers_loop())
 
     def stop(self) -> "asyncio.Future":
         """Stop the drain now; returns an awaitable that finishes when sends already under way have finished.
@@ -370,14 +425,15 @@ class VerdictPublisher:
         if drain_task is not None:
             await asyncio.gather(drain_task, return_exceptions=True)
         await self._settle_sends()
-        if drain_task is None or self._tasks:
+        publishers = self._drain_publishers
+        await asyncio.gather(*(publisher._settle_sends() for publisher in publishers))
+        if drain_task is None or any(publisher._tasks for publisher in publishers):
             return
-        # Released wherever the database still names this process, whatever this process last concluded.
-        # Best effort: a lease that is not released expires within LEASE_SECONDS.
-        try:
-            await self._db.release_sender_lease(LEASE_NAME, self._lease_holder)
-        except Exception as e:
-            logger.warning("Robinhood verdict registry: sender lease not released: %s", type(e).__name__)
+        for publisher in publishers:
+            try:
+                await publisher._db.release_sender_lease(publisher._lease_name, publisher._lease_holder)
+            except Exception as e:
+                logger.warning("%s verdict registry: sender lease not released: %s", publisher._chain_name, type(e).__name__)
 
     async def _settle_sends(self) -> None:
         tasks = list(self._tasks)
@@ -405,7 +461,8 @@ class VerdictPublisher:
                 held, expires_at = await self._take_lease()
             except Exception as e:
                 logger.error(
-                    "Robinhood verdict registry: not sending, the sender lease could not be taken: %s",
+                    "%s verdict registry: not sending, the sender lease could not be taken: %s",
+                    self._chain_name,
                     type(e).__name__,
                 )
                 await asyncio.sleep(LEASE_SECONDS)
@@ -414,7 +471,7 @@ class VerdictPublisher:
                 # Ask again when the other drain's lease runs out, unless it is renewed before then.
                 await asyncio.sleep(min(LEASE_SECONDS, max(0.0, expires_at - time.time())))
                 continue
-            logger.info("Robinhood verdict registry: sending as recorder %s", self.recorder)
+            logger.info("%s verdict registry: sending as recorder %s", self._chain_name, self.recorder)
             drain = asyncio.create_task(self._drain_loop())
             keeper = asyncio.create_task(self._keep_lease(expires_at))
             try:
@@ -428,15 +485,91 @@ class VerdictPublisher:
                 drain.cancel()
                 await asyncio.wait({keeper, drain})
                 self._lease_lost = False
-            logger.error("Robinhood verdict registry: stopped sending until this process holds the sender lease again")
+            logger.error(
+                "%s verdict registry: stopped sending until this process holds the sender lease again",
+                self._chain_name,
+            )
+
+    async def _drain_publishers_loop(self) -> None:
+        publishers = self._drain_publishers
+        for publisher in publishers:
+            await publisher._recover_claims()
+            await publisher._reconcile()
+        retry_after = {publisher: 0.0 for publisher in publishers}
+        backoffs = {publisher: 0.0 for publisher in publishers}
+        while True:
+            held = []
+            keepers = {}
+            for publisher in publishers:
+                try:
+                    acquired, expiry = await publisher._take_lease()
+                except Exception as e:
+                    logger.error("%s verdict registry: sender lease could not be taken: %s", publisher._chain_name, type(e).__name__)
+                    continue
+                if acquired:
+                    held.append(publisher)
+                    keepers[publisher] = asyncio.create_task(publisher._keep_lease(expiry))
+            if not held:
+                await asyncio.sleep(DRAIN_POLL_SECONDS)
+                continue
+            try:
+                while True:
+                    idle = True
+                    for publisher in held:
+                        if keepers[publisher].done():
+                            publisher._lease_lost = True
+                            continue
+                        if time.monotonic() < retry_after[publisher]:
+                            continue
+                        publisher._wake.clear()
+                        try:
+                            outcome = await publisher.drain_once()
+                        except Exception as e:
+                            logger.error("Verdict drain failed on %s: %s", publisher._chain_name, type(e).__name__)
+                            await publisher._recover_claims()
+                            outcome = "error"
+                        if outcome in ("retry", "error"):
+                            backoffs[publisher] = min(
+                                max(backoffs[publisher] * 2, DRAIN_BACKOFF_SECONDS),
+                                DRAIN_MAX_BACKOFF_SECONDS,
+                            )
+                            retry_after[publisher] = time.monotonic() + backoffs[publisher]
+                            idle = False
+                            continue
+                        if outcome == "capped":
+                            retry_after[publisher] = time.monotonic() + publisher._rate_wait()
+                            idle = False
+                            continue
+                        if outcome == "done":
+                            backoffs[publisher] = 0.0
+                            idle = False
+                            continue
+                        if await publisher._recover_claims() or await publisher._reconcile():
+                            idle = False
+                    if idle:
+                        wakes = [asyncio.create_task(publisher._wake.wait()) for publisher in held if not publisher._lease_lost]
+                        if not wakes:
+                            break
+                        done, pending = await asyncio.wait(wakes, timeout=DRAIN_POLL_SECONDS, return_when=asyncio.FIRST_COMPLETED)
+                        for task in pending:
+                            task.cancel()
+                        await asyncio.gather(*pending, return_exceptions=True)
+            finally:
+                for publisher, keeper in keepers.items():
+                    publisher._lease_lost = False
+                    keeper.cancel()
+                await asyncio.gather(*keepers.values(), return_exceptions=True)
 
     async def _take_lease(self) -> Tuple[bool, float]:
         """Take or renew the sender lease. Returns whether this process holds it, and when it expires (Unix time)."""
-        holder, expires_at = await self._db.take_sender_lease(LEASE_NAME, self._lease_holder, LEASE_SECONDS)
+        holder, expires_at = await self._db.take_sender_lease(
+            self._lease_name, self._lease_holder, LEASE_SECONDS
+        )
         # No holder: another drain released the lease between the take and its read; ask again.
         if holder is not None and holder != self._lease_holder:
             logger.warning(
-                "Robinhood verdict registry: not sending, %s holds the sender lease until %s UTC",
+                "%s verdict registry: not sending, %s holds the sender lease until %s UTC",
+                self._chain_name,
                 holder,
                 time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(expires_at)),
             )
@@ -456,7 +589,11 @@ class VerdictPublisher:
             try:
                 held, expires_at = await self._take_lease()
             except Exception as e:
-                logger.error("Robinhood verdict registry: sender lease not renewed: %s", type(e).__name__)
+                logger.error(
+                    "%s verdict registry: sender lease not renewed: %s",
+                    self._chain_name,
+                    type(e).__name__,
+                )
                 if self._lease_running_out(held_until):
                     return
                 continue
@@ -523,7 +660,7 @@ class VerdictPublisher:
         """
         if self._account is None:
             return "idle"
-        row = await self._db.claim_next_pending_verdict(CHAIN_ID)
+        row = await self._db.claim_next_pending_verdict(self.chain_id)
         if row is None:
             return "idle"
         if await self._drop_ineligible(row):
@@ -555,7 +692,9 @@ class VerdictPublisher:
         """
         released = 0
         try:
-            rows = await self._db.get_claimed_verdicts(CHAIN_ID, time.time() - RECONCILE_AFTER_SECONDS)
+            rows = await self._db.get_claimed_verdicts(
+                self.chain_id, time.time() - RECONCILE_AFTER_SECONDS
+            )
             transactions = await self._db.get_verdict_transactions([row["id"] for row in rows])
             for row in rows:
                 hashes = _row_hashes(row, transactions.get(row["id"], []))
@@ -591,7 +730,7 @@ class VerdictPublisher:
         """
         try:
             rows = await self._db.get_unresolved_verdicts(
-                CHAIN_ID, time.time() - RECONCILE_AFTER_SECONDS, RECONCILE_BATCH
+                self.chain_id, time.time() - RECONCILE_AFTER_SECONDS, RECONCILE_BATCH
             )
             if not rows:
                 return 0
@@ -677,7 +816,7 @@ class VerdictPublisher:
                             else "the recorder has insufficient funds"
                         )
                         self._alert(
-                            f"*ShieldBot verdict recorder cannot record* on chain {CHAIN_ID}: {reason}\n"
+                        f"*ShieldBot verdict recorder cannot record* on {self._alert_chain_label}: {reason}\n"
                             f"`{self.recorder}`\n"
                             f"{detail}; recording is paused; queued verdicts are retried and dropped "
                             f"once their observation is older than {MAX_OBSERVATION_AGE_SECONDS // 60} minutes"
@@ -772,7 +911,7 @@ class VerdictPublisher:
             reason = "MissingObservationTime"
         else:
             # Any newer measurement supersedes this one, whichever registry it was queued for (or none).
-            newest = await self._db.get_newest_verdict_observation(CHAIN_ID, row["subject"])
+            newest = await self._db.get_newest_verdict_observation(self.chain_id, row["subject"])
             # No awaited read may separate this clock check from the broadcast decision.
             now = time.time()
             if observed_at > now:
@@ -871,23 +1010,24 @@ class VerdictPublisher:
             raise RecordFailed("GasCapExceeded")
         max_fee = min(base_fee * 2, MAX_FEE_PER_GAS_WEI)
         reservation = gas * max_fee
-        if balance < LOW_BALANCE_RECORDS * reservation and not self._low_funds_alerted:
+        if balance < self._low_balance_records * reservation and not self._low_funds_alerted:
             self._low_funds_alerted = True
             balance_eth = f"{balance // 10**18}.{balance % 10**18 * 1_000_000 // 10**18:06d}"
+            from utils.chain_info import get_native_symbol
+
+            native_symbol = get_native_symbol(self.chain_id)
             self._alert(
-                f"*ShieldBot verdict recorder is running low* on chain {CHAIN_ID}\n"
+                f"*ShieldBot verdict recorder is running low* on {self._alert_chain_label}\n"
                 f"`{self.recorder}`\n"
-                f"Balance: {balance_eth} ETH; about {balance // reservation} records left "
+                f"Balance: {balance_eth} {native_symbol}; about {balance // reservation} records left "
                 f"at the current fee reservation"
             )
-        elif balance >= 2 * LOW_BALANCE_RECORDS * reservation:
+        elif balance >= 2 * self._low_balance_records * reservation:
             self._low_funds_alerted = False
         if balance < reservation:
             raise RecordFailed("InsufficientFunds")
-        signed = self._account.sign_transaction(
-            {
-                "type": 2,
-                "chainId": CHAIN_ID,
+        transaction = {
+                "chainId": self.chain_id,
                 "nonce": nonce,
                 "to": self.registry,
                 "value": 0,

@@ -158,11 +158,18 @@ class ServiceContainer:
         self.contract_service.db = self.db
         self.auth_manager = AuthManager(self.db)
         self.indexer = DeployerIndexer(self.web3_client, self.db, settings=settings)
-        # Verdict evidence storage, plus on-chain records in the Robinhood Chain registry when configured
-        self.verdict_publisher = VerdictPublisher(
-            self.db, rpc_url=settings.robinhood_rpc_url,
-            alert=lambda text: send_alert(self.settings, text),
-        )
+        # Verdict evidence storage, plus per-chain on-chain records when configured.
+        self.verdict_publishers = {
+            4663: VerdictPublisher(
+                self.db, rpc_url=settings.robinhood_rpc_url,
+                alert=lambda text: send_alert(self.settings, text),
+            ),
+            677: VerdictPublisher(
+                self.db, rpc_url=settings.botchain_rpc_url,
+                alert=lambda text: send_alert(self.settings, text), chain_id=677,
+            ),
+        }
+        self.verdict_publisher = self.verdict_publishers[4663]
 
         # Mempool monitor + Rescue mode + Campaign detection
         self.mempool_monitor = MempoolMonitor(

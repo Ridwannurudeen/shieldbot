@@ -2289,11 +2289,10 @@ async def public_stats():
     watch's), and `background_workers_note` says so.
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
-    from services.verdict_publisher import CHAIN_ID as REGISTRY_CHAIN_ID
 
     db_stats = {}
     launch_discovery = None
-    evidence_documents = registry_records_confirmed = None
+    evidence_documents = registry_records_confirmed = registry_records_confirmed_by_chain = None
     if container and container.db:
         db_stats = await container.db.get_platform_stats()
         window_hours = 24
@@ -2307,7 +2306,10 @@ async def public_stats():
         }
         evidence = await container.db.get_verdict_evidence_counts()
         evidence_documents = {chain_id: counts["documents"] for chain_id, counts in evidence.items()}
-        registry_records_confirmed = evidence[REGISTRY_CHAIN_ID]["confirmed"] if REGISTRY_CHAIN_ID in evidence else 0
+        registry_records_confirmed_by_chain = {
+            chain_id: evidence.get(chain_id, {}).get("confirmed", 0) for chain_id in (4663, 677)
+        }
+        registry_records_confirmed = registry_records_confirmed_by_chain.get(4663, 0)
 
     mempool = {}
     observable = unobservable = None
@@ -2335,6 +2337,7 @@ async def public_stats():
         "launch_discovery":       launch_discovery,
         "evidence_documents":     evidence_documents,
         "registry_records_confirmed": registry_records_confirmed,
+        "registry_records_confirmed_by_chain": registry_records_confirmed_by_chain,
         "unknown_ledger":         unknown_ledger.summary(),
     }
     if _background_workers == "external":

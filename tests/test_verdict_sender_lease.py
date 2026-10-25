@@ -103,8 +103,8 @@ def publisher_on(db, rpc_url=RPC):
     return VerdictPublisher(db, rpc_url=rpc_url, registry_address=REGISTRY)
 
 
-async def lease(db):
-    return await lease_row(db, vp.LEASE_NAME)
+async def lease(db, publisher):
+    return await lease_row(db, publisher._lease_name)
 
 
 async def lease_row(db, name):
@@ -113,7 +113,7 @@ async def lease_row(db, name):
 
 
 async def holds(db, publisher):
-    row = await lease(db)
+    row = await lease(db, publisher)
     return row is not None and row[0] == publisher._lease_holder
 
 
@@ -125,6 +125,42 @@ async def confirmed(db, subject):
 async def queued(db, subject):
     stored = await db.get_latest_verdict_evidence(4663, subject)
     return stored is not None and stored["onchain_status"] == "pending"
+
+
+def test_publisher_lease_names_are_chain_specific():
+    robinhood = VerdictPublisher(None, registry_address=REGISTRY)
+    botchain = VerdictPublisher(None, registry_address=REGISTRY, chain_id=677)
+
+    assert robinhood._lease_name == "verdict-drain:4663"
+    assert botchain._lease_name == "verdict-drain:677"
+
+
+@pytest.mark.asyncio
+async def test_start_publishers_runs_one_drain_task_in_chain_order(monkeypatch):
+    database = Database(":memory:")
+    await database.initialize()
+    monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
+    monkeypatch.setenv("BOTCHAIN_RECORDER_PRIVATE_KEY", KEY)
+    robinhood = VerdictPublisher(database, registry_address=REGISTRY)
+    botchain = VerdictPublisher(database, registry_address=REGISTRY, chain_id=677)
+    order = []
+    robinhood._recover_claims = AsyncMock(return_value=0)
+    botchain._recover_claims = AsyncMock(return_value=0)
+    robinhood._reconcile = AsyncMock(return_value=0)
+    botchain._reconcile = AsyncMock(return_value=0)
+    robinhood.drain_once = AsyncMock(side_effect=lambda: order.append(4663) or "idle")
+    botchain.drain_once = AsyncMock(side_effect=lambda: order.append(677) or "idle")
+    robinhood.start_publishers([robinhood, botchain])
+    assert robinhood._drain_task is not None
+    assert botchain._drain_task is None
+    for _ in range(100):
+        if len(order) >= 2:
+            break
+        await asyncio.sleep(0.01)
+    assert len(order) >= 2
+    await robinhood.stop()
+    await database.close()
+    assert order[:2] == [4663, 677]
 
 
 def running_drains():
@@ -385,7 +421,7 @@ async def test_a_dead_holders_lease_expires_and_the_waiting_drain_takes_over(
         await asyncio.gather(first._drain_task, return_exceptions=True)
         await first_db.close()
         # The lease stays with the dead process until it expires, then the waiting drain takes it.
-        assert (await lease(second_db))[0] == first._lease_holder
+        assert (await lease(second_db, first))[0] == first._lease_holder
         await until(lambda: holds(second_db, second))
         await second.publish(4663, TOKEN, scan())
         await until(lambda: confirmed(second_db, TOKEN))
@@ -463,7 +499,7 @@ async def test_a_holder_whose_renewals_hang_then_fail_stops_while_its_lease_is_s
         monkeypatch.setattr(db, "take_sender_lease", locked)
         await until(lambda: asyncio.sleep(0, "stopped sending" in caplog.text), tries=400)
         # No other drain could have taken the lease yet: the drain stopped before it lapsed.
-        holder, expires_at = await lease(other_process)
+        holder, expires_at = await lease(other_process, publisher)
         assert holder == publisher._lease_holder and expires_at > time.time()
         assert "OperationalError" in caplog.text
         await publisher.stop()
@@ -613,7 +649,7 @@ async def test_a_send_that_cannot_renew_the_lease_is_not_broadcast_so_a_new_hold
             first_db, "take_sender_lease", AsyncMock(side_effect=RuntimeError("database is locked"))
         )
         await asyncio.sleep(0.3)
-        _, expires_at = await lease(second_db)
+        _, expires_at = await lease(second_db, first)
         # A row reaches the first drain half a second before the lease lapses: a broadcast started now would
         # still be open when the second drain takes over.
         await asyncio.sleep(max(0.0, expires_at - 0.5 - time.time()))
@@ -767,7 +803,7 @@ async def test_a_stop_releases_a_lease_the_database_still_names_this_process_for
         publisher.start(recorder_key=KEY)
         await until(lambda: holds(db, publisher))
         await publisher.stop()
-    assert await lease(db) is None
+    assert await lease(db, publisher) is None
 
 
 @pytest.mark.asyncio
@@ -778,7 +814,7 @@ async def test_a_clean_stop_releases_the_lease(two_processes, short_lease):
         publisher.start(recorder_key=KEY)
         await until(lambda: holds(db, publisher))
         await publisher.stop()
-    assert await lease(db) is None
+    assert await lease(db, publisher) is None
 
 
 @pytest.mark.asyncio
@@ -800,7 +836,7 @@ async def test_a_stop_releases_the_lease_only_once_the_drain_has_ended(
         await until(lambda: holds(db, publisher))
         await publisher.stop()
     assert drains_at_release == []
-    assert await lease(db) is None
+    assert await lease(db, publisher) is None
 
 
 @pytest.mark.asyncio
