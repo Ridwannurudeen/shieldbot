@@ -1,17 +1,15 @@
-"""BOT Chain approvals stay inside the explicitly prefixed Telegram rescue path."""
+"""BOT Chain approvals use the registered Telegram rescue path."""
 
 import asyncio
 import re
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 from urllib.parse import parse_qs, urlsplit
 
 import aiohttp
 import pytest
-import requests
 from web3 import Web3
 
-from adapters.botchain_approval import BotChainApprovalReader
 from core.telegram_formatter import escape_untrusted
 from services.rescue_service import (
     APPROVAL_TOPIC,
@@ -25,7 +23,6 @@ from tests.test_api import client as api_client  # noqa: F401 (pytest fixture)
 from tests.test_bot_app import bot_module  # noqa: F401 (pytest fixture)
 from tests.test_rescue_bounded_history import FakeRpc, LATEST, OWNER_TOPIC, TOKEN, UNLIMITED, ok
 from utils.chain_info import CHAIN_INFO, CHAIN_PREFIXES
-from utils.web3_client import UnsupportedChainError
 
 
 BOTCHAIN = 677
@@ -77,15 +74,13 @@ def rpc_handler(logs, allowance=UNLIMITED, balance=10**18, code="0x6000", latest
 
 def botchain_service(price=1.25, info=None):
     web3_client = MagicMock()
-    service = RescueService(web3_client)
-    service._botchain_adapter = SimpleNamespace(
-        get_token_info=AsyncMock(return_value=info or {
-            "name": "Token",
-            "symbol": "TKN",
-            "decimals": 18,
-            "total_supply": 1000,
-        })
+    web3_client._get_adapter.return_value = SimpleNamespace(
+        w3=SimpleNamespace(provider=SimpleNamespace(endpoint_uri=BOTCHAIN_RPC)),
     )
+    web3_client.get_token_info = AsyncMock(return_value=info or {
+        "name": "Token", "symbol": "TKN", "decimals": 18, "total_supply": 1000,
+    })
+    service = RescueService(web3_client)
     service._fetch_prices = AsyncMock(return_value={TOKEN: price})
     return service
 
@@ -95,9 +90,7 @@ async def scan_botchain(handler, service=None):
     rpc = FakeRpc(handler)
     with patch("services.rescue_service.aiohttp.ClientSession") as factory:
         factory.return_value.__aenter__.return_value = rpc
-        result = await service.scan_approvals(
-            WALLET, chain_id=BOTCHAIN, botchain_approval_scan=True,
-        )
+        result = await service.scan_approvals(WALLET, chain_id=BOTCHAIN)
     return result, rpc
 
 
@@ -151,20 +144,25 @@ def price_answer(price="2.5", path=None, token=TOKEN):
 
 
 @pytest.mark.asyncio
-async def test_chain_677_requires_the_private_approval_scan_opt_in():
+async def test_chain_677_uses_the_registered_adapter_for_approval_scans():
     service = RescueService(MagicMock())
+    service._web3_client._get_adapter.return_value = SimpleNamespace(
+        w3=SimpleNamespace(provider=SimpleNamespace(endpoint_uri=BOTCHAIN_RPC)),
+    )
+    service._web3_client.get_token_info = AsyncMock(return_value={})
+    service._fetch_approvals = AsyncMock(return_value=([], {}, {"from_block": 1, "to_block": 2}))
+    service._fetch_prices = AsyncMock(return_value={})
+    result = await service.scan_approvals(WALLET, chain_id=BOTCHAIN)
+    assert result["chain_id"] == BOTCHAIN
 
-    with pytest.raises(UnsupportedChainError):
-        await service.scan_approvals(WALLET, chain_id=BOTCHAIN)
-    with pytest.raises(ValueError):
-        await service.scan_approvals(WALLET, chain_id=56, botchain_approval_scan=True)
 
-
-def test_botchain_labels_are_confined_to_677_and_public_history_lists_stay_unchanged():
+def test_botchain_labels_and_history_are_registered_for_677():
     assert KNOWN_SAFE_SPENDERS[BOTCHAIN] == MAINNET_SPENDERS
-    assert BOTCHAIN not in CHAIN_INFO
-    assert BOTCHAIN not in CHAIN_PREFIXES.values()
-    assert BOTCHAIN not in PUBLIC_LOG_WINDOW_BLOCKS
+    assert CHAIN_INFO[BOTCHAIN]["name"] == "BOT Chain"
+    assert {prefix for prefix, chain_id in CHAIN_PREFIXES.items() if chain_id == BOTCHAIN} == {
+        "bot", "botchain",
+    }
+    assert PUBLIC_LOG_WINDOW_BLOCKS[BOTCHAIN] == WINDOW_BLOCKS
     assert RescueService(MagicMock()).approval_history(BOTCHAIN) == {
         "history": "recent",
         "window_blocks": 24_000_000,
@@ -190,7 +188,8 @@ async def test_botchain_uses_twenty_four_million_recent_blocks_and_discloses_old
     assert result["coverage_reasons"]["allowances"] == (
         f"Approvals before block {WINDOW_START} not scanned"
     )
-    service._web3_client._get_adapter.assert_not_called()
+    service._web3_client._get_adapter.assert_called_with(BOTCHAIN)
+    service._web3_client.get_token_info.assert_awaited_once_with(TOKEN, BOTCHAIN)
 
 
 @pytest.mark.asyncio
@@ -206,11 +205,18 @@ async def test_mainnet_spenders_have_demo_risk_levels_and_limited_approvals_rema
     assert known_approval["spender_label"] == "BDEX V2 Router02"
     assert known_approval["risk_level"] == "MEDIUM"
     assert known_approval["risk_reason"] == (
-        "Unlimited approval to BDEX V2 Router02 — safe but excessive"
+        "Unlimited approval to BDEX V2 Router02, review the unlimited amount"
     )
     assert limited_approval["risk_level"] == "LOW"
     assert limited_approval["allowance"] == "5.00"
     assert limited_approval["value_at_risk_usd"] == 6.25
+
+
+def test_known_spender_reason_for_existing_chain_keeps_its_original_wording():
+    service = RescueService(MagicMock())
+    assert service._assess_approval_risk(
+        next(iter(KNOWN_SAFE_SPENDERS[56])), int(UNLIMITED, 16), "BDEX V2 Router02", 56,
+    ) == ("MEDIUM", "Unlimited approval to BDEX V2 Router02 — safe but excessive")
 
 
 @pytest.mark.asyncio
@@ -347,30 +353,8 @@ async def test_unpriced_botchain_approval_has_no_value_at_risk():
 
 
 @pytest.mark.asyncio
-async def test_botchain_token_info_retries_a_transient_429():
-    reader = BotChainApprovalReader()
-    reader.w3 = MagicMock()
-    functions = reader.w3.eth.contract.return_value.functions
-    name_call = functions.name.return_value.call
-    name_call.side_effect = [
-        requests.exceptions.HTTPError(response=MagicMock(status_code=429)),
-        "Token",
-    ]
-    functions.symbol.return_value.call.return_value = "TKN"
-    functions.decimals.return_value.call.return_value = 18
-    functions.totalSupply.return_value.call.return_value = 100 * 10**18
-
-    with patch("adapters.botchain_approval.asyncio.sleep", new_callable=AsyncMock) as sleep:
-        info = await reader.get_token_info(TOKEN)
-
-    assert info == {"name": "Token", "symbol": "TKN", "decimals": 18, "total_supply": 100.0}
-    assert name_call.call_count == 2
-    assert [call.args[0] for call in sleep.await_args_list] == [1.0]
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("prefix", ["bot:", "botchain:"])
-async def test_rescue_accepts_botchain_only_with_an_explicit_prefix(bot_module, monkeypatch, prefix):
+async def test_rescue_prefix_dispatches_to_registered_chain(bot_module, monkeypatch, prefix):
     update = MagicMock()
     update.message.reply_text = AsyncMock()
     scan = AsyncMock()
@@ -379,7 +363,7 @@ async def test_rescue_accepts_botchain_only_with_an_explicit_prefix(bot_module, 
 
     await bot_module.rescue_command(update, SimpleNamespace(args=[prefix + WALLET], user_data={}))
 
-    scan.assert_awaited_once_with(update, WALLET, BOTCHAIN, botchain_approval=True)
+    scan.assert_awaited_once_with(update, WALLET, BOTCHAIN)
 
 
 @pytest.mark.asyncio
@@ -416,54 +400,34 @@ async def test_rescue_without_a_prefix_keeps_the_existing_chain_picker_path(bot_
 
 
 @pytest.mark.asyncio
-async def test_botchain_prefix_does_not_enable_scan_or_token_commands(bot_module, monkeypatch):
-    bot_module.web3_client.is_valid_address.side_effect = Web3.is_address
-    scan = AsyncMock()
-    token = AsyncMock()
-    monkeypatch.setattr(bot_module, "scan_contract", scan)
-    monkeypatch.setattr(bot_module, "check_token", token)
-
-    for command in (bot_module.scan_command, bot_module.token_command):
-        update = MagicMock()
-        update.message.reply_text = AsyncMock()
-        await command(update, SimpleNamespace(args=["bot:" + WALLET]))
-        update.message.reply_text.assert_awaited_once_with("❌ Invalid address format.")
-
-    scan.assert_not_awaited()
-    token.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_botchain_is_absent_from_the_picker_and_global_chain_lists(bot_module):
+async def test_botchain_is_registered_in_picker_and_prefix_table(bot_module):
     from utils.chain_info import parse_chain_prefix
 
-    assert parse_chain_prefix("bot:" + WALLET) == (None, "bot:" + WALLET)
-    assert parse_chain_prefix("botchain:" + WALLET) == (None, "botchain:" + WALLET)
-    assert set(bot_module.web3_client.get_supported_chain_ids()) == set(CHAIN_INFO)
-    assert BOTCHAIN not in bot_module.PICKER_CHAIN_ORDER
-    assert all(
-        BOTCHAIN not in chain_ids
-        for chain_ids in (CHAIN_INFO, CHAIN_PREFIXES.values(), PUBLIC_LOG_WINDOW_BLOCKS)
-    )
+    assert parse_chain_prefix("bot:" + WALLET) == (BOTCHAIN, WALLET)
+    assert parse_chain_prefix("botchain:" + WALLET) == (BOTCHAIN, WALLET)
+    assert BOTCHAIN in bot_module.PICKER_CHAIN_ORDER
     update = MagicMock()
     update.message.reply_text = AsyncMock()
     await bot_module._ask_chain(update, SimpleNamespace(user_data={}), "r", WALLET)
     buttons = update.message.reply_text.await_args.kwargs["reply_markup"].inline_keyboard
-    assert all("677" not in button.callback_data for row in buttons for button in row)
+    assert [len(row) for row in buttons] == [2, 2, 2, 2, 1]
+    assert buttons[-1][0].text == "BOT Chain"
+    assert any("pick_r_677_" in button.callback_data for row in buttons for button in row)
 
 
-def test_botchain_is_not_advertised_by_api(api_client):
+def test_botchain_is_advertised_by_api(api_client):
     import api
 
     api.web3_client.get_supported_chain_ids.return_value = list(CHAIN_INFO)
-
-    def validate_chain_id(chain_id):
-        if chain_id not in CHAIN_INFO:
-            raise UnsupportedChainError("unsupported")
-
-    api.web3_client.validate_chain_id.side_effect = validate_chain_id
+    api.web3_client.validate_chain_id.side_effect = lambda chain_id: chain_id
+    scan_result = {
+        "status": "unknown",
+        "approvals": [],
+        "scanned_blocks": {"from_block": 1, "to_block": 2},
+        "coverage_reasons": {"allowances": "Approvals before block 1 not scanned"},
+    }
     api.container = SimpleNamespace(
-        rescue_service=SimpleNamespace(scan_approvals=AsyncMock(return_value={"status": "ok"})),
+        rescue_service=SimpleNamespace(scan_approvals=AsyncMock(return_value=scan_result)),
         settings=SimpleNamespace(bscscan_api_key=""),
     )
 
@@ -472,13 +436,14 @@ def test_botchain_is_not_advertised_by_api(api_client):
     supported_rescue_response = api_client.get(f"/api/rescue/{WALLET}?chain_id=56")
 
     assert response.status_code == 200
-    assert BOTCHAIN not in response.json()["supported_chains"]
-    assert rescue_response.status_code == 400
+    assert BOTCHAIN in response.json()["supported_chains"]
+    assert rescue_response.status_code == 200
+    assert rescue_response.json() == scan_result
     assert supported_rescue_response.status_code == 200
-    api.container.rescue_service.scan_approvals.assert_awaited_once_with(
-        WALLET, chain_id=56, etherscan_api_key="",
-    )
-
+    assert api.container.rescue_service.scan_approvals.await_args_list == [
+        call(WALLET, chain_id=BOTCHAIN, etherscan_api_key=""),
+        call(WALLET, chain_id=56, etherscan_api_key=""),
+    ]
 
 @pytest.mark.asyncio
 async def test_botchain_reply_shows_other_allowances_values_escaped_labels_and_capped_revoke_links(
@@ -533,10 +498,10 @@ async def test_botchain_reply_shows_other_allowances_values_escaped_labels_and_c
     bot_module.settings.etherscan_api_key = ""
     bot_module.container.rescue_service.scan_approvals = AsyncMock(return_value=result)
 
-    await bot_module._scan_approvals(update, owner, BOTCHAIN, botchain_approval=True)
+    await bot_module._scan_approvals(update, owner, BOTCHAIN)
 
     bot_module.container.rescue_service.scan_approvals.assert_awaited_once_with(
-        owner, chain_id=BOTCHAIN, etherscan_api_key="", botchain_approval_scan=True,
+        owner, chain_id=BOTCHAIN, etherscan_api_key="",
     )
     text = "\n".join(call.args[0] for call in reply_text.await_args_list[1:])
     assert "**Chain:** BOT Chain\n" in text
@@ -562,6 +527,7 @@ async def test_botchain_reply_shows_other_allowances_values_escaped_labels_and_c
     assert all(link.startswith(REVOKE_PAGE + "?") for link in links)
     assert "1 more approval(s) not listed; run /rescue again a few minutes after revoking these." in text
     assert "This bot has not revoked any approvals or submitted transactions." in text
+    assert "safe" not in text.lower()
     assert events == ["reply", "reply", "reply", "delete"]
 
 
@@ -587,7 +553,7 @@ async def test_botchain_reply_send_failure_falls_back_when_progress_edit_fails(b
     bot_module.settings.bscscan_api_key = ""
     bot_module.container.rescue_service.scan_approvals = AsyncMock(return_value=result)
 
-    await bot_module._scan_approvals(update, WALLET, BOTCHAIN, botchain_approval=True)
+    await bot_module._scan_approvals(update, WALLET, BOTCHAIN)
 
     assert replies[-1] == "❌ Error scanning approvals. Please try again later."
     status.edit_text.assert_awaited_once_with(replies[-1])
@@ -595,7 +561,7 @@ async def test_botchain_reply_send_failure_falls_back_when_progress_edit_fails(b
 
 
 @pytest.mark.asyncio
-async def test_help_describes_botchain_approval_scanning_without_changing_supported_chains(bot_module):
+async def test_help_describes_botchain_approval_scanning_and_supported_chains(bot_module):
     update = MagicMock()
     update.message.reply_text = AsyncMock()
 
@@ -604,5 +570,5 @@ async def test_help_describes_botchain_approval_scanning_without_changing_suppor
     text = update.message.reply_text.await_args.args[0]
     assert "/rescue bot:<wallet>" in text
     assert "BDEX names, dollar values and revoke links" in text
-    assert "BOT Chain has approval scanning only" in text
-    assert "Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain" in text
+    assert "BOT Chain: contract checks, approvals and revoke links. Checks that cannot run are reported as Unknown." in text
+    assert "Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain, BOT Chain" in text

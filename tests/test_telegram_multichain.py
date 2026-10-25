@@ -1,5 +1,7 @@
 """Tests for Telegram multichain support and chain_info utilities."""
 
+import time
+
 import pytest
 from utils.chain_info import (
     get_chain_name,
@@ -144,6 +146,7 @@ def bot_chain_functions():
     ai.generate_forensic_report = AsyncMock(return_value='Analysis')
     namespace = {
         'asyncio': asyncio,
+        'time': time,
         'is_scan_incomplete': is_scan_incomplete,
         'escape_untrusted': escape_untrusted,
         'unlinked': unlinked,

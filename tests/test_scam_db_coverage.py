@@ -192,6 +192,35 @@ async def _structural(mock_web3_client, lookup, is_token=True):
     return data, structural
 
 
+@pytest.mark.asyncio
+async def test_botchain_goplus_gap_keeps_contract_and_engine_status_unknown(mock_web3_client):
+    http, _ = _goplus_http(GOPLUS_NO_RECORD)
+    service = ContractService(mock_web3_client, ScamDatabase())
+    with http as factory, patch("services.contract_service.BSCSCAN_DELAY", 0):
+        factory.return_value.__aenter__ = AsyncMock()
+        factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        data = await service.fetch_contract_data(ADDRESS, chain_id=677)
+        structural = await StructuralAnalyzer(service).analyze(
+            AnalysisContext(ADDRESS, chain_id=677, is_token=True)
+        )
+
+    assert factory.call_count == 0
+    assert data["coverage"] == {"scam_database": False}
+    assert data["reason"] == "Scam database unavailable: GoPlus does not cover BOT Chain"
+    assert structural.data["coverage"]["scam_database"] is False
+    risk = RiskEngine().compute_from_results([
+        structural,
+        AnalyzerResult("market", 0.25, 0, data={"liquidity_usd": 200000, "pair_age_hours": 100}),
+        AnalyzerResult("behavioral", 0.2, 0, data={"reputation_score": 80}),
+        AnalyzerResult("honeypot", 0.15, 0, data=_complete_honeypot()),
+    ])
+    assert risk["status"] == "unknown"
+    assert risk["risk_level"] != "LOW"
+    assert risk["coverage_reasons"]["structural"] == (
+        "Scam database unavailable: GoPlus does not cover BOT Chain"
+    )
+
+
 def _complete_honeypot():
     return {"is_honeypot": False, "can_buy": True, "can_sell": True, "buy_tax": 0, "sell_tax": 0}
 

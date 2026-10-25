@@ -763,9 +763,9 @@ READY_TIMEOUT_SECONDS = 2
 _ready_lock = asyncio.Lock()
 _ready_cache = {"body": None, "expires_at": 0.0}
 # The RPC probes' own threads, so a hung RPC never holds a worker of the default pool that scans
-# use. Eight: the seven chains probed at once, and one more for a probe still hanging from the
+# use. Nine: the eight chains probed at once, and one more for a probe still hanging from the
 # previous check (an RPC request times out after 10 s, twice the cache period).
-_READY_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="readiness")
+_READY_EXECUTOR = ThreadPoolExecutor(max_workers=9, thread_name_prefix="readiness")
 
 
 async def _database_answers() -> bool:
@@ -1096,9 +1096,11 @@ async def firewall(req: FirewallRequest, request: Request):
 
 
 def _firewall_deadline(req: FirewallRequest, started: float) -> Optional[float]:
-    """When a firewall request must answer: FIREWALL_REQUEST_DEADLINE_SECONDS after it started on
-    Robinhood Chain, where it was measured; no request-wide deadline on other chains."""
-    return started + FIREWALL_REQUEST_DEADLINE_SECONDS if req.chainId == 4663 else None
+    """When a chain's own sell simulation requires a firewall request deadline."""
+    return (
+        started + FIREWALL_REQUEST_DEADLINE_SECONDS
+        if web3_client.supports_honeypot_simulation(req.chainId) is True else None
+    )
 
 
 def _firewall_deadline_response(
@@ -2360,7 +2362,7 @@ async def verdict_vocabulary():
 async def chain_coverage(chain_id: int):
     """What a scan on this chain can check, from its configuration, and how its providers are answering.
 
-    `capabilities`: `sell_simulation` is honeypot.is, eth_simulateV1, or goplus_reported (no sell is
+    `capabilities`: `sell_simulation` is honeypot.is, eth_simulateV1, goplus_reported, or none (no sell is
     simulated; GoPlus's own flags only); `contract_age` and `verification` name the explorer each lookup
     asks (`contract_age` is null where no request can be sent: Robinhood Chain's creation lookup needs
     the Blockscout gateway key, and without it verification is Sourcify alone); `liquidity_lock` says
@@ -2440,6 +2442,24 @@ async def verdict_permalink(chain_id: int, address: str):
     stored = await container.db.get_latest_verdict_evidence(chain_id, address.lower())
     if stored is None:
         raise HTTPException(status_code=404, detail="No verdict published for this address")
+    chain_name = get_chain_name(chain_id)
+    if chain_id == 4663:
+        onchain_verification = (
+            f"{chain_name} transaction tx_hash emitted "
+            "VerdictRecorded(subject, verdict, evidenceHash, observedBlock, timestamp) from `registry` "
+            "with this subject, verdict_code, evidence_hash and the evidence's observed_block; this is the "
+            "sequencer's soft finality, final on the parent chain once the batch is posted. "
+        )
+    elif chain_id == 677:
+        onchain_verification = (
+            "Compare the evidence hash with the BOT Chain transaction's VerdictRecorded event. "
+        )
+    else:
+        onchain_verification = (
+            f"{chain_name} transaction tx_hash emitted "
+            "VerdictRecorded(subject, verdict, evidenceHash, observedBlock, timestamp) from `registry` "
+            "with this subject, verdict_code, evidence_hash and the evidence's observed_block. "
+        )
     return {
         "chain_id": stored["chain_id"],
         "subject": stored["subject"],
@@ -2456,10 +2476,7 @@ async def verdict_permalink(chain_id: int, address: str):
         "onchain_error": stored["onchain_error"],
         "verify": (
             "keccak256 of the UTF-8 bytes of `canonical`, exactly as served, must equal evidence_hash. "
-            "onchain_status `confirmed`: Robinhood Chain transaction tx_hash emitted "
-            "VerdictRecorded(subject, verdict, evidenceHash, observedBlock, timestamp) from `registry` "
-            "with this subject, verdict_code, evidence_hash and the evidence's observed_block; this is the "
-            "sequencer's soft finality, final on the parent chain once the batch is posted. "
+            "onchain_status `confirmed`: " + onchain_verification +
             "`reverted`: transaction tx_hash reverted and recorded nothing. "
             "`pending` and `sending`: queued for, or being sent to, the chain. "
             "`submitted`, `unconfirmed` and `failed`: not yet proven on-chain. Every transaction sent for this "

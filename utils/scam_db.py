@@ -22,6 +22,9 @@ _ETH_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 _GOPLUS_CACHE = TTLCache(maxsize=1024, ttl=30)
 _GOPLUS_INFLIGHT = {}
 _GOPLUS_NO_DATA = 'GoPlus has no data for this token on this chain'
+# GoPlus answered code 2022 for 677 on 25 Oct 2026.
+GOPLUS_UNSUPPORTED_CHAINS = {677}
+_GOPLUS_CHAIN_UNSUPPORTED = 'GoPlus does not cover BOT Chain'
 
 
 def _address_security_ttu(key, result, now):
@@ -153,6 +156,15 @@ class ScamDatabase:
     async def _fetch_token_security(key: tuple, flight_key: tuple) -> dict:
         chain_id, address = key
         observed_at = time.time()
+        if chain_id in GOPLUS_UNSUPPORTED_CHAINS:
+            result = {
+                'status': 'unknown', 'reason': _GOPLUS_CHAIN_UNSUPPORTED, 'data': {},
+                'observed_at': observed_at,
+            }
+            _GOPLUS_INFLIGHT.pop(flight_key, None)
+            unknown_ledger.record('goplus_token', chain_id, 'unknown')
+            _GOPLUS_CACHE[key] = result
+            return result
         result = {'status': 'unknown', 'reason': 'GoPlus unavailable', 'data': {}}
         try:
             provider_breakers.check('goplus_token', chain_id)
@@ -194,7 +206,7 @@ class ScamDatabase:
         result['observed_at'] = observed_at
         unknown_ledger.record('goplus_token', chain_id, (
             'answered' if result['status'] == 'ok'
-            else 'unknown' if result['reason'] == _GOPLUS_NO_DATA else 'failed'
+            else 'unknown' if result['reason'] in {_GOPLUS_NO_DATA, _GOPLUS_CHAIN_UNSUPPORTED} else 'failed'
         ))
         _GOPLUS_CACHE[key] = result
         return result

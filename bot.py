@@ -229,7 +229,7 @@ Send me a token address, and I'll analyze:
 
 **How to use:**
 Send any address and I'll ask which chain it is on, then auto-detect what to scan! A chain prefix skips the question.
-Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
+Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`, `bot:0x...`
 
 Commands:
 /scan — Scan a contract
@@ -264,7 +264,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **/token <address>** - Check if a token is safe to trade
 **/chain** - Switch active chain
 **/rescue <wallet>** - Scan wallet for risky token approvals
-**/rescue bot:<wallet>** - Scan BOT Chain token approvals with BDEX names, dollar values and revoke links; BOT Chain has approval scanning only
+**/rescue bot:<wallet>** - Scan BOT Chain token approvals with BDEX names, dollar values and revoke links
+BOT Chain: contract checks, approvals and revoke links. Checks that cannot run are reported as Unknown.
 **/threats** - Live mempool threat alerts
 **/campaign <address>** - Check if address is part of a scam campaign
 **/report <address> <reason>** - Report a scam address
@@ -274,7 +275,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **Quick Tips:**
 • Send any address and I'll ask which chain it is on, then auto-detect what to scan; a chain prefix skips the question
-• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
+• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`, `bot:0x...`
 • Use /chain to set the default chain for the advisor chat
 • Supported: {supported_chains}
 
@@ -474,14 +475,6 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     raw = context.args[0]
-    prefix, separator, prefixed_address = raw.partition(":")
-    if separator and prefix.lower() in {"bot", "botchain"}:
-        if not web3_client.is_valid_address(prefixed_address):
-            await update.message.reply_text("❌ Invalid address format.")
-            return
-        await _scan_approvals(update, prefixed_address, 677, botchain_approval=True)
-        return
-
     prefix_chain_id, address = parse_chain_prefix(raw)
     if prefix_chain_id:
         web3_client.validate_chain_id(prefix_chain_id)
@@ -494,11 +487,9 @@ async def rescue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _ask_chain(update, context, 'r', address)
 
 
-async def _scan_approvals(
-    update: Update, address: str, chain_id: int, *, botchain_approval: bool = False,
-):
+async def _scan_approvals(update: Update, address: str, chain_id: int):
     """Scan a wallet's token approvals on chain_id and report the risky ones."""
-    chain_name = "BOT Chain" if botchain_approval else get_chain_name(chain_id)
+    chain_name = get_chain_name(chain_id)
     status_msg = await update.message.reply_text(
         f"🚨 **Scanning approvals on {chain_name}...**\n\n"
         "⏳ Checking token allowances for risky spenders...",
@@ -507,16 +498,15 @@ async def _scan_approvals(
 
     try:
         # Pick the best API key for the target chain
-        api_key = "" if botchain_approval else settings.bscscan_api_key
+        api_key = "" if chain_id == 677 else settings.bscscan_api_key
         if chain_id == 1:
             api_key = settings.etherscan_api_key or api_key
 
         result = await container.rescue_service.scan_approvals(
             address, chain_id=chain_id, etherscan_api_key=api_key,
-            botchain_approval_scan=botchain_approval,
         )
 
-        if botchain_approval:
+        if chain_id == 677:
             response, other_approvals, revoke_section = _botchain_approval_sections(address, result)
             reply_with_other_approvals = response + other_approvals
             assembled_reply = reply_with_other_approvals + revoke_section
@@ -623,7 +613,7 @@ async def _scan_approvals(
     except Exception as e:
         logger.error(f"Error in /rescue: {type(e).__name__}")
         error_message = "❌ Error scanning approvals. Please try again later."
-        if botchain_approval:
+        if chain_id == 677:
             try:
                 await status_msg.edit_text(error_message)
             except Exception:
@@ -1321,7 +1311,10 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
         try:
             from core.analyzer import AnalysisContext
 
-            ctx = AnalysisContext(address=address, chain_id=chain_id)
+            ctx = AnalysisContext(
+                address=address, chain_id=chain_id,
+                extra={'deadline': time.monotonic() + RUN_ALL_DEADLINE_SECONDS},
+            )
             reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
                 # The official-token check reads symbol() and name() itself, alongside the analyzers, as the
@@ -1451,7 +1444,10 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
         try:
             from core.analyzer import AnalysisContext
 
-            ctx = AnalysisContext(address=address, chain_id=chain_id)
+            ctx = AnalysisContext(
+                address=address, chain_id=chain_id,
+                extra={'deadline': time.monotonic() + RUN_ALL_DEADLINE_SECONDS},
+            )
             reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
                 # The official-token check reads symbol() and name() itself, alongside the analyzers, as the

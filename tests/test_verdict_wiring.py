@@ -4,6 +4,7 @@ import ast
 import asyncio
 import json
 import subprocess
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -341,6 +342,7 @@ def bot_scan_functions():
     services.robinhood_assets.check_onchain = AsyncMock(return_value=NO_MATCH)
     namespace = {
         "asyncio": asyncio,
+        "time": time,
         "is_scan_incomplete": is_scan_incomplete,
         "with_impostor_check": with_impostor_check,
         "RUN_ALL_DEADLINE_SECONDS": RUN_ALL_DEADLINE_SECONDS,

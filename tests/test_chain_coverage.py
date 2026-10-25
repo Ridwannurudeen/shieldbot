@@ -10,6 +10,7 @@ import requests
 from fastapi.testclient import TestClient
 
 from adapters.arbitrum import ArbitrumAdapter
+from adapters.botchain import BotChainAdapter
 from adapters.base_chain import BaseChainAdapter
 from adapters.bsc import BscAdapter
 from adapters.eth import EthAdapter
@@ -34,6 +35,7 @@ def coverage(monkeypatch):
         ArbitrumAdapter(rpc_url=RPC),
         PolygonAdapter(rpc_url=RPC),
         RobinhoodAdapter(rpc_url=RPC),
+        BotChainAdapter(rpc_url=RPC),
     )
     registry._adapters = {adapter.chain_id: adapter for adapter in adapters}
     mempool = SimpleNamespace(
@@ -141,6 +143,14 @@ def test_arbitrum_reads_approval_history_in_wide_windows(coverage):
     assert coverage.get(42161).json()["capabilities"]["approvals"] == {
         "history": "recent", "window_blocks": 12_000_000,
     }
+
+
+def test_botchain_has_no_sell_simulation_or_public_mempool(coverage):
+    capabilities = coverage.get(677).json()["capabilities"]
+    assert capabilities["sell_simulation"] == "none"
+    assert capabilities["verification"] == "blockscout"
+    assert capabilities["public_mempool"] == "no"
+    assert capabilities["approvals"] == {"history": "recent", "window_blocks": 24_000_000}
 
 
 def test_a_monitored_mempool_the_monitor_could_not_read_is_unobservable(coverage):

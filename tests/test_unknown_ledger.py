@@ -374,6 +374,25 @@ async def test_explorer_requests_are_counted_per_provider_and_cached_answers_are
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("is_verified, expected", [(True, "verified"), (False, "unverified")])
+async def test_botchain_verification_uses_blockscout_without_sourcify(
+    ledger, is_verified, expected
+):
+    from services.explorer_service import ExplorerService
+
+    reply = {**BLOCKSCOUT_CONTRACT, "is_verified": is_verified}
+    patcher = _aiohttp("services.explorer_service", (200, reply))
+    try:
+        result = await ExplorerService().get_verification_status(TOKEN, 677)
+    finally:
+        patcher.stop()
+
+    assert result.status == expected
+    assert result.provider == "blockscout"
+    assert _chain_counts(ledger, 677) == {"blockscout": _counts(answered=1)}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "reply, outcome",
     [
@@ -446,6 +465,27 @@ async def test_goplus_token_lookups_are_counted_once_per_request(
     finally:
         patcher.stop()
     assert _chain_counts(ledger, 56) == {"goplus_token": {**_counts(), outcome: 1}}
+
+
+@pytest.mark.asyncio
+async def test_unsupported_goplus_chain_is_unknown_without_a_request_or_breaker_call(
+    ledger, monkeypatch
+):
+    import utils.scam_db
+    from utils.scam_db import ScamDatabase
+
+    monkeypatch.setattr(utils.scam_db, "_GOPLUS_CACHE", {})
+    with patch("utils.scam_db.aiohttp.ClientSession") as session, patch.object(
+        utils.scam_db.provider_breakers, "check"
+    ) as breaker_check:
+        result = await ScamDatabase.fetch_token_security(TOKEN, 677)
+
+    assert result["status"] == "unknown"
+    assert result["reason"] == "GoPlus does not cover BOT Chain"
+    assert result["data"] == {}
+    session.assert_not_called()
+    breaker_check.assert_not_called()
+    assert _chain_counts(ledger, 677) == {"goplus_token": _counts(unknown=1)}
 
 
 @pytest.mark.asyncio

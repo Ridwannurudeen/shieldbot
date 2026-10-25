@@ -27,6 +27,7 @@ from adapters.opbnb import OpBNBAdapter
 from adapters.optimism import OptimismAdapter
 from adapters.polygon import PolygonAdapter
 from adapters.robinhood import RobinhoodAdapter
+from adapters.botchain import BotChainAdapter
 
 ADAPTERS = (
     BscAdapter,
@@ -37,6 +38,7 @@ ADAPTERS = (
     PolygonAdapter,
     OptimismAdapter,
     RobinhoodAdapter,
+    BotChainAdapter,
 )
 # Public RPCs refuse bursts: mainnet.base.org answered 429 to back-to-back calls.
 REQUEST_SPACING_SECONDS = 1.0
