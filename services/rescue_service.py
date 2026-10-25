@@ -6,7 +6,6 @@ ready-to-sign revocation transactions for one-click cleanup.
 
 import asyncio
 import logging
-import math
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,6 +15,7 @@ from cachetools import TTLCache
 from eth_utils import keccak
 from web3 import Web3
 
+from services.botchain_market import parse_price_reply
 from utils.chain_info import CHAIN_INFO, get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
@@ -1139,31 +1139,7 @@ class RescueService:
                         if resp.status != 200:
                             return token, None
                         answer = await resp.json(content_type=None)
-
-                    if not isinstance(answer, dict) or answer.get("success") is not True:
-                        return token, None
-                    data = answer.get("data")
-                    if not isinstance(data, dict):
-                        return token, None
-                    response_token = data.get("token")
-                    path = data.get("path")
-                    if (
-                        not isinstance(response_token, str)
-                        or response_token.lower() != token.lower()
-                        or not isinstance(path, list)
-                        or not path
-                        or not isinstance(path[-1], str)
-                        or path[-1].lower() != BOTCHAIN_USDT
-                    ):
-                        return token, None
-
-                    raw_price = data.get("price")
-                    if isinstance(raw_price, bool):
-                        return token, None
-                    price = float(raw_price)
-                    if not math.isfinite(price) or price <= 0:
-                        return token, None
-                    return token, price
+                    return token, parse_price_reply(answer, token)
                 except Exception as error:
                     logger.warning("BOT Chain price request failed: %s", type(error).__name__)
                     return token, None
