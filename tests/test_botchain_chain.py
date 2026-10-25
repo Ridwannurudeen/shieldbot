@@ -201,6 +201,20 @@ async def test_scan_bot_prefix_runs_analyzers_and_reports_unknown_sellability(mo
     report = reply_text.await_args_list[-1].args[0]
     assert "*Chain:* BOT Chain (677)" in report
     assert report.count(rendered_flag) == 1
+    assert "safe" not in report.lower()
+
+
+@pytest.mark.asyncio
+async def test_token_bot_prefix_dispatches_to_the_selected_chain(bot_module):
+    bot_module.web3_client.is_valid_address.return_value = True
+    bot_module.web3_client.validate_chain_id.side_effect = lambda chain_id: chain_id
+    bot_module.check_token = AsyncMock()
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+
+    await bot_module.token_command(update, SimpleNamespace(args=["bot:" + TOKEN]))
+
+    bot_module.web3_client.validate_chain_id.assert_called_once_with(677)
+    bot_module.check_token.assert_awaited_once_with(update, TOKEN, chain_id=677)
 
 
 def test_api_scan_accepts_chain_677(api_client, monkeypatch):

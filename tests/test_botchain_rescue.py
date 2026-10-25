@@ -421,8 +421,14 @@ def test_botchain_is_advertised_by_api(api_client):
 
     api.web3_client.get_supported_chain_ids.return_value = list(CHAIN_INFO)
     api.web3_client.validate_chain_id.side_effect = lambda chain_id: chain_id
+    scan_result = {
+        "status": "unknown",
+        "approvals": [],
+        "scanned_blocks": {"from_block": 1, "to_block": 2},
+        "coverage_reasons": {"allowances": "Approvals before block 1 not scanned"},
+    }
     api.container = SimpleNamespace(
-        rescue_service=SimpleNamespace(scan_approvals=AsyncMock(return_value={"status": "ok"})),
+        rescue_service=SimpleNamespace(scan_approvals=AsyncMock(return_value=scan_result)),
         settings=SimpleNamespace(bscscan_api_key=""),
     )
 
@@ -433,6 +439,7 @@ def test_botchain_is_advertised_by_api(api_client):
     assert response.status_code == 200
     assert BOTCHAIN in response.json()["supported_chains"]
     assert rescue_response.status_code == 200
+    assert rescue_response.json() == scan_result
     assert supported_rescue_response.status_code == 200
     assert api.container.rescue_service.scan_approvals.await_args_list == [
         call(WALLET, chain_id=BOTCHAIN, etherscan_api_key=""),
