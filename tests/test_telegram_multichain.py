@@ -1013,7 +1013,7 @@ async def test_a_legacy_proven_honeypot_publishes_no_stronger_verdict_than_its_e
     update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
     await ns['check_token'](update, TOKEN, chain_id=4663)
     assert '**Safety:** 🔴 DANGER' in update.message.reply_text.await_args.args[0]
-    args, kwargs = ns['container'].verdict_publisher.publish_fire_and_forget.call_args
+    args, kwargs = ns['container'].verdict_publishers.get(4663).publish_fire_and_forget.call_args
     assert args[:2] == (4663, TOKEN) and kwargs == {'honeypot_data': None}
     # The dict it publishes is the one it caches, the scan incomplete: the legacy result carries no simulation
     # provenance, so the evidence cannot say the simulation proved the trap.

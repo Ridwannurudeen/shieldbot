@@ -18,6 +18,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 UNITS = {"shieldbot", "shieldbot-bot"}
 KEY = "ROBINHOOD_RECORDER_PRIVATE_KEY"
+BOTCHAIN_KEY = "BOTCHAIN_RECORDER_PRIVATE_KEY"
 PYTHON = Path(sys.executable).as_posix()
 
 STUBS = r"""
@@ -331,21 +332,22 @@ def test_check_is_read_only_and_says_go(server):
         "bot process",
     ],
 )
-def test_check_refuses_when_the_bot_can_see_the_recorder_key(server, where):
+@pytest.mark.parametrize("key", [KEY, BOTCHAIN_KEY])
+def test_check_refuses_when_the_bot_can_see_the_recorder_key(server, where, key):
     secret = "0x" + "5e" * 32
     unit = server.state / "unit-shieldbot-bot"
     if where == "shared .env":
-        (server.app / ".env").write_text(f"{KEY}={secret}\n", encoding="utf-8")
+        (server.app / ".env").write_text(f"{key}={secret}\n", encoding="utf-8")
     elif where == "shared .env, exported":
-        (server.app / ".env").write_text(f"A=1\n  export {KEY} = {secret}\n", encoding="utf-8")
+        (server.app / ".env").write_text(f"A=1\n  export {key} = {secret}\n", encoding="utf-8")
     elif where == "unit loads recorder.env":
         unit.write_text(
             unit.read_text() + "EnvironmentFile=/etc/shieldbot/recorder.env\n", encoding="utf-8"
         )
     elif where == "unit sets the key":
-        unit.write_text(unit.read_text() + f'Environment="{KEY}={secret}"\n', encoding="utf-8")
+        unit.write_text(unit.read_text() + f'Environment="{key}={secret}"\n', encoding="utf-8")
     else:
-        server.environ.write_bytes(server.environ.read_bytes() + f"{KEY}={secret}\x00".encode())
+        server.environ.write_bytes(server.environ.read_bytes() + f"{key}={secret}\x00".encode())
     code, out, err = server.run("--check", server.target)
     assert code == 1
     assert "NO-GO" in err
@@ -385,10 +387,13 @@ API_UNIT_WITH_KEY = (
         'background_workers="external"\r',
     ],
 )
-def test_check_refuses_an_api_that_loads_the_key_when_the_workers_send(server, setting):
+@pytest.mark.parametrize("key", [KEY, BOTCHAIN_KEY])
+def test_check_refuses_an_api_that_loads_the_key_when_the_workers_send(server, setting, key):
     # With BACKGROUND_WORKERS=external the workers unit runs the drain; the key must have moved there.
     (server.app / ".env").write_text(f"TELEGRAM_BOT_TOKEN=unused\n{setting}\n", encoding="utf-8")
-    (server.state / "unit-shieldbot").write_text(API_UNIT_WITH_KEY, encoding="utf-8")
+    (server.state / "unit-shieldbot").write_text(
+        API_UNIT_WITH_KEY.replace(KEY, key), encoding="utf-8"
+    )
     code, out, err = server.run("--check", server.target)
     assert code == 1
     assert "BACKGROUND_WORKERS=external" in err and "recorder.env" in err

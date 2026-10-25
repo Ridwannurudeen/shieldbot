@@ -1387,8 +1387,9 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
 
         keyboard = _scan_buttons(address, chain_id)
 
-        if chain_id == 4663:
-            container.verdict_publisher.publish_fire_and_forget(
+        publisher = container.verdict_publishers.get(chain_id)
+        if publisher is not None:
+            publisher.publish_fire_and_forget(
                 chain_id, address, verdict_scan, honeypot_data=verdict_honeypot,
             )
 
@@ -1519,8 +1520,9 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
 
         keyboard = _token_buttons(address, chain_id)
 
-        if chain_id == 4663:
-            container.verdict_publisher.publish_fire_and_forget(
+        publisher = container.verdict_publishers.get(chain_id)
+        if publisher is not None:
+            publisher.publish_fire_and_forget(
                 chain_id, address, verdict_scan, honeypot_data=verdict_honeypot,
             )
 

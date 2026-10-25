@@ -103,6 +103,17 @@ by `0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4`, following [DEPLOY_ROBINHOOD.md]
 - **Source:** full exact matches on Sourcify (creation and runtime code) for all three. Blockscout shows each contract through its Sourcify lookup; a first page load can show "Verify & publish" before that match appears.
   ([exact match](https://sourcify.dev/server/v2/contract/4663/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138), [exact match](https://sourcify.dev/server/v2/contract/4663/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e), [exact match](https://sourcify.dev/server/v2/contract/4663/0x336254bA85406D9af39357101b688E2B757751b3)).
 
+## BOT Chain (677)
+
+Nothing is deployed yet. Follow the [BOT Chain registry runbook](../contracts/base/DEPLOY_BOTCHAIN.md) before recording a deployment here. Fill these values only after the owner completes deployment and verifies the result:
+
+| Field | Value |
+|---|---|
+| Registry address | To be filled after deployment |
+| Deployment transaction | To be filled after deployment |
+| Recorder address | To be filled after deployment |
+| Deployment block | To be filled after deployment |
+
 ## Checking these values
 
 ```bash

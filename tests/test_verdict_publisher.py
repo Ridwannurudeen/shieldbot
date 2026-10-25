@@ -92,6 +92,7 @@ class FakeChain:
         # A lagging view (a read replica behind the sequencer) does not see what was mined.
         self.lagging = False
         self.base_fee = base_fee
+        self.gas_price = 20 * 10**9
         self.estimate = estimate
         self.balance = balance
         self.posts = []
@@ -146,6 +147,8 @@ class FakeChain:
             result = hex(self.estimate)
         elif method == "eth_getBalance":
             result = hex(self.balance)
+        elif method == "eth_gasPrice":
+            result = hex(self.gas_price)
         elif method == "eth_sendRawTransaction":
             raw = bytes.fromhex(params[0][2:])
             if decode_record(raw)["max_fee"] < self.base_fee:
@@ -251,21 +254,25 @@ def backoffs(sleep):
 
 
 def decode_record(raw):
-    """Decode a signed type-2 record() transaction into its fields and record() arguments."""
-    assert raw[0] == 2
-    chain_id, nonce, tip, max_fee, gas, to, value, data, access_list, *_ = rlp.decode(raw[1:])
+    """Decode a signed record() transaction into its fields and record() arguments."""
+    if raw[0] == 2:
+        chain_id, nonce, tip, max_fee, gas, to, value, data, access_list, *_ = rlp.decode(raw[1:])
+    else:
+        nonce, max_fee, gas, to, value, data, v, _, _ = rlp.decode(raw)
+        v = int.from_bytes(v, "big")
+        chain_id, tip, access_list = (v - 35) // 2, 0, None
     assert data[:4] == keccak(text="record(address,uint8,bytes32,uint64)")[:4]
     subject, verdict, evidence_hash, observed_block = decode(
         ["address", "uint8", "bytes32", "uint64"], data[4:]
     )
 
     def number(field):
-        return int.from_bytes(field, "big")
+        return field if isinstance(field, int) else int.from_bytes(field, "big")
 
     return {
         "chain_id": number(chain_id),
         "nonce": number(nonce),
-        "tip": number(tip),
+        "tip": number(tip) if isinstance(tip, bytes) else tip,
         "max_fee": number(max_fee),
         "gas": number(gas),
         "to": "0x" + to.hex(),
@@ -338,7 +345,7 @@ async def test_publishing_never_reads_the_recorder_key(monkeypatch, db):
 async def test_start_reads_the_key_from_the_environment(monkeypatch, db):
     monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
     publisher = make_publisher(db)
-    with patch.object(VerdictPublisher, "_drain_loop", new=AsyncMock()):
+    with patch.object(VerdictPublisher, "_drain_publishers_loop", new=AsyncMock()):
         publisher.start()
         assert publisher.recorder == RECORDER
         assert publisher._drain_task is not None
@@ -1097,6 +1104,149 @@ async def test_gas_limit_at_the_cap_and_max_fee_cap(db):
 
 
 @pytest.mark.asyncio
+async def test_botchain_uses_legacy_gas_price_transaction(db):
+    chain = FakeChain(base_fee=0)
+    publisher = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, chain_id=677)
+    publisher._account = Account.from_key(KEY)
+    publisher.recorder = publisher._account.address
+    evidence = await publisher.publish(677, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "done"
+    [stored] = (await db.get_verdict_transactions([evidence["evidence_id"]]))[evidence["evidence_id"]]
+    raw = bytes.fromhex(stored["raw_tx"])
+    transaction = decode_record(raw)
+    assert raw[0] != 2
+    assert transaction["chain_id"] == 677
+    assert transaction["max_fee"] == 20 * 10**9
+    assert "eth_gasPrice" in chain.methods()[0]
+
+
+@pytest.mark.asyncio
+async def test_botchain_defers_when_gas_price_exceeds_cap(db):
+    chain = FakeChain(base_fee=0)
+    chain.gas_price = vp.BOTCHAIN_MAX_GAS_PRICE_WEI + 1
+    publisher = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, chain_id=677)
+    publisher._account = Account.from_key(KEY)
+    publisher.recorder = publisher._account.address
+    evidence = await publisher.publish(677, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "retry"
+    assert ["eth_sendRawTransaction"] not in chain.methods()
+
+
+@pytest.mark.asyncio
+async def test_botchain_defers_when_gas_price_is_zero(db):
+    chain = FakeChain(base_fee=0)
+    chain.gas_price = 0
+    publisher = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, chain_id=677)
+    publisher._account = Account.from_key(KEY)
+    publisher.recorder = publisher._account.address
+    evidence = await publisher.publish(677, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "retry"
+    assert ["eth_sendRawTransaction"] not in chain.methods()
+    stored = await db.get_verdict_evidence(evidence["evidence_id"])
+    assert stored["onchain_status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_botchain_replacement_bumps_gas_price_at_same_nonce(db, reconcile_now):
+    chain = FakeChain(base_fee=0)
+    chain.raise_on["eth_sendRawTransaction"] = aiohttp.ClientConnectionError()
+    publisher = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, chain_id=677)
+    publisher._account = Account.from_key(KEY)
+    publisher.recorder = publisher._account.address
+    evidence = await publisher.publish(677, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "done"
+        [stored] = (await db.get_verdict_transactions([evidence["evidence_id"]]))[evidence["evidence_id"]]
+        chain.raise_on.clear()
+        assert await publisher._reconcile() == 1
+        assert await publisher.drain_once() == "done"
+    replacement = decode_record(chain.sent[-1])
+    assert replacement["nonce"] == 7
+    assert replacement["max_fee"] >= stored["max_fee_per_gas"] * 110 // 100
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["rejected", "rpc_error", "rollback", "transport"])
+async def test_chain_publishers_isolate_botchain_failures_from_robinhood_rows(db, failure):
+    robinhood = sender(db)
+    botchain_registry = "0x" + "d1" * 20
+    botchain = VerdictPublisher(db, rpc_url=RPC, registry_address=botchain_registry, chain_id=677)
+    botchain._account = Account.from_key(KEY)
+    botchain.recorder = botchain._account.address
+    assert await robinhood._take_lease() == (True, pytest.approx(time.time() + vp.LEASE_SECONDS, abs=1))
+    assert await botchain._take_lease() == (True, pytest.approx(time.time() + vp.LEASE_SECONDS, abs=1))
+    robinhood_id = (await robinhood.publish(4663, TOKEN, COMPLETE))["evidence_id"]
+    botchain_id = (await botchain.publish(677, TOKEN, COMPLETE))["evidence_id"]
+    chain = FakeChain()
+    if failure == "rejected":
+        chain.errors["eth_sendRawTransaction"] = {"code": -32000, "message": "execution rejected"}
+    elif failure == "rpc_error":
+        chain.errors["eth_estimateGas"] = {"code": -32000, "message": "temporary node error"}
+    elif failure == "transport":
+        chain.raise_on["eth_sendRawTransaction"] = aiohttp.ClientConnectionError()
+    else:
+        await db._db.execute(
+            f"CREATE TRIGGER force_verdict_tx_rollback BEFORE INSERT ON verdict_transactions "
+            f"WHEN NEW.evidence_id = {botchain_id} BEGIN SELECT RAISE(ABORT, 'forced rollback'); END"
+        )
+        await db._db.commit()
+    with rpc_node(chain):
+        result = await botchain.drain_once()
+        await settle_publisher_tasks(botchain)
+    robinhood_row = await db.get_verdict_evidence(robinhood_id)
+    botchain_row = await db.get_verdict_evidence(botchain_id)
+    assert (robinhood_row["onchain_status"], robinhood_row["registry"], robinhood_row["tx_hash"]) == (
+        "pending",
+        robinhood.registry,
+        None,
+    )
+    assert botchain_row["registry"] == botchain.registry
+    botchain_transactions = (await db.get_verdict_transactions([botchain_id]))[botchain_id]
+    if failure == "rejected":
+        assert result == "done"
+        assert botchain_row["onchain_status"] == "failed"
+        assert decode_record(bytes.fromhex(botchain_transactions[0]["raw_tx"]))["to"].lower() == botchain.registry.lower()
+    elif failure == "rpc_error":
+        assert result == "retry"
+        assert botchain_row["onchain_status"] == "pending"
+        assert botchain_transactions == []
+    elif failure == "rollback":
+        assert result == "error"
+        assert botchain_row["onchain_status"] == "sending"
+        assert botchain_transactions == []
+        await db._db.execute("DROP TRIGGER force_verdict_tx_rollback")
+        await db._db.commit()
+    else:
+        assert result == "done"
+        assert botchain_row["onchain_status"] == "unconfirmed"
+        assert decode_record(bytes.fromhex(botchain_transactions[0]["raw_tx"]))["to"].lower() == botchain.registry.lower()
+
+
+def test_low_balance_record_threshold_is_chain_specific():
+    assert VerdictPublisher(None, registry_address="")._low_balance_records == 1000
+    assert VerdictPublisher(None, registry_address="", chain_id=677)._low_balance_records == 100
+
+
+@pytest.mark.asyncio
+async def test_botchain_low_balance_alert_names_bot_and_bot_chain(db):
+    chain = FakeChain(base_fee=0, balance=10**17)
+    alert = AsyncMock()
+    publisher = VerdictPublisher(db, rpc_url=RPC, registry_address=REGISTRY, alert=alert, chain_id=677)
+    publisher._account = Account.from_key(KEY)
+    publisher.recorder = publisher._account.address
+    await publisher.publish(677, TOKEN, COMPLETE)
+    with rpc_node(chain):
+        assert await publisher.drain_once() == "done"
+    await settle_publisher_tasks(publisher)
+    [message] = [call.args[0] for call in alert.await_args_list]
+    assert "on BOT Chain (677)" in message
+    assert " BOT;" in message
+
+
+@pytest.mark.asyncio
 async def test_a_hung_rpc_before_signing_times_out_and_waits(db, monkeypatch):
     monkeypatch.setattr(vp, "PHASE_TIMEOUT_SECONDS", 0.05)
     chain = FakeChain()
@@ -1110,23 +1260,60 @@ async def test_a_hung_rpc_before_signing_times_out_and_waits(db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_drain_loop_backs_off_exponentially_and_resets_after_a_record(db, monkeypatch):
+async def test_the_production_coordinator_backs_off_exponentially_and_resets_after_a_record(db, monkeypatch):
     publisher = sender(db)
-    publisher._wake = asyncio.Event()
-    outcomes = iter(["retry", "retry", "retry", "done", "retry"] + ["retry"] * 10)
-    monkeypatch.setattr(publisher, "drain_once", AsyncMock(side_effect=lambda: next(outcomes)))
-    monkeypatch.setattr(publisher, "_recover_claims", AsyncMock(return_value=0))
+    outcomes = iter(["retry", "retry", "retry", "done"] + ["retry"] * 9)
+    clock = [100.0]
     waits = []
 
-    async def sleep(seconds):
-        waits.append(seconds)
-        if len(waits) == 12:
-            raise asyncio.CancelledError
+    async def drain_once():
+        return next(outcomes)
 
-    with patch("services.verdict_publisher.asyncio.sleep", new=sleep):
-        with pytest.raises(asyncio.CancelledError):
-            await publisher._drain_loop()
-    assert waits == [5.0, 10.0, 20.0, 5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0, 60.0, 60.0]
+    async def advance_wait(tasks, timeout=None, return_when=None):
+        waits.append(timeout)
+        clock[0] += timeout or 0.0
+        await asyncio.sleep(0)
+        if len(waits) == 13:
+            raise asyncio.CancelledError
+        return set(), set(tasks)
+
+    monkeypatch.setattr(vp.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(vp.asyncio, "wait", advance_wait)
+    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 3600)
+    monkeypatch.setattr(publisher, "drain_once", drain_once)
+    publisher.start_publishers([publisher], recorder_key=KEY)
+    with pytest.raises(asyncio.CancelledError):
+        await publisher._drain_task
+    await publisher.stop()
+    assert waits == [
+        5.0,
+        10.0,
+        20.0,
+        0.0,
+        5.0,
+        10.0,
+        20.0,
+        40.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+    ]
+    assert [timeout for timeout in waits if timeout] == [
+        5.0,
+        10.0,
+        20.0,
+        5.0,
+        10.0,
+        20.0,
+        40.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+    ]
 
 
 @pytest.mark.asyncio
@@ -1450,6 +1637,35 @@ async def test_a_database_failure_mid_send_is_recovered_and_sent_once(
 
 
 @pytest.mark.asyncio
+async def test_production_coordinator_recovers_a_returned_send_error(db, monkeypatch):
+    monkeypatch.setattr(vp, "RECONCILE_AFTER_SECONDS", -1)
+    monkeypatch.setattr(vp, "DRAIN_BACKOFF_SECONDS", 0.001)
+    publisher = make_publisher(db)
+    await publisher.publish(4663, TOKEN, COMPLETE)
+    chain = FakeChain()
+    real_store = db.set_verdict_tx_hash
+    failures = [RuntimeError("database is locked")]
+
+    async def fail_once(*args, **kwargs):
+        if failures:
+            raise failures.pop()
+        return await real_store(*args, **kwargs)
+
+    monkeypatch.setattr(db, "set_verdict_tx_hash", fail_once)
+    with rpc_node(chain):
+        publisher.start_publishers([publisher], recorder_key=KEY)
+        for _ in range(500):
+            stored = await db.get_latest_verdict_evidence(4663, TOKEN)
+            if stored["onchain_status"] == "confirmed":
+                break
+            await asyncio.sleep(0.01)
+        await publisher.stop()
+    assert stored["onchain_status"] == "confirmed"
+    assert not failures
+    assert len(chain.sent) == 1
+
+
+@pytest.mark.asyncio
 async def test_the_drain_recovers_claims_after_an_error(db, monkeypatch):
     publisher = sender(db)
     publisher._wake = asyncio.Event()
@@ -1465,9 +1681,11 @@ async def test_the_drain_recovers_claims_after_an_error(db, monkeypatch):
     monkeypatch.setattr(publisher, "drain_once", drain_once)
     monkeypatch.setattr(publisher, "_reconcile", AsyncMock(return_value=0))
     monkeypatch.setattr(publisher, "_recover_claims", AsyncMock(side_effect=lambda: recoveries.append("recover")))
-    with patch("services.verdict_publisher.asyncio.sleep", new=AsyncMock()):
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(publisher._drain_loop(), 5)
+    monkeypatch.setattr(vp, "DRAIN_BACKOFF_SECONDS", 0.001)
+    publisher.start_publishers([publisher], recorder_key=KEY)
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(publisher._drain_task, 5)
+    await publisher.stop()
     # Once at start and once after the error; a plain retry does not trigger recovery.
     assert recoveries == ["recover", "recover"]
 
@@ -1480,9 +1698,12 @@ async def test_a_failing_claim_query_is_an_error_not_a_crash(db, monkeypatch):
     monkeypatch.setattr(publisher, "_reconcile", AsyncMock(side_effect=[0, asyncio.CancelledError()]))
     recover = AsyncMock(return_value=0)
     monkeypatch.setattr(publisher, "_recover_claims", recover)
+    monkeypatch.setattr(vp, "DRAIN_BACKOFF_SECONDS", 0.001)
     with patch("services.verdict_publisher.asyncio.sleep", new=AsyncMock()):
+        publisher.start_publishers([publisher], recorder_key=KEY)
         with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(publisher._drain_loop(), 5)
+            await asyncio.wait_for(publisher._drain_task, 5)
+    await publisher.stop()
     # At start, after the error, and when the drain found nothing to do.
     assert recover.await_count == 3
 
@@ -1763,8 +1984,10 @@ async def test_the_drain_reconciles_at_start_and_when_idle(db, monkeypatch):
         return 0
 
     monkeypatch.setattr(publisher, "_reconcile", reconcile)
+    publisher.start_publishers([publisher], recorder_key=KEY)
     with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(publisher._drain_loop(), 5)
+        await asyncio.wait_for(publisher._drain_task, 5)
+    await publisher.stop()
     # Once before the first drain, then after each idle drain.
     assert calls == [0, 1, 2]
 
@@ -1786,8 +2009,10 @@ async def test_rows_requeued_by_reconcile_are_drained_without_waiting(db, monkey
             raise asyncio.CancelledError
 
     monkeypatch.setattr(publisher, "_reconcile", reconcile)
+    publisher.start_publishers([publisher], recorder_key=KEY)
     with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(publisher._drain_loop(), 5)
+        await asyncio.wait_for(publisher._drain_task, 5)
+    await publisher.stop()
     assert publisher.drain_once.await_count == 3
 
 
@@ -2177,8 +2402,10 @@ async def test_the_idle_drain_recovers_old_claims(db, monkeypatch):
     monkeypatch.setattr(publisher, "_recover_claims", recover)
     monkeypatch.setattr(publisher, "_reconcile", AsyncMock(return_value=0))
     monkeypatch.setattr(publisher, "drain_once", AsyncMock(return_value="idle"))
+    publisher.start_publishers([publisher], recorder_key=KEY)
     with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(publisher._drain_loop(), 5)
+        await asyncio.wait_for(publisher._drain_task, 5)
+    await publisher.stop()
     # Once at start, then after each idle drain.
     assert (recover.await_count, publisher.drain_once.await_count) == (3, 2)
 

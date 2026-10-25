@@ -210,7 +210,9 @@ async def lifespan(app: FastAPI):
     _background_workers = settings.background_workers
     if _background_workers == "api":
         await container.start_mempool_monitor()
-        container.verdict_publisher.start()
+        container.verdict_publishers[4663].start_publishers(
+            list(container.verdict_publishers.values())
+        )
     else:
         logger.info("Background work runs in workers.py (BACKGROUND_WORKERS=external)")
 
@@ -263,7 +265,7 @@ async def lifespan(app: FastAPI):
     await container.launch_watch.stop()
     await container.hunter.stop()
     await container.phishing_service.stop()
-    await container.verdict_publisher.stop()
+    await container.verdict_publishers[4663].stop()
     await container.shutdown()
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
     if rpc_proxy:
@@ -2289,11 +2291,10 @@ async def public_stats():
     watch's), and `background_workers_note` says so.
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
-    from services.verdict_publisher import CHAIN_ID as REGISTRY_CHAIN_ID
 
     db_stats = {}
     launch_discovery = None
-    evidence_documents = registry_records_confirmed = None
+    evidence_documents = registry_records_confirmed = registry_records_confirmed_by_chain = None
     if container and container.db:
         db_stats = await container.db.get_platform_stats()
         window_hours = 24
@@ -2307,7 +2308,10 @@ async def public_stats():
         }
         evidence = await container.db.get_verdict_evidence_counts()
         evidence_documents = {chain_id: counts["documents"] for chain_id, counts in evidence.items()}
-        registry_records_confirmed = evidence[REGISTRY_CHAIN_ID]["confirmed"] if REGISTRY_CHAIN_ID in evidence else 0
+        registry_records_confirmed_by_chain = {
+            chain_id: evidence.get(chain_id, {}).get("confirmed", 0) for chain_id in (4663, 677)
+        }
+        registry_records_confirmed = registry_records_confirmed_by_chain.get(4663, 0)
 
     mempool = {}
     observable = unobservable = None
@@ -2335,6 +2339,7 @@ async def public_stats():
         "launch_discovery":       launch_discovery,
         "evidence_documents":     evidence_documents,
         "registry_records_confirmed": registry_records_confirmed,
+        "registry_records_confirmed_by_chain": registry_records_confirmed_by_chain,
         "unknown_ledger":         unknown_ledger.summary(),
     }
     if _background_workers == "external":
@@ -2433,6 +2438,7 @@ async def verdict_permalink(chain_id: int, address: str):
     """Latest published ShieldBot verdict for a token, with its evidence document and on-chain record."""
     from core.verdict_evidence import Verdict
     from services.verdict_publisher import MAX_SEND_ATTEMPTS
+    from utils.chain_info import CHAIN_INFO
 
     _validate_chain_id(chain_id)
     if not web3_client.is_valid_address(address):
@@ -2473,6 +2479,11 @@ async def verdict_permalink(chain_id: int, address: str):
         "onchain_status": stored["onchain_status"],
         "registry": stored["registry"],
         "tx_hash": stored["tx_hash"],
+        "explorer_tx_url": (
+            f"{CHAIN_INFO[chain_id]['explorer_url']}/tx/{stored['tx_hash']}"
+            if stored["tx_hash"] and CHAIN_INFO.get(chain_id, {}).get("explorer_url")
+            else None
+        ),
         "onchain_error": stored["onchain_error"],
         "verify": (
             "keccak256 of the UTF-8 bytes of `canonical`, exactly as served, must equal evidence_hash. "
