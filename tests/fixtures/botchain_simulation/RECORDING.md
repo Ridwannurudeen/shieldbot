@@ -55,4 +55,6 @@ No live trap token is recorded: none is known on BDEX. The trap cases in the tes
 
 ## Latency measured while recording
 
-Each POST opened a fresh TLS connection from this host. `eth_simulateV1` took 3.2 to 7.2 s per call (11 calls over two recordings), the five call discovery batch 2.5 to 6.8 s, the depth batch 2.5 to 3.8 s. A bare `eth_blockNumber` took 1.8 to 2.6 s, of which TLS setup was 1.0 to 1.8 s, so most of the difference from the 1.8 to 2.4 s reported on 25 Oct earlier is connection setup that a reused `aiohttp` session does not pay again.
+Each POST opened a fresh TLS connection from this host. `eth_simulateV1` took 3.2 to 7.2 s per call (11 calls over two recordings), the five call discovery batch 2.5 to 6.8 s, the depth batch 2.5 to 3.8 s. A bare `eth_blockNumber` took 1.8 to 2.6 s, of which TLS setup was 1.0 to 1.8 s.
+
+Over one kept alive `aiohttp.ClientSession`, as the simulator uses, the two recorded COW requests (`cow.json`, the first run and the sized run, at `0x1aa4e80`) sent twice each in turn took 2.44 s (the first, which opened the connection), then 0.82, 0.56 and 0.57 s, and every answer equalled the recorded one.
