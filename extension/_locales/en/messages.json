@@ -4,7 +4,7 @@
     "description": "Extension name. Keep it exactly as written, untranslated."
   },
   "extDescription": {
-    "message": "Warns before you sign on 8 EVM chains, reports Unknown when a check cannot complete, and flags known phishing sites.",
+    "message": "Warns before you sign on 9 EVM chains, reports Unknown when a check cannot complete, and flags known phishing sites.",
     "description": "Extension description on the extensions page and the store. At most 132 characters. It warns; it never claims to block."
   }
 }
