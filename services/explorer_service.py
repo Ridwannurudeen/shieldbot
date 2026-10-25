@@ -497,11 +497,15 @@ class ExplorerService:
         data = result.data
         creator = data.get("creator_address_hash")
         tx_hash = data.get("creation_transaction_hash")
+        creation_status = data.get("creation_status")
         if (
             isinstance(data.get("hash"), str)
             and data["hash"].lower() == address.lower()
             and data.get("is_contract") is True
-            and data.get("creation_status") == "success"
+            and (
+                creation_status == "success"
+                or (chain_id == 677 and "creation_status" not in data)
+            )
             and _is_address(creator)
             and isinstance(tx_hash, str)
             and re.fullmatch(r"0x[0-9a-fA-F]{64}", tx_hash)
