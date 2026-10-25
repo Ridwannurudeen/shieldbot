@@ -32,6 +32,7 @@ def ledger(monkeypatch):
     import adapters.evm_base
     import api
     import services.dex_service
+    import services.contract_service
     import services.explorer_service
     import services.phishing_service
     import services.robinhood_simulation
@@ -42,6 +43,7 @@ def ledger(monkeypatch):
         adapters.evm_base,
         api,
         services.dex_service,
+        services.contract_service,
         services.explorer_service,
         services.phishing_service,
         services.robinhood_simulation,
@@ -485,7 +487,76 @@ async def test_unsupported_goplus_chain_is_unknown_without_a_request_or_breaker_
     assert result["data"] == {}
     session.assert_not_called()
     breaker_check.assert_not_called()
-    assert _chain_counts(ledger, 677) == {"goplus_token": _counts(unknown=1)}
+    address_record = {
+        "status": "ok", "reason": None,
+        "data": {"address": TOKEN, "data_source": "SlowMist", "stealing_attack": "1"},
+    }
+    with patch.object(
+        ScamDatabase, "fetch_address_security", new=AsyncMock(return_value=address_record),
+    ):
+        matches = await ScamDatabase().check_address(TOKEN, chain_id=677)
+    assert matches[0]["severity"] == "block"
+    assert _chain_counts(ledger, 677) == {
+        "goplus_token": _counts(unknown=1),
+        "goplus_address": _counts(answered=1),
+    }
+
+
+@pytest.mark.asyncio
+async def test_botchain_scam_lookup_records_address_outcome_by_chain_and_keeps_chain_independent_entry(
+    ledger, monkeypatch
+):
+    import utils.scam_db
+    from utils.scam_db import ScamDatabase
+
+    monkeypatch.setattr(utils.scam_db, "_GOPLUS_ADDRESS_CACHE", {})
+    monkeypatch.setattr(utils.scam_db, "_GOPLUS_ADDRESS_INFLIGHT", {})
+    response = {
+        "status": "ok", "reason": None,
+        "data": {"address": TOKEN, "data_source": "SlowMist", "stealing_attack": "1"},
+    }
+    patcher = _aiohttp("utils.scam_db", (200, {"code": 1, "result": response["data"]}))
+    try:
+        await ScamDatabase.fetch_address_security(TOKEN)
+        matches = await ScamDatabase().check_address(TOKEN, chain_id=677)
+    finally:
+        patcher.stop()
+
+    assert matches[0]["severity"] == "block"
+    assert _chain_counts(ledger, 677) == {"goplus_address": _counts(answered=1)}
+    assert _chain_counts(ledger, None) == {"goplus_address": _counts(answered=1)}
+
+
+@pytest.mark.asyncio
+async def test_botchain_contract_scan_records_token_and_creator_address_lookups(ledger, mock_web3_client):
+    from services.contract_service import ContractService
+    from utils.scam_db import ScamDatabase
+
+    creator = "0x" + "cd" * 20
+    mock_web3_client.get_contract_creation_info.return_value = {
+        "creator": creator, "age_days": 138,
+    }
+    clean_record = {
+        "status": "ok", "reason": None,
+        "data": {"address": TOKEN, "data_source": "", "stealing_attack": "0"},
+    }
+    creator_record = {
+        "status": "ok", "reason": None,
+        "data": {"address": creator, "data_source": "", "stealing_attack": "0"},
+    }
+    with (
+        patch.object(
+            ScamDatabase, "fetch_address_security",
+            new=AsyncMock(side_effect=[clean_record, creator_record]),
+        ),
+        patch("services.contract_service.BSCSCAN_DELAY", 0),
+    ):
+        data = await ContractService(mock_web3_client, ScamDatabase()).fetch_contract_data(
+            TOKEN, chain_id=677,
+        )
+
+    assert data["creator_address"] == creator
+    assert _chain_counts(ledger, 677) == {"goplus_address": _counts(answered=2)}
 
 
 @pytest.mark.asyncio
