@@ -15,6 +15,7 @@ from adapters.botchain import (
     WHITELISTED_ROUTERS,
     BotChainAdapter,
 )
+from tests.test_api import client as api_client  # noqa: F401 (pytest fixture)
 from tests.test_bot_app import bot_module  # noqa: F401 (pytest fixture)
 
 TOKEN = "0x" + "ab" * 20
@@ -158,3 +159,49 @@ async def test_bot_contract_scan_passes_a_request_deadline_to_analyzers(monkeypa
     context = registry.run_all.await_args.args[0]
     assert isinstance(context, AnalysisContext)
     assert context.extra["deadline"] - before == pytest.approx(25, abs=0.1)
+
+
+def test_firewall_deadline_follows_adapter_simulation_support(monkeypatch):
+    import api
+
+    monkeypatch.setattr(
+        api, "web3_client",
+        SimpleNamespace(supports_honeypot_simulation=lambda chain_id: chain_id in {42161, 4663}),
+    )
+    assert api._firewall_deadline(SimpleNamespace(chainId=42161), 100.0) == (
+        100.0 + api.FIREWALL_REQUEST_DEADLINE_SECONDS
+    )
+    assert api._firewall_deadline(SimpleNamespace(chainId=4663), 100.0) == (
+        100.0 + api.FIREWALL_REQUEST_DEADLINE_SECONDS
+    )
+    assert api._firewall_deadline(SimpleNamespace(chainId=56), 100.0) is None
+
+
+@pytest.mark.parametrize(
+    "chain_id, expected, excluded",
+    [
+        (4663, "sequencer's soft finality, final on the parent chain once the batch is posted", "BOT Chain"),
+        (677, "Compare the evidence hash with the BOT Chain transaction's VerdictRecorded event", "sequencer"),
+    ],
+)
+def test_verdict_permalink_verification_copy_is_chain_specific(
+    api_client, monkeypatch, chain_id, expected, excluded,
+):
+    import api
+
+    stored = {
+        "chain_id": chain_id, "subject": TOKEN, "verdict": "HIGH", "evidence_hash": "0xabc",
+        "observed_block": 1, "canonical": "{}", "created_at": 1.0, "onchain_status": "confirmed",
+        "registry": "0x123", "tx_hash": "0x456", "onchain_error": None,
+    }
+    api.web3_client.validate_chain_id.side_effect = lambda value: value
+    api.container = SimpleNamespace(
+        db=SimpleNamespace(get_latest_verdict_evidence=AsyncMock(return_value=stored)),
+    )
+
+    response = api_client.get(f"/api/verdict/{chain_id}/{TOKEN}")
+
+    assert response.status_code == 200
+    verify = response.json()["verify"]
+    assert expected in verify
+    assert excluded not in verify
