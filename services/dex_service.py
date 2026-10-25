@@ -1,10 +1,12 @@
 import aiohttp
 import logging
 import math
+import os
 import time
 
 from core.circuit_breaker import provider_breakers
 from core.unknown_ledger import unknown_ledger
+from services.botchain_market import BotChainMarket
 from utils.chain_info import get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
@@ -14,9 +16,18 @@ logger = logging.getLogger(__name__)
 # Ethereum's state), those pairs can crowd out the requested chain's.
 DEX_API_URL = "https://api.dexscreener.com/token-pairs/v1/{chain}/{address}"
 
+# Chains DexScreener does not list, read from their own DEX in the same shape. One provider per
+# chain for the process, so its pool list and price caches serve every scan.
+MARKET_PROVIDERS = {677: BotChainMarket}
+BOTCHAIN_RPC_URL = "https://rpc.botchain.ai"
+
 
 class DexService:
-    """Fetches token market data from DexScreener API."""
+    """Fetches token market data from DexScreener API, or from a chain's own DEX where
+    MARKET_PROVIDERS names one."""
+
+    def __init__(self):
+        self._providers = {}
 
     async def fetch_token_market_data(self, address: str, chain_id: int = 56) -> dict:
         defaults = {
@@ -44,6 +55,19 @@ class DexService:
                         coverage={field: False for field in required})
 
         try:
+            provider = MARKET_PROVIDERS.get(chain_id)
+            if provider is not None:
+                if chain_id not in self._providers:
+                    self._providers[chain_id] = provider(os.getenv('BOTCHAIN_RPC_URL') or BOTCHAIN_RPC_URL)
+                result = await self._providers[chain_id].token_market(address)
+                if any(result['coverage'].values()):
+                    outcome = 'answered'
+                elif result['reason'].startswith('No BDEX pools'):
+                    outcome = 'unknown'
+                else:
+                    outcome = 'failed'
+                unknown_ledger.record('bdex', chain_id, outcome)
+                return result
             slug = get_dexscreener_slug(chain_id)
             if not slug:
                 defaults['reason'] = f'DexScreener unsupported for chain {chain_id}'
