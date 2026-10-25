@@ -1,4 +1,4 @@
-"""BOT Chain approvals stay inside the explicitly prefixed Telegram rescue path."""
+"""BOT Chain approvals use the registered Telegram rescue path."""
 
 import asyncio
 import re
@@ -400,7 +400,6 @@ async def test_rescue_without_a_prefix_keeps_the_existing_chain_picker_path(bot_
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
 async def test_botchain_is_registered_in_picker_and_prefix_table(bot_module):
     from utils.chain_info import parse_chain_prefix
 
@@ -562,7 +561,7 @@ async def test_botchain_reply_send_failure_falls_back_when_progress_edit_fails(b
 
 
 @pytest.mark.asyncio
-async def test_help_describes_botchain_approval_scanning_without_changing_supported_chains(bot_module):
+async def test_help_describes_botchain_approval_scanning_and_supported_chains(bot_module):
     update = MagicMock()
     update.message.reply_text = AsyncMock()
 
