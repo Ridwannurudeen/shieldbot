@@ -501,7 +501,8 @@ const CHAIN_NAMES = {
   137: 'Polygon',
   10: 'OP',
   204: 'opBNB',
-  4663: 'Robinhood'
+  4663: 'Robinhood',
+  677: 'BOT Chain'
 };
 const CHAIN_COLORS = {
   56: 'secondary',
@@ -511,7 +512,8 @@ const CHAIN_COLORS = {
   137: 'secondary',
   10: 'secondary',
   204: 'secondary',
-  4663: 'secondary'
+  4663: 'secondary',
+  677: 'secondary'
 };
 const EXPLORERS = {
   56: 'https://bscscan.com',
@@ -521,7 +523,8 @@ const EXPLORERS = {
   137: 'https://polygonscan.com',
   10: 'https://optimistic.etherscan.io',
   204: 'https://opbnbscan.com',
-  4663: 'https://robinhoodchain.blockscout.com'
+  4663: 'https://robinhoodchain.blockscout.com',
+  677: 'https://scan.botchain.ai'
 };
 
 // Opaque badge backgrounds, so a hovered row cannot lower the text's contrast (each is at least 4.5:1).
@@ -1086,6 +1089,9 @@ const CHAIN_FILTERS = [{
 }, {
   label: 'Robinhood',
   val: '4663'
+}, {
+  label: 'BOT Chain',
+  val: '677'
 }];
 function threatKey(t) {
   return [t.type, t.chain_id, threatAddress(t).addr, t.victim_tx || t.attacker_tx || '', t.detected_at || t.created_at || ''].join(':');
