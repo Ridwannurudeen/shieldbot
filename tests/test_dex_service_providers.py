@@ -5,6 +5,7 @@ The BDEX replies are the recorded fixtures served by tests/test_botchain_market.
 DexScreener replies are tests/fixtures/dexscreener_replies.json. Nothing touches the network.
 """
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,8 +14,11 @@ import pytest
 
 import services.botchain_market as botchain_market
 import services.dex_service as dex_service
+from analyzers.market import MarketAnalyzer
+from core.analyzer import AnalysisContext
+from core.registry import RUN_ALL_DEADLINE_SECONDS
 from core.unknown_ledger import UnknownLedger
-from services.botchain_market import BotChainMarket
+from services.botchain_market import REQUIRED, BotChainMarket
 from services.dex_service import MARKET_PROVIDERS, DexService
 from tests.test_botchain_market import API, COW, PRICES, RPC, ZERO, Clock, Response, Server
 from utils.chain_info import CHAIN_INFO
@@ -194,3 +198,42 @@ async def test_usdt_on_ethereum_reads_the_same_as_before_the_hook(ledger):
     assert result["liquidity_usd"] == 50152955.91
     assert result["low_liquidity_flag"] is False
     assert ledger.for_chain(1)["dexscreener"]["answered"] == 1
+
+
+class SlowResponse(Response):
+    """A reply that arrives long after the provider deadline."""
+
+    async def json(self, content_type="application/json"):
+        await asyncio.sleep(30)
+        return await super().json(content_type)
+
+
+@pytest.mark.asyncio
+async def test_a_bdex_lookup_past_the_deadline_is_a_reasoned_unknown_and_keeps_its_prices(
+    clock, ledger, monkeypatch
+):
+    assert dex_service.PROVIDER_DEADLINE_SECONDS == RUN_ALL_DEADLINE_SECONDS - 2
+    monkeypatch.setattr(dex_service, "PROVIDER_DEADLINE_SECONDS", 0.2)
+    service = DexService()
+    slow = Server()
+    slow.rpc_fault = lambda body: SlowResponse(200, [slow.answer(row) for row in body])
+    result, _ = await botchain(service, COW, slow)
+
+    assert result["status"] == "unknown"
+    assert result["coverage"] == {field: False for field in REQUIRED}
+    assert result["low_liquidity_flag"] is None
+    assert result["reason"] == "BDEX lookup did not finish within the 0.2 s scan deadline"
+    entry = ledger.for_chain(677)["bdex"]
+    assert (entry["answered"], entry["unknown"], entry["failed"]) == (0, 0, 1)
+
+    analyzer = MarketAnalyzer(service)
+    with patch("services.botchain_market.aiohttp.ClientSession", slow.session()):
+        analysis = await analyzer.analyze(AnalysisContext(address=COW, chain_id=677, is_token=True))
+    assert analysis.error is None
+    assert analysis.flags == [
+        "Market data unknown: BDEX lookup did not finish within the 0.2 s scan deadline"
+    ]
+
+    # The COW price answered before the cut, so the next scan does not ask it again.
+    _, fast = await botchain(service, COW)
+    assert COW not in fast.prices_asked()

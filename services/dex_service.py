@@ -1,10 +1,12 @@
 import aiohttp
+import asyncio
 import logging
 import math
 import os
 import time
 
 from core.circuit_breaker import provider_breakers
+from core.registry import RUN_ALL_DEADLINE_SECONDS
 from core.unknown_ledger import unknown_ledger
 from services.botchain_market import BotChainMarket
 from utils.chain_info import get_dexscreener_slug
@@ -20,6 +22,10 @@ DEX_API_URL = "https://api.dexscreener.com/token-pairs/v1/{chain}/{address}"
 # chain for the process, so its pool list and price caches serve every scan.
 MARKET_PROVIDERS = {677: BotChainMarket}
 BOTCHAIN_RPC_URL = "https://rpc.botchain.ai"
+# A provider lookup ends a little before the analyzers' interactive cut, so a slow one returns its
+# own Unknown with a reason instead of being cancelled into an error row. Prices it fetched before
+# the bound stay in the provider's cache for the next scan.
+PROVIDER_DEADLINE_SECONDS = RUN_ALL_DEADLINE_SECONDS - 2
 
 
 class DexService:
@@ -59,7 +65,16 @@ class DexService:
             if provider is not None:
                 if chain_id not in self._providers:
                     self._providers[chain_id] = provider(os.getenv('BOTCHAIN_RPC_URL') or BOTCHAIN_RPC_URL)
-                result = await self._providers[chain_id].token_market(address)
+                try:
+                    result = await asyncio.wait_for(
+                        self._providers[chain_id].token_market(address), PROVIDER_DEADLINE_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    unknown_ledger.record('bdex', chain_id, 'failed')
+                    defaults['reason'] = (
+                        f'BDEX lookup did not finish within the {PROVIDER_DEADLINE_SECONDS} s scan deadline'
+                    )
+                    return defaults
                 if any(result['coverage'].values()):
                     outcome = 'answered'
                 elif result['reason'].startswith('No BDEX pools'):
