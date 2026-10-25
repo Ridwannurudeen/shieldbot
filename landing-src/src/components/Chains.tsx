@@ -19,6 +19,8 @@ interface Chain {
   launches: boolean;
   // Shown under the simulator when it covers only some of the chain's pools.
   simulationScope?: string;
+  // The sell simulation cell's label when nobody simulates; "GoPlus flags only" when unset.
+  unavailableLabel?: string;
   logo: ReactNode;
 }
 
@@ -145,6 +147,7 @@ const chains: Chain[] = [
     simulation: null,
     mempool: false,
     launches: false,
+    unavailableLabel: "Unknown",
     logo: (
       <svg viewBox="0 0 32 32" fill="none" className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" aria-hidden="true">
         <circle cx="16" cy="16" r="16" fill="#0C2A3A"/>
@@ -191,7 +194,7 @@ function CapabilityCell({
 
 function simulationCell(chain: Chain): { state: CellState; label: string; note?: string } {
   if (chain.simulation === null) {
-    return { state: "unavailable", label: "GoPlus flags only" };
+    return { state: "unavailable", label: chain.unavailableLabel ?? "GoPlus flags only" };
   }
   return {
     state: "available",
