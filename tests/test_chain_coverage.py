@@ -145,9 +145,9 @@ def test_arbitrum_reads_approval_history_in_wide_windows(coverage):
     }
 
 
-def test_botchain_has_no_sell_simulation_or_public_mempool(coverage):
+def test_botchain_simulates_the_sell_itself_and_has_no_public_mempool(coverage):
     capabilities = coverage.get(677).json()["capabilities"]
-    assert capabilities["sell_simulation"] == "none"
+    assert capabilities["sell_simulation"] == "eth_simulateV1"
     assert capabilities["verification"] == "blockscout"
     assert capabilities["public_mempool"] == "no"
     assert capabilities["approvals"] == {"history": "recent", "window_blocks": 24_000_000}

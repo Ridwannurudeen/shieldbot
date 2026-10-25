@@ -86,12 +86,14 @@ def test_mechanism_and_try_it_chain_maps_match_the_registry():
         assert set(ids) == set(chain_info())
 
 
-def test_bot_chain_row_does_not_claim_goplus_flags():
-    # GoPlus does not cover BOT Chain tokens and nothing simulates a sell there, so its cell reads Unknown.
+def test_bot_chain_row_claims_only_its_own_bdex_simulation():
+    # GoPlus does not cover BOT Chain tokens; the only sell simulation there is ShieldBot's own, on BDEX
+    # pools with WBOT, so the row names that scope and no GoPlus flags.
     row = re.search(r'\{\s*//[^\n]*\n\s*chainId: 677,(.*?)logo:', read(COMPONENTS / "Chains.tsx"), re.S)
     assert row, "Chains.tsx should have a BOT Chain row"
-    assert 'simulation: null,' in row.group(1)
-    assert 'unavailableLabel: "Unknown",' in row.group(1)
+    assert 'simulation: "ShieldBot",' in row.group(1)
+    assert 'simulationScope: "BDEX V2 and V3 pools with WBOT",' in row.group(1)
+    assert "unavailableLabel" not in row.group(1)
     assert 'label: chain.unavailableLabel ?? "GoPlus flags only"' in read(COMPONENTS / "Chains.tsx")
 
 

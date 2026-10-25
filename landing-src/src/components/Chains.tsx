@@ -144,10 +144,10 @@ const chains: Chain[] = [
     // Generic block mark: no third-party logo.
     chainId: 677,
     name: "BOT Chain",
-    simulation: null,
+    simulation: "ShieldBot",
     mempool: false,
     launches: false,
-    unavailableLabel: "Unknown",
+    simulationScope: "BDEX V2 and V3 pools with WBOT",
     logo: (
       <svg viewBox="0 0 32 32" fill="none" className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" aria-hidden="true">
         <circle cx="16" cy="16" r="16" fill="#0C2A3A"/>
@@ -388,9 +388,10 @@ export default function Chains() {
           <li>
             <span className="text-ink">Sell simulation:</span> honeypot.is
             simulates a buy and a sell on Ethereum, BNB Chain and Base, and
-            ShieldBot runs its own on supported Arbitrum and Robinhood Chain pool
-            routes. On Arbitrum those are pools pairing the token with WETH on
-            Uniswap V3, Uniswap V2 or SushiSwap. Elsewhere honeypot and tax flags
+            ShieldBot runs its own on supported Arbitrum, Robinhood Chain and BOT
+            Chain pool routes. On Arbitrum those are pools pairing the token with
+            WETH on Uniswap V3, Uniswap V2 or SushiSwap. On BOT Chain they are
+            BDEX V2 and V3 pools pairing the token with WBOT. Elsewhere honeypot and tax flags
             come from GoPlus alone and read Unknown when GoPlus has no answer.
             <details className="disclose">
               <summary>Why ShieldBot simulates on Arbitrum itself</summary>
