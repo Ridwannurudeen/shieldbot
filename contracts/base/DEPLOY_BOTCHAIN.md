@@ -26,13 +26,33 @@ systemctl is-active shieldbot-workers
 grep '^BACKGROUND_WORKERS=' /opt/shieldbot/.env
 ```
 
-If `shieldbot-workers` is active, it is the only sender. Put the 677 recorder key in the root-owned recorder environment file loaded by that unit, restart that unit, and read its `recorder ready` log with:
+If `shieldbot-workers` is active, it is the only sender. Put the 677 recorder key in the existing root-owned recorder environment file loaded by that unit. When running `--cutover` or `--rollback`, stop and start the workers unit around the command:
 
 ```bash
-journalctl -u shieldbot-workers
+SHA=<commit>
+if systemctl is-active --quiet shieldbot-workers; then
+  sudo systemctl stop shieldbot-workers
+  bash /root/shieldbot-deploy.sh --cutover "$SHA"
+  sudo systemctl start shieldbot-workers
+else
+  bash /root/shieldbot-deploy.sh --cutover "$SHA"
+fi
 ```
 
-Wrap every `--cutover` and `--rollback` with stopping and starting `shieldbot-workers`. If the workers unit is not active, the API unit follows the existing Robinhood sender pattern. Only the one active sender unit may load either recorder key. If the topology is unclear or more than one sender would load a key, stop here.
+For a rollback, use the backup directory printed by the deploy command:
+
+```bash
+BACKUP=<backup-directory>
+if systemctl is-active --quiet shieldbot-workers; then
+  sudo systemctl stop shieldbot-workers
+  bash /root/shieldbot-deploy.sh --rollback "$BACKUP"
+  sudo systemctl start shieldbot-workers
+else
+  bash /root/shieldbot-deploy.sh --rollback "$BACKUP"
+fi
+```
+
+If the workers unit is not active, the API unit follows the existing Robinhood sender pattern. Only the one active sender unit may load either recorder key. If the topology is unclear or more than one sender would load a key, stop here.
 
 ## 1. Create and install the recorder keystore
 
@@ -46,13 +66,19 @@ Never run a bare `cast wallet new`. Create the root-owned, mode 600 environment 
 
 ```bash
 sudo install -d -m 700 -o root -g root /etc/shieldbot
-sudo install -m 600 -o root -g root /dev/null /etc/shieldbot/recorder.env
-cast wallet decrypt-keystore botchain-recorder | sed 's/^/BOTCHAIN_RECORDER_PRIVATE_KEY=/' | sudo tee /etc/shieldbot/recorder.env >/dev/null
+sudo -v
+sudo grep -c '^ROBINHOOD_RECORDER_PRIVATE_KEY=' /etc/shieldbot/recorder.env
+sudo grep -c '^BOTCHAIN_RECORDER_PRIVATE_KEY=' /etc/shieldbot/recorder.env || true
+cast wallet decrypt-keystore botchain-recorder | sed -n 's/^.*private key is: \(0x[0-9a-fA-F]*\)$/BOTCHAIN_RECORDER_PRIVATE_KEY=\1/p' | sudo tee -a /etc/shieldbot/recorder.env >/dev/null
+sudo grep -c '^ROBINHOOD_RECORDER_PRIVATE_KEY=' /etc/shieldbot/recorder.env
+sudo grep -c '^BOTCHAIN_RECORDER_PRIVATE_KEY=' /etc/shieldbot/recorder.env
+sudo awk -F= '/^BOTCHAIN_RECORDER_PRIVATE_KEY=/{print length($2)}' /etc/shieldbot/recorder.env
 sudo chown root:root /etc/shieldbot/recorder.env
 sudo chmod 600 /etc/shieldbot/recorder.env
 ```
 
 Enter the keystore password only at the prompt. Clear the terminal after the command. Do not copy the key into chat, shell history, `/opt/shieldbot/.env`, or any other file. The recorder key belongs only in the environment file loaded by the single active sender.
+Stop if either recorder key count is not exactly `1`, or if the private key value length is not `66`.
 
 ## 2. Fund the owner and recorder
 
@@ -141,7 +167,17 @@ BOTCHAIN_VERDICT_REGISTRY=<registry address>
 BOTCHAIN_RPC_URL=https://rpc.botchain.ai
 ```
 
-The `BOTCHAIN_RECORDER_PRIVATE_KEY` line stays in the root-owned, mode 600 recorder environment file loaded only by the active sender unit. Restart that one sender unit. Read its `recorder ready` log and confirm the line names chain 677. Confirm there are no repeated restarts for 20 seconds.
+The `BOTCHAIN_RECORDER_PRIVATE_KEY` line stays in the root-owned, mode 600 recorder environment file loaded only by the active sender unit. Restart that one sender unit and read its log. Confirm the `recorder ready` line names chain 677 and there are no repeated restarts for 20 seconds:
+
+```bash
+if systemctl is-active --quiet shieldbot-workers; then
+  sudo systemctl restart shieldbot-workers
+  sudo journalctl -u shieldbot-workers -n 100 --no-pager
+else
+  sudo systemctl restart shieldbot
+  sudo journalctl -u shieldbot -n 100 --no-pager
+fi
+```
 
 ## 8. Smoke check
 
@@ -170,8 +206,28 @@ Fill this table for every candidate before scanning. Add rows when there are mor
 
 Scan each selected token with `/token bot:<address>` as its first scan inside the bot's cache window. Count only five distinct successful registry receipts from the expected registry whose evidence hashes match the corresponding `/api/verdict/677/<address>` responses. Describe the result as **five token checks recorded**. Do not claim that it meets the team's requirement until the team confirms.
 
-All five records are separate `record()` transactions (the publisher sends `RECORD_SELECTOR`, `services/verdict_publisher.py:96-97`; it never calls `recordBatch`), and because of `onlyRecorder` (`contracts/base/src/ShieldBotVerdictRegistry.sol:91,117-119`) every one of them comes from the single recorder wallet. If the team requires interactions from different user wallets, these records do not satisfy it. ShieldBot never fakes users with its own wallets; the honest option is then a contract that users call themselves, for example a guarded action, written up as a follow up after the team answers.
+All five records are separate `record()` transactions (the publisher sends `RECORD_SELECTOR`, `services/verdict_publisher.py:100`; it never calls `recordBatch`), and because of `onlyRecorder` (`contracts/base/src/ShieldBotVerdictRegistry.sol:91,117-119`) every one of them comes from the single recorder wallet. If the team requires interactions from different user wallets, these records do not satisfy it. ShieldBot never fakes users with its own wallets; the honest option is then a contract that users call themselves, for example a guarded action, written up as a follow up after the team answers.
 
 ## Rollback of P3 configuration
 
-If P3 needs to roll back, use the deploy rollback to restore the previous release. Remove only the 677 registry and RPC settings and the 677 recorder entry from the active sender unit, restart that sender, and verify health. Confirm 4663 publishing remains on and 677 publishing is off. The 677 registry remains onchain. Its deployment is not reversible.
+If P3 needs to roll back, use the deploy rollback to restore the previous release. When the workers unit is active, stop it before the rollback and start it after the rollback completes:
+
+```bash
+BACKUP=<backup-directory>
+if systemctl is-active --quiet shieldbot-workers; then
+  sudo systemctl stop shieldbot-workers
+  bash /root/shieldbot-deploy.sh --rollback "$BACKUP"
+  sudo systemctl start shieldbot-workers
+else
+  bash /root/shieldbot-deploy.sh --rollback "$BACKUP"
+fi
+```
+
+Remove only the 677 registry and RPC settings from `/opt/shieldbot/.env` and only the BOTCHAIN key line from the recorder environment file:
+
+```bash
+sudo sed -i '/^BOTCHAIN_VERDICT_REGISTRY=/d; /^BOTCHAIN_RPC_URL=/d' /opt/shieldbot/.env
+sudo sed -i '/^BOTCHAIN_RECORDER_PRIVATE_KEY=/d' /etc/shieldbot/recorder.env
+```
+
+Do not remove or recreate `/etc/shieldbot/recorder.env`. Restart the active sender as shown in step 7 and verify health. Confirm 4663 publishing remains on and 677 publishing is off. The 677 registry remains onchain. Its deployment is not reversible.
