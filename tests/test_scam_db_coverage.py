@@ -462,6 +462,32 @@ async def test_botchain_address_label_severity_and_token_record_separation():
 
 
 @pytest.mark.asyncio
+async def test_botchain_fake_token_label_is_block_severity():
+    response = {
+        "status": "ok", "reason": None,
+        "data": {"address": ADDRESS, "data_source": "SlowMist", "fake_token": "1"},
+    }
+    with patch.object(ScamDatabase, "fetch_address_security", new=AsyncMock(return_value=response)):
+        matches = await ScamDatabase().check_address(ADDRESS, chain_id=677)
+    assert matches[0]["severity"] == "block"
+    assert "fake_token" in matches[0]["reason"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("data_source", ["", "   "])
+async def test_botchain_block_label_without_data_source_is_high(data_source):
+    response = {
+        "status": "ok", "reason": None,
+        "data": {"address": ADDRESS, "data_source": data_source, "stealing_attack": "1"},
+    }
+    with patch.object(ScamDatabase, "fetch_address_security", new=AsyncMock(return_value=response)):
+        matches = await ScamDatabase().check_address(ADDRESS, chain_id=677)
+    assert len(matches) == 1
+    assert matches[0]["severity"] == "high"
+    assert "stealing_attack" in matches[0]["reason"]
+
+
+@pytest.mark.asyncio
 async def test_recorded_goplus_flagged_address_fixture_uses_direct_label_severity():
     with patch.object(
         ScamDatabase, "fetch_address_security",
@@ -547,6 +573,40 @@ async def test_creator_address_is_checked_only_when_creation_lookup_supplies_it(
 
 
 @pytest.mark.asyncio
+async def test_creator_task_joins_the_creation_lookup_deadline(mock_web3_client):
+    import asyncio
+    import time
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    finished = asyncio.Event()
+    mock_web3_client.get_contract_creation_info.return_value = {
+        "creator": CREATOR, "age_days": 138,
+    }
+
+    async def slow_creator(address):
+        started.set()
+        await release.wait()
+        finished.set()
+        return {"status": "ok", "reason": None, "data": {"address": address}}
+
+    scam_db = MagicMock(
+        check_address=AsyncMock(return_value=ScamMatches()),
+        fetch_address_security=slow_creator,
+    )
+    with patch("services.contract_service.BSCSCAN_DELAY", 0):
+        data = await ContractService(mock_web3_client, scam_db).fetch_contract_data(
+            ADDRESS, chain_id=677, deadline=time.monotonic() + 0.55,
+        )
+    assert started.is_set()
+    assert data["contract_age_days"] == 138
+    assert data["creator_address_status"] == "unknown"
+    assert data["creator_address_pending"] is True
+    release.set()
+    await finished.wait()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "label",
     ["stealing_attack", "phishing_activities", "honeypot_related_address", "number_of_malicious_contracts_created"],
@@ -609,3 +669,35 @@ async def test_botchain_scope_note_names_creator_availability(mock_web3_client, 
         AnalysisContext(ADDRESS, chain_id=677, is_token=True)
     )
     assert structural.data["notes"][0] == expected
+
+
+@pytest.mark.asyncio
+async def test_creator_result_is_used_when_token_address_lookup_failed(mock_web3_client):
+    data = {
+        "is_contract": True, "is_verified": True, "contract_age_days": 100,
+        "coverage": {"scam_database": False},
+        "reason": "Scam database unavailable: GoPlus address security: GoPlus HTTP 503",
+        "creator_address_status": "ok", "creator_address": CREATOR,
+        "creator_address_labels": {"phishing_activities": "1"}, "scam_matches": [],
+    }
+    structural = await StructuralAnalyzer(
+        MagicMock(fetch_contract_data=AsyncMock(return_value=data))
+    ).analyze(AnalysisContext(ADDRESS, chain_id=677, is_token=True))
+    assert not any(note.startswith("Scam check:") for note in structural.data["notes"])
+    assert structural.score == 15
+    assert structural.flags == [
+        f"Creator {CREATOR} carries GoPlus address labels: phishing_activities"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_creator_pending_note_names_the_deadline(mock_web3_client):
+    data = {
+        "is_contract": True, "is_verified": True, "contract_age_days": 100,
+        "coverage": {"scam_database": True}, "creator_address_pending": True,
+        "scam_matches": [],
+    }
+    structural = await StructuralAnalyzer(
+        MagicMock(fetch_contract_data=AsyncMock(return_value=data))
+    ).analyze(AnalysisContext(ADDRESS, chain_id=677, is_token=True))
+    assert "Creator labels not checked before the request deadline" in structural.data["notes"]

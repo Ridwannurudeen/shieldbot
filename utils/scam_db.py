@@ -40,6 +40,7 @@ _GOPLUS_ADDRESS_INFLIGHT = {}
 _GOPLUS_RETRY_CODES = (2, 4029)
 _GOPLUS_ATTEMPTS = 3
 _GOPLUS_BACKOFF = 0.5
+GOPLUS_ADDRESS_TIMEOUT_SECONDS = 8
 
 # Addresses that must never be blacklisted (routers, WBNB, stables, etc.)
 _PROTECTED_ADDRESSES: set[str] = set()
@@ -57,6 +58,23 @@ COMMUNITY_BLACKLIST_TTL = 30 * 86400
 # How often a process that runs no hunter sweep (the bot, and the API when the sweep runs in
 # workers.py) rereads the persisted blacklist: as often as the sweep prunes and reloads it.
 BLACKLIST_RELOAD_SECONDS = 1800
+
+
+def address_security_outcome(response: dict) -> str:
+    record = response.get('data')
+    valid_record = (
+        isinstance(record, dict)
+        and bool(record)
+        and all(
+            isinstance(label, str) and isinstance(value, (str, int, float, bool))
+            for label, value in record.items()
+        )
+    )
+    if response.get('status') == 'ok' and valid_record:
+        return 'answered'
+    if response.get('reason') == 'GoPlus returned no address record':
+        return 'unknown'
+    return 'failed'
 
 
 def load_protected_addresses():
@@ -151,7 +169,20 @@ class ScamDatabase:
         )
 
     async def _check_goplus_address(self, address: str) -> ScamMatches:
-        response = await self.fetch_address_security(address)
+        async def fetch_and_record():
+            try:
+                response = await asyncio.wait_for(
+                    self.fetch_address_security(address),
+                    timeout=GOPLUS_ADDRESS_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                response = {'status': 'unknown', 'reason': 'timed out', 'data': {}}
+            unknown_ledger.record('goplus_address', 677, address_security_outcome(response))
+            return response
+
+        task = asyncio.create_task(fetch_and_record())
+        task.add_done_callback(lambda pending: pending.exception() if not pending.cancelled() else None)
+        response = await asyncio.shield(task)
         record = response.get('data')
         valid_record = (
             isinstance(record, dict)
@@ -185,16 +216,20 @@ class ScamDatabase:
                 f'{label}: {value}' if label == 'number_of_malicious_contracts_created'
                 else label
             )
-            if label in {'stealing_attack', 'phishing_activities'}:
+            if label in {'stealing_attack', 'phishing_activities', 'fake_token'}:
                 block_labels.append(rendered)
             elif label in {
                 'honeypot_related_address', 'number_of_malicious_contracts_created',
-                'fake_token', 'cybercrime', 'financial_crime', 'sanctioned',
+                'cybercrime', 'financial_crime', 'sanctioned',
                 'blackmail_activities',
             }:
                 high_labels.append(rendered)
             else:
                 note_labels.append(label)
+
+        if block_labels and not str(record.get('data_source') or '').strip():
+            high_labels.extend(block_labels)
+            block_labels = []
 
         matches = []
         for labels, severity in ((block_labels, 'block'), (high_labels, 'high')):

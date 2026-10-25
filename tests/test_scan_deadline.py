@@ -9,7 +9,6 @@ import pytest
 import utils.scam_db as scam_db
 from agent.tools import AgentTools
 from analyzers.honeypot import HoneypotAnalyzer
-from analyzers.structural import StructuralAnalyzer
 from core.analyzer import AnalysisContext, AnalyzerResult
 from core.extension_formatter import is_scan_incomplete
 from core.registry import BACKGROUND_SCAN_DEADLINE_SECONDS, RUN_ALL_DEADLINE_SECONDS, AnalyzerRegistry
@@ -356,32 +355,44 @@ async def test_a_background_scan_outlasts_a_full_simulator_request_that_an_inter
 
 
 @pytest.mark.asyncio
-async def test_hung_botchain_address_lookup_is_cut_by_the_registry_deadline(short_deadline, mock_web3_client):
+async def test_botchain_address_lookup_has_its_own_timeout_on_the_contract_service_path(
+    monkeypatch, mock_web3_client,
+):
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def slow_address_lookup(address, flight_key):
+    async def slow_response():
         started.set()
         await release.wait()
-        return {"status": "ok", "reason": None, "data": {"address": address}}
+        return {"code": 1, "result": {"address": TOKEN, "data_source": "SlowMist"}}
+
+    response = MagicMock(status=200)
+    response.json = AsyncMock(side_effect=slow_response)
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=response)
+    context.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.get.return_value = context
 
     service = ContractService(mock_web3_client, ScamDatabase())
+    monkeypatch.setattr(scam_db, "_GOPLUS_ADDRESS_CACHE", {})
+    monkeypatch.setattr(scam_db, "_GOPLUS_ADDRESS_INFLIGHT", {})
+    assert scam_db.GOPLUS_ADDRESS_TIMEOUT_SECONDS == 8
     with (
-        patch.object(ScamDatabase, "_fetch_address_security", new=slow_address_lookup),
+        patch("utils.scam_db.aiohttp.ClientSession") as client,
+        patch("utils.scam_db.GOPLUS_ADDRESS_TIMEOUT_SECONDS", 0.01),
         patch("services.contract_service.BSCSCAN_DELAY", 0),
     ):
-        scan = asyncio.create_task(registry_of(
-            StructuralAnalyzer(service),
-        ).run_all(AnalysisContext(address=TOKEN, chain_id=677, is_token=True)))
-        await started.wait()
-        results = await scan
+        client.return_value.__aenter__.return_value = session
+        data = await service.fetch_contract_data(TOKEN, chain_id=677)
+        assert started.is_set()
         task = next(iter(scam_db._GOPLUS_ADDRESS_INFLIGHT.values()))
         assert not task.done()
         release.set()
-        await asyncio.sleep(0)
+        await task
         scam_db._GOPLUS_ADDRESS_INFLIGHT.clear()
 
-    assert results[0].error == "structural analysis unavailable (TimeoutError)"
-    risk = RiskEngine().compute_from_results(results)
-    assert risk["status"] == "unknown"
-    assert risk["coverage_reasons"]["structural"] == "structural analysis unavailable (TimeoutError)"
+    assert data["coverage"]["scam_database"] is False
+    assert data["reason"] == "Scam database unavailable: GoPlus address security: timed out"
+    assert data["token_security_unsupported"] is True
+    assert scam_db._GOPLUS_ADDRESS_CACHE[TOKEN.lower()]["status"] == "ok"

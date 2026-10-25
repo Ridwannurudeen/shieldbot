@@ -10,8 +10,10 @@ from typing import Optional
 from eth_utils import keccak
 
 from adapters.evm_base import BURN_ADDRESSES
+from core.unknown_ledger import unknown_ledger
 from services.launch_discovery import SOURCES, LaunchDiscoveryError, _decode_log, _quantity
 from services.robinhood_assets import OFFICIAL_LIST_WAIT_SECONDS
+from utils.scam_db import address_security_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -357,27 +359,17 @@ class ContractService:
             elif exemption is None:
                 creation_task = start(creation_lookup())
                 lookups['contract_age_days'] = creation_task
+                if chain_id == 677:
+                    async def creator_lookup():
+                        creation = await creation_task
+                        creator = creation.get('creator') if isinstance(creation, dict) else None
+                        if not isinstance(creator, str) or not re.fullmatch(r'0x[0-9a-fA-F]{40}', creator):
+                            return None
+                        response = await self.scam_db.fetch_address_security(creator)
+                        unknown_ledger.record('goplus_address', 677, address_security_outcome(response))
+                        return creator, response
 
-                def start_creator(creation):
-                    nonlocal creator_security_task
-                    if creator_security_task is not None:
-                        return
-                    creator = creation.get('creator') if isinstance(creation, dict) else None
-                    if isinstance(creator, str) and re.fullmatch(r'0x[0-9a-fA-F]{40}', creator):
-                        results['creator_address'] = creator
-                        creator_security_task = asyncio.create_task(
-                            self.scam_db.fetch_address_security(creator)
-                        )
-                        creator_security_task.add_done_callback(
-                            lambda pending: pending.exception() if not pending.cancelled() else None
-                        )
-
-                def check_creator(task):
-                    if chain_id != 677 or task.cancelled() or task.exception() is not None:
-                        return
-                    start_creator(task.result())
-
-                creation_task.add_done_callback(check_creator)
+                    creator_security_task = start(creator_lookup())
 
             if chain_id == 677:
                 results['token_security_unsupported'] = True
@@ -454,17 +446,11 @@ class ContractService:
                 results['coverage'] = {**results.get('coverage', {}), 'bytecode': False}
                 results['reason'] = '; '.join(filter(None, (results.get('reason'), 'Bytecode scan unavailable')))
 
-            if lookups:
-                await asyncio.wait(lookups.values(), timeout=wait_timeout())
-            if (
-                chain_id == 677
-                and 'contract_age_days' in lookups
-                and lookups['contract_age_days'].done()
-                and not lookups['contract_age_days'].cancelled()
-                and lookups['contract_age_days'].exception() is None
-                and creator_security_task is None
-            ):
-                start_creator(lookups['contract_age_days'].result())
+            pending_lookups = list(lookups.values())
+            if creator_security_task is not None:
+                pending_lookups.append(creator_security_task)
+            if pending_lookups:
+                await asyncio.wait(pending_lookups, timeout=wait_timeout())
             if exemption is not None:
                 results['coverage_exemptions'] = exemption
             creation_lookup_answered = False
@@ -497,18 +483,25 @@ class ContractService:
 
             if chain_id == 677:
                 if creator_security_task is not None:
-                    await asyncio.wait((creator_security_task,), timeout=wait_timeout())
                     if (
                         creator_security_task.done()
                         and not creator_security_task.cancelled()
                         and creator_security_task.exception() is None
                     ):
-                        creator_response = creator_security_task.result()
-                        results['creator_address_status'] = creator_response.get('status')
-                        results['creator_address_labels'] = creator_response.get('data', {})
-                        results['creator_address_reason'] = creator_response.get('reason')
+                        creator_result = creator_security_task.result()
+                        if creator_result is not None:
+                            creator, creator_response = creator_result
+                            results['creator_address'] = creator
+                            results['creator_address_status'] = creator_response.get('status')
+                            results['creator_address_labels'] = creator_response.get('data', {})
+                            results['creator_address_reason'] = creator_response.get('reason')
+                        else:
+                            results['creator_address_status'] = (
+                                'not_available' if creation_lookup_answered else 'unknown'
+                            )
                     else:
                         results['creator_address_status'] = 'unknown'
+                        results['creator_address_pending'] = not creator_security_task.done()
                 else:
                     results['creator_address_status'] = (
                         'not_available' if creation_lookup_answered else 'unknown'

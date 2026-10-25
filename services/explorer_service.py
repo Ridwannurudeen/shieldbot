@@ -30,6 +30,7 @@ BLOCKSCOUT_INSTANCES = {
 # Sourcify's /server/chains listed 453 chains without 677 on 25 Oct 2026; its
 # /server/v2/contract/677/<address> endpoint answers 400.
 SOURCIFY_UNSUPPORTED_CHAINS = {677}
+BLOCKSCOUT_WITHOUT_CREATION_STATUS = {677}
 
 
 # An answer holds for five minutes; a failed lookup is asked again after 30 seconds, so one
@@ -504,7 +505,10 @@ class ExplorerService:
             and data.get("is_contract") is True
             and (
                 creation_status == "success"
-                or (chain_id == 677 and "creation_status" not in data)
+                or (
+                    chain_id in BLOCKSCOUT_WITHOUT_CREATION_STATUS
+                    and "creation_status" not in data
+                )
             )
             and _is_address(creator)
             and isinstance(tx_hash, str)

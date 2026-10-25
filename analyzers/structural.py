@@ -74,6 +74,12 @@ class StructuralAnalyzer(Analyzer):
                         'Creator not available from Blockscout. '
                         'GoPlus token security does not cover BOT Chain.'
                     )
+                elif data.get('creator_address_pending'):
+                    notes.append(
+                        'Scam check: GoPlus address labels checked for the token. '
+                        'GoPlus token security does not cover BOT Chain.'
+                    )
+                    notes.append('Creator labels not checked before the request deadline')
                 else:
                     notes.append(
                         'Scam check: GoPlus address labels checked for the token. '
@@ -81,30 +87,33 @@ class StructuralAnalyzer(Analyzer):
                         'GoPlus token security does not cover BOT Chain.'
                     )
                 notes.extend(data.get('address_label_notes', ()))
-                creator_labels = (
-                    data.get('creator_address_labels', {})
-                    if data.get('creator_address_status') == 'ok' else {}
+            creator_labels = (
+                data.get('creator_address_labels', {})
+                if data.get('creator_address_status') == 'ok' else {}
+            )
+            selected = []
+            other = []
+            for label, value in creator_labels.items():
+                if label in {'address', 'data_source'}:
+                    continue
+                flagged = (
+                    str(value).isdigit() and int(value) > 0
+                    if label == 'number_of_malicious_contracts_created'
+                    else str(value) == '1'
                 )
-                selected = []
-                other = []
-                for label, value in creator_labels.items():
-                    if label in {'address', 'data_source'}:
-                        continue
-                    flagged = (
-                        str(value).isdigit() and int(value) > 0
-                        if label == 'number_of_malicious_contracts_created'
-                        else str(value) == '1'
-                    )
-                    if flagged:
-                        (selected if label in CREATOR_SCORING_LABELS else other).append(label)
-                notes.extend(
-                    f'Creator address label: {label}' for label in other
+                if flagged:
+                    (selected if label in CREATOR_SCORING_LABELS else other).append(label)
+            notes.extend(
+                f'Creator address label: {label}' for label in other
+            )
+            if selected:
+                # Blockscout names the factory or launchpad contract as creator for its child tokens,
+                # so one factory label can flag every child. This flag names that address and adds
+                # 15 without a floor.
+                data['creator_address_flag'] = (
+                    f"Creator {data['creator_address']} carries GoPlus address labels: "
+                    + ', '.join(selected)
                 )
-                if selected:
-                    data['creator_address_flag'] = (
-                        f"Creator {data['creator_address']} carries GoPlus address labels: "
-                        + ', '.join(selected)
-                    )
         if exemptions:
             named = {'is_verified': 'verification', 'contract_age_days': 'contract age'}
             notes.append(
