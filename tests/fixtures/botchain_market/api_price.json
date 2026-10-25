@@ -1,0 +1,505 @@
+{
+ "0xd5452816194a3784dba983426cce7c122f4abd30": {
+  "data": {
+   "path": [
+    "0xd5452816194a3784dba983426cce7c122f4abd30",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v3"
+   ],
+   "pools": [
+    "0x64f418471a1a7932a190e10da5a8551db5abec05"
+   ],
+   "price": "12.3989883651098719616",
+   "token": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  "success": true
+ },
+ "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c": {
+  "data": {
+   "path": [
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "1",
+   "token": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  "success": true
+ },
+ "0x5af9a0e7472134a6a5ad02a7d327e83ddd24b337": {
+  "data": {
+   "path": [
+    "0x5af9a0e7472134a6a5ad02a7d327e83ddd24b337",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2"
+   ],
+   "pools": [
+    "0x8cdd0050c7ba9231c9ca65dac73f3375086acad2"
+   ],
+   "price": "0.001443182206334598176",
+   "token": "0x5af9a0e7472134a6a5ad02a7d327e83ddd24b337"
+  },
+  "success": true
+ },
+ "0x04bbf9ec920e8996bb96e5c451f621e5df6d9999": {
+  "data": {
+   "path": [],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "0",
+   "token": "0x04bbf9ec920e8996bb96e5c451f621e5df6d9999"
+  },
+  "success": true
+ },
+ "0x0000000000000000000000000000000000000000": {
+  "data": {
+   "path": [],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "0",
+   "token": "0x0000000000000000000000000000000000000000"
+  },
+  "success": true
+ },
+ "0x41346bb2391669628b44d3b8cfc02b20f85c7d90": {
+  "data": {
+   "path": [],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "0",
+   "token": "0x41346bb2391669628b44d3b8cfc02b20f85c7d90"
+  },
+  "success": true
+ },
+ "0x432c154b4fe3f81a024ae1bc7835d15c0f073b5e": {
+  "data": {
+   "path": [
+    "0x432c154b4fe3f81a024ae1bc7835d15c0f073b5e",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2"
+   ],
+   "pools": [
+    "0x30dc23f45b6206a172733dfe6a53a7dada7d6e6c"
+   ],
+   "price": "16.757766742042613226",
+   "token": "0x432c154b4fe3f81a024ae1bc7835d15c0f073b5e"
+  },
+  "success": true
+ },
+ "0x4a781889ce38c08b86b02e084a5a19609376b857": {
+  "data": {
+   "path": [
+    "0x4a781889ce38c08b86b02e084a5a19609376b857",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2"
+   ],
+   "pools": [
+    "0xecf9855597e9b46b8b9d4e602b73ecb9822459aa"
+   ],
+   "price": "0.00001494493727226762594",
+   "token": "0x4a781889ce38c08b86b02e084a5a19609376b857"
+  },
+  "success": true
+ },
+ "0x546307af427902a75771434df831d88219784e19": {
+  "data": {
+   "path": [
+    "0x546307af427902a75771434df831d88219784e19",
+    "0xd5452816194a3784dba983426cce7c122f4abd30",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v3",
+    "v3"
+   ],
+   "pools": [
+    "0x822dc160cc971510cf87999004a28b4a7aefd082",
+    "0x64f418471a1a7932a190e10da5a8551db5abec05"
+   ],
+   "price": "5.640695389210499082",
+   "token": "0x546307af427902a75771434df831d88219784e19"
+  },
+  "success": true
+ },
+ "0x733178aadf038a8044ebcbd36bb918fc99fdba87": {
+  "data": {
+   "path": [],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "0",
+   "token": "0x733178aadf038a8044ebcbd36bb918fc99fdba87"
+  },
+  "success": true
+ },
+ "0x7627b8c7ca57110a8282065bc5193ed9b4442693": {
+  "data": {
+   "path": [],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "0",
+   "token": "0x7627b8c7ca57110a8282065bc5193ed9b4442693"
+  },
+  "success": true
+ },
+ "0x787e46eb2911cf6bccef221a71ae83b3602df123": {
+  "data": {
+   "path": [],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "0",
+   "token": "0x787e46eb2911cf6bccef221a71ae83b3602df123"
+  },
+  "success": true
+ },
+ "0x7ed2a1550217f980cc217484b51e7b8a1fec2391": {
+  "data": {
+   "path": [
+    "0x7ed2a1550217f980cc217484b51e7b8a1fec2391",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2"
+   ],
+   "pools": [
+    "0x67ea0f133bd80ca535f11ae21c7966b8629229fd"
+   ],
+   "price": "0.00000000067639604704200702105",
+   "token": "0x7ed2a1550217f980cc217484b51e7b8a1fec2391"
+  },
+  "success": true
+ },
+ "0x8ba8b124a62c7a738f3669b0776d86789e72d838": {
+  "data": {
+   "path": [
+    "0x8ba8b124a62c7a738f3669b0776d86789e72d838",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2"
+   ],
+   "pools": [
+    "0xb4b220bbeea9f14c776d0c29cb8a1ab1068cb1d7"
+   ],
+   "price": "0.00000002941455490156653432",
+   "token": "0x8ba8b124a62c7a738f3669b0776d86789e72d838"
+  },
+  "success": true
+ },
+ "0x94566c45bbd0cfb286a7b1402ac6f43e2368dce1": {
+  "data": {
+   "path": [],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "0",
+   "token": "0x94566c45bbd0cfb286a7b1402ac6f43e2368dce1"
+  },
+  "success": true
+ },
+ "0x9841194c1f6f8359d0ff1a98fb2c3a6a17357ce0": {
+  "data": {
+   "path": [
+    "0x9841194c1f6f8359d0ff1a98fb2c3a6a17357ce0",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v3"
+   ],
+   "pools": [
+    "0x91239c56a38dc1c35eccdd823e3a748023d2540f"
+   ],
+   "price": "0.000038014928146043500526",
+   "token": "0x9841194c1f6f8359d0ff1a98fb2c3a6a17357ce0"
+  },
+  "success": true
+ },
+ "0xbe449366dec6ba7dc7d1b56540b918219a290a64": {
+  "data": {
+   "path": [],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "0",
+   "token": "0xbe449366dec6ba7dc7d1b56540b918219a290a64"
+  },
+  "success": true
+ },
+ "0xcaab50f36252a57529afef651fa6b9f9281917ff": {
+  "data": {
+   "path": [
+    "0xcaab50f36252a57529afef651fa6b9f9281917ff",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v3"
+   ],
+   "pools": [
+    "0xdacfc2574b6110892351bd31afb36f95e7206162"
+   ],
+   "price": "0.00011228103764355319882",
+   "token": "0xcaab50f36252a57529afef651fa6b9f9281917ff"
+  },
+  "success": true
+ },
+ "0xce6eec61ce9e72a436398eb97ec026fa800dc0d8": {
+  "data": {
+   "path": [
+    "0xce6eec61ce9e72a436398eb97ec026fa800dc0d8",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2"
+   ],
+   "pools": [
+    "0xc5b69792d9587a7753fa12f3a4298600dd84e50a"
+   ],
+   "price": "0.94005887731903747714",
+   "token": "0xce6eec61ce9e72a436398eb97ec026fa800dc0d8"
+  },
+  "success": true
+ },
+ "0xdaaabbd103c95395197c79890858922549a7a5e2": {
+  "data": {
+   "path": [
+    "0xdaaabbd103c95395197c79890858922549a7a5e2",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2"
+   ],
+   "pools": [
+    "0xb9044d8df4c81ac577e5bf69edcb23555514cc82"
+   ],
+   "price": "0.012326875382586382739",
+   "token": "0xdaaabbd103c95395197c79890858922549a7a5e2"
+  },
+  "success": true
+ },
+ "0x1b1c27acb5f60d5d65a0a716df49bcd25add1e43": {
+  "data": {
+   "path": [
+    "0x1b1c27acb5f60d5d65a0a716df49bcd25add1e43",
+    "0xd5452816194a3784dba983426cce7c122f4abd30",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2",
+    "v3"
+   ],
+   "pools": [
+    "0xea9d4b3909ffbd9ceaed8f3bb223437e882aeed0",
+    "0x64f418471a1a7932a190e10da5a8551db5abec05"
+   ],
+   "price": "0.012704970019791770754",
+   "token": "0x1b1c27acb5f60d5d65a0a716df49bcd25add1e43"
+  },
+  "success": true
+ },
+ "0x337a5749dc5acdee38a2493d6593df20dba4859c": {
+  "data": {
+   "path": [
+    "0x337a5749dc5acdee38a2493d6593df20dba4859c",
+    "0xd5452816194a3784dba983426cce7c122f4abd30",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2",
+    "v3"
+   ],
+   "pools": [
+    "0x60752b66f61c29f087d75ac1ff323f4bd892b549",
+    "0x64f418471a1a7932a190e10da5a8551db5abec05"
+   ],
+   "price": "0.00012369877703882141362",
+   "token": "0x337a5749dc5acdee38a2493d6593df20dba4859c"
+  },
+  "success": true
+ },
+ "0x4a287f66aba5f6219463312a79319ec2b7ff65c5": {
+  "data": {
+   "path": [],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "0",
+   "token": "0x4a287f66aba5f6219463312a79319ec2b7ff65c5"
+  },
+  "success": true
+ },
+ "0x5c56582e1fbbb9bf6b03de9a4507d2ca28af6ce7": {
+  "data": {
+   "path": [
+    "0x5c56582e1fbbb9bf6b03de9a4507d2ca28af6ce7",
+    "0xd5452816194a3784dba983426cce7c122f4abd30",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2",
+    "v3"
+   ],
+   "pools": [
+    "0xa7a7796b5ec5ea2fdec1f94a3e71fa027f7cf45b",
+    "0x64f418471a1a7932a190e10da5a8551db5abec05"
+   ],
+   "price": "0.0006706690988830577328",
+   "token": "0x5c56582e1fbbb9bf6b03de9a4507d2ca28af6ce7"
+  },
+  "success": true
+ },
+ "0x816c6c2fdd88a74cbb8cad959d398fcb22314ee0": {
+  "data": {
+   "path": [],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "0",
+   "token": "0x816c6c2fdd88a74cbb8cad959d398fcb22314ee0"
+  },
+  "success": true
+ },
+ "0x8d315a37d3d0bda861cc113cf381231c09d42e4a": {
+  "data": {
+   "path": [
+    "0x8d315a37d3d0bda861cc113cf381231c09d42e4a",
+    "0xd5452816194a3784dba983426cce7c122f4abd30",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2",
+    "v3"
+   ],
+   "pools": [
+    "0x8785dcbdfa15b51b67f396d529f206605fca812c",
+    "0x64f418471a1a7932a190e10da5a8551db5abec05"
+   ],
+   "price": "0.00000000007288671395750560825",
+   "token": "0x8d315a37d3d0bda861cc113cf381231c09d42e4a"
+  },
+  "success": true
+ },
+ "0xad033f263b929edf90b9744cfee8e4a432d01265": {
+  "data": {
+   "path": [
+    "0xad033f263b929edf90b9744cfee8e4a432d01265",
+    "0xd5452816194a3784dba983426cce7c122f4abd30",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2",
+    "v3"
+   ],
+   "pools": [
+    "0x480d8fad4273fc651b3552a767eb6900eb1fb0eb",
+    "0x64f418471a1a7932a190e10da5a8551db5abec05"
+   ],
+   "price": "0.000000012560737599916145365",
+   "token": "0xad033f263b929edf90b9744cfee8e4a432d01265"
+  },
+  "success": true
+ },
+ "0xc25b190eb62c4bb0b0891d029e35411a20baced9": {
+  "data": {
+   "path": [],
+   "pool_type": "all",
+   "pool_types": [],
+   "pools": [],
+   "price": "0",
+   "token": "0xc25b190eb62c4bb0b0891d029e35411a20baced9"
+  },
+  "success": true
+ },
+ "0xc53d92a3a99b9efb9d6c2b66e534f638601dc181": {
+  "data": {
+   "path": [
+    "0xc53d92a3a99b9efb9d6c2b66e534f638601dc181",
+    "0xd5452816194a3784dba983426cce7c122f4abd30",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2",
+    "v3"
+   ],
+   "pools": [
+    "0xe7ccc59ab51b98177c86f62677f8104fd0e53db2",
+    "0x64f418471a1a7932a190e10da5a8551db5abec05"
+   ],
+   "price": "0.00000004952637509382388368",
+   "token": "0xc53d92a3a99b9efb9d6c2b66e534f638601dc181"
+  },
+  "success": true
+ },
+ "0xca7d638dd42936f90924a46dcacbd2ee08751111": {
+  "data": {
+   "path": [
+    "0xca7d638dd42936f90924a46dcacbd2ee08751111",
+    "0xd5452816194a3784dba983426cce7c122f4abd30",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2",
+    "v3"
+   ],
+   "pools": [
+    "0xd178fd09c898b8042d0423a5212796e5df7ef3cc",
+    "0x64f418471a1a7932a190e10da5a8551db5abec05"
+   ],
+   "price": "0.0046850905192801706503",
+   "token": "0xca7d638dd42936f90924a46dcacbd2ee08751111"
+  },
+  "success": true
+ },
+ "0xdcc362323e8b12c1475af0b7caedc295e596cdb9": {
+  "data": {
+   "path": [
+    "0xdcc362323e8b12c1475af0b7caedc295e596cdb9",
+    "0xd5452816194a3784dba983426cce7c122f4abd30",
+    "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+   ],
+   "pool_type": "all",
+   "pool_types": [
+    "v2",
+    "v3"
+   ],
+   "pools": [
+    "0x56912a57cea1de11f69ec054192ea8eab2004937",
+    "0x64f418471a1a7932a190e10da5a8551db5abec05"
+   ],
+   "price": "0.00000000003100012684829192064",
+   "token": "0xdcc362323e8b12c1475af0b7caedc295e596cdb9"
+  },
+  "success": true
+ }
+}
