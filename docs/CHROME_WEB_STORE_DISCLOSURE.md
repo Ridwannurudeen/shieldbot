@@ -219,7 +219,7 @@ Content scripts are injected at document_start to ensure transaction interceptio
 **Answer:**
 
 ```
-Provide pre-signature security analysis of blockchain transactions on 8 EVM chains (Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain), warning users about malicious contracts, phishing sites and scams before they sign.
+Provide pre-signature security analysis of blockchain transactions on nine EVM chains listed on the extension's welcome page, warning users about malicious contracts, phishing sites and scams before they sign.
 ```
 
 ---
