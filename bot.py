@@ -265,7 +265,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **/chain** - Switch active chain
 **/rescue <wallet>** - Scan wallet for risky token approvals
 **/rescue bot:<wallet>** - Scan BOT Chain token approvals with BDEX names, dollar values and revoke links
-BOT Chain: contract checks, approvals and revoke links. Checks that cannot run are reported as Unknown.
+BOT Chain: contract checks, approvals and revoke links; BDEX buy and sell simulation for tokens with a supported WBOT pool.
 **/threats** - Live mempool threat alerts
 **/campaign <address>** - Check if address is part of a scam campaign
 **/report <address> <reason>** - Report a scam address

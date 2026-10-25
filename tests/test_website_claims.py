@@ -180,6 +180,25 @@ def test_arbitrum_simulation_scope_matches_the_code():
     assert re.search(r'name: "Arbitrum", [^}]*simulationScope: "Some WETH pools, see below",', chains)
 
 
+
+def test_botchain_simulation_scope_matches_the_code():
+    # services/botchain_simulation.py simulates only BDEX pools pairing the token with WBOT: the V3 pools
+    # through the original SwapRouter and the V2 pairs. A token with no such pool stays Unknown.
+    from adapters.botchain import WBOT as ADAPTER_WBOT
+    from services.botchain_simulation import V2_ROUTES, WBOT
+
+    assert set(V2_ROUTES) == {"BDEX"}, "the BOT Chain simulation routes changed: update the site"
+    assert WBOT == ADAPTER_WBOT
+    scope = "BDEX V2 and V3 pools pairing the token with WBOT"
+    for path in (COMPONENTS / "Chains.tsx", LANDING_SRC / "public" / "about.html", ROOT / "README.md"):
+        assert scope in " ".join(read(path).split()), path.name
+    unknown = {
+        LANDING_SRC / "public" / "about.html": "so a BOT Chain token with no such pool reads Unknown",
+        ROOT / "README.md": "so a token with no such pool reads Unknown",
+    }
+    for path, sentence in unknown.items():
+        assert sentence in " ".join(read(path).split()), path.name
+
 def test_mcp_counts_match_the_code():
     from mcp_server.prompts import PROMPT_DEFINITIONS
     from mcp_server.resources import RESOURCE_DEFINITIONS, RESOURCE_TEMPLATE_DEFINITIONS
