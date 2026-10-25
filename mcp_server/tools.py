@@ -23,7 +23,8 @@ _DATA_RE = re.compile(r"0[xX](?:[0-9a-fA-F]{2})*")
 _WEI_RE = re.compile(r"0[xX][0-9a-fA-F]{1,64}|[0-9]{1,78}")
 _CHAIN_ID_DESCRIPTION = (
     "Chain ID of the chain the address or transaction is on; required, there is no default. "
-    "Every chain ShieldBot supports is accepted, including 56 = BNB Chain and 4663 = Robinhood Chain; "
+    "Every chain ShieldBot supports is accepted, including 56 = BNB Chain, 4663 = Robinhood Chain and "
+    "677 = BOT Chain; "
     "an unsupported chain ID is rejected."
 )
 
@@ -73,7 +74,7 @@ def _require_chain_id(container, params: Dict) -> int:
     if params.get("chain_id") is None:
         raise ValueError(
             "Missing required argument: chain_id (the chain the address or transaction is on, "
-            "for example 56 = BNB Chain or 4663 = Robinhood Chain)"
+            "for example 56 = BNB Chain, 4663 = Robinhood Chain or 677 = BOT Chain)"
         )
     return _validate_chain_id(container, params["chain_id"])
 
