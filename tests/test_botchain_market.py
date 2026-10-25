@@ -738,6 +738,18 @@ async def test_price_replies_are_kept_60_seconds_priced_or_not_and_failures_are_
     assert server.prices_asked() == [COW]
 
 
+@pytest.mark.asyncio
+async def test_a_price_reply_without_success_is_not_kept(clock):
+    market = BotChainMarket(RPC)
+    refused = Server(prices={**PRICES, COW: {**PRICES[COW], "success": False}})
+    first, _ = await scan(COW, refused, market=market)
+    assert first["price_usd"] is None
+
+    second, server = await scan(COW, market=market)
+    assert second["price_usd"] == float(PRICES[COW]["data"]["price"])
+    assert COW in server.prices_asked()
+
+
 def test_the_price_cache_is_bounded():
     cache = BotChainMarket(RPC)._prices
     assert cache.maxsize == botchain_market.PRICE_CACHE_SIZE == 512

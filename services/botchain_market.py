@@ -543,7 +543,9 @@ class BotChainMarket:
         note = (
             "Price unknown: BDEX prices no route from this token to USDT" if price is None else None
         )
-        self._prices[token] = (price, note)
+        # Only a reply that succeeded is kept: success false is the API failing, not an answer.
+        if isinstance(answer, dict) and answer.get("success") is True:
+            self._prices[token] = (price, note)
         return price, note
 
     @staticmethod
