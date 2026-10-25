@@ -1,5 +1,5 @@
 {
-  "checked_on": "2026-09-28",
+  "checked_on": "2026-10-25",
   "addresses": [
     {
       "chain_id": 56,
@@ -616,6 +616,62 @@
       "kind": "spender",
       "label": "Uniswap V4 PositionManager",
       "code_size": 23877
+    },
+    {
+      "chain_id": 677,
+      "address": "0x1414ed29fdfd322c3c0a830330ed982e2d629e76",
+      "kind": "router",
+      "label": "BDEX V2 Router02",
+      "code_size": 21987
+    },
+    {
+      "chain_id": 677,
+      "address": "0x07032d47a1b9f8460cbee9dc17c1d3e438693929",
+      "kind": "router",
+      "label": "BDEX V3 SwapRouter",
+      "code_size": 10088
+    },
+    {
+      "chain_id": 677,
+      "address": "0xae6ae8630f7a888dec0b9195c85f7515d5887655",
+      "kind": "router",
+      "label": "BDEX Universal Router",
+      "code_size": 18242
+    },
+    {
+      "chain_id": 677,
+      "address": "0x8366170f09a04f715a13549d616a06aed16db7c3",
+      "kind": "spender",
+      "label": "BDEX Permit2",
+      "code_size": 9238
+    },
+    {
+      "chain_id": 677,
+      "address": "0xdac3fcff004d8a8675b94e44941a1a2e3b240090",
+      "kind": "spender",
+      "label": "BDEX V3 Position Manager",
+      "code_size": 23444
+    },
+    {
+      "chain_id": 677,
+      "address": "0x82cb7cd6ad9ce3a1f1fc1821ad7dcab87c3d7663",
+      "kind": "locker",
+      "label": "BDexV2Locker",
+      "code_size": 12597
+    },
+    {
+      "chain_id": 677,
+      "address": "0x32685b8db1559d6651fcdb8a22d11cc44d3b952b",
+      "kind": "locker",
+      "label": "BDexV3LiquidityLocker",
+      "code_size": 23122
+    },
+    {
+      "chain_id": 677,
+      "address": "0x4807eac6fac2114153122977e8366c3dcef4a51b",
+      "kind": "locker",
+      "label": "FullRangeConvertorV2",
+      "code_size": 6819
     }
   ]
 }
