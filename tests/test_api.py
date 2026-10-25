@@ -574,7 +574,7 @@ async def test_strict_blocks_a_provider_unknown_cold_and_warm(cached_firewall_ap
 
 
 @pytest.mark.asyncio
-async def test_firewall_deadline_returns_unknown_reason_for_slow_provider(monkeypatch):
+async def test_firewall_deadline_returns_structural_pending_for_a_hung_lookup(monkeypatch):
     import time
     import api
 
@@ -603,6 +603,7 @@ async def test_firewall_deadline_returns_unknown_reason_for_slow_provider(monkey
     assert response["coverage_reasons"]["structural"] == (
         "Provider timed out at the firewall request deadline"
     )
+    assert response["pending_sources"] == ["structural"]
 
 
 @pytest.mark.asyncio
