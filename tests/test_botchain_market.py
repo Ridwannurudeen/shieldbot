@@ -454,6 +454,7 @@ def mutated(**changes):
         mutated(price=True),
         mutated(price=None),
         mutated(price="twelve"),
+        mutated(price=10**400),
         {**PRICES[WBOT], "success": False},
         {"success": True, "data": None},
         None,
@@ -709,13 +710,63 @@ async def test_warm_caches_skip_the_logs_the_pools_list_and_the_dating(clock):
     assert warm.methods().count("eth_getLogs") == 0
     assert "eth_getBlockByNumber" not in warm.methods()
     assert not any(url.endswith("/pools") for url, _ in warm.gets)
-    assert len(warm.gets) + len(warm.posts) == 3
+    assert warm.gets == []
+    assert len(warm.posts) == 1
     assert warm_result["status"] == "ok"
 
     clock.advance(31)
     _, later = await scan(COW, market=market)
     assert sum(url.endswith("/pools") for url, _ in later.gets) == 1
+    assert sorted(later.prices_asked()) == sorted([COW, WBOT])
     assert later.methods().count("eth_getLogs") == 0
+
+
+@pytest.mark.asyncio
+async def test_price_replies_are_kept_60_seconds_priced_or_not_and_failures_are_not(clock):
+    market = BotChainMarket(RPC)
+    await scan(KKFJ, market=market)
+    clock.advance(59)
+    kkfj, server = await scan(KKFJ, market=market)
+    assert server.prices_asked() == []
+    assert "Price unknown: BDEX prices no route from this token to USDT" in kkfj["reason"]
+
+    failing = Server()
+    failing.get_fault = lambda url, params: Response(503, None) if url.endswith("/price") else None
+    await scan(COW, failing, market=market)
+    cow, server = await scan(COW, market=market)
+    assert cow["price_usd"] == float(PRICES[COW]["data"]["price"])
+    # WBOT is still kept from the KKFJ scan; the failed COW price was not kept.
+    assert server.prices_asked() == [COW]
+
+
+@pytest.mark.asyncio
+async def test_a_price_reply_without_success_is_not_kept(clock):
+    market = BotChainMarket(RPC)
+    refused = Server(prices={**PRICES, COW: {**PRICES[COW], "success": False}})
+    first, _ = await scan(COW, refused, market=market)
+    assert first["price_usd"] is None
+
+    second, server = await scan(COW, market=market)
+    assert second["price_usd"] == float(PRICES[COW]["data"]["price"])
+    assert COW in server.prices_asked()
+
+
+@pytest.mark.asyncio
+async def test_a_price_too_large_for_a_float_is_unpriced_not_a_failed_read(clock):
+    huge = copy.deepcopy(PRICES[COW])
+    huge["data"]["price"] = 10**400
+    result, _ = await scan(COW, Server(prices={**PRICES, COW: huge}))
+
+    assert result["price_usd"] is None
+    assert result["liquidity_usd"] is None
+    assert "Price unknown: BDEX prices no route from this token to USDT" in result["reason"]
+    assert "market read failed" not in result["reason"]
+
+
+def test_the_price_cache_is_bounded():
+    cache = BotChainMarket(RPC)._prices
+    assert cache.maxsize == botchain_market.PRICE_CACHE_SIZE == 512
+    assert cache.ttl == botchain_market.PRICE_TTL_SECONDS == 60
 
 
 @pytest.mark.asyncio

@@ -20,7 +20,9 @@ DexScreener lists no BOT Chain pair, so a token's market is read from BDEX itsel
              73.96M) and COW's two pools give it two different figures.
 
 Every request has a 10 s timeout, at most two run at once, and only an HTTP 429 or a connection
-error is asked once more after a backoff. A failure leaves the affected fields unknown with a reason
+error is asked once more after a backoff. A price reply, priced or not, is kept for 60 s (at most
+512 tokens), so a scan repeated within a minute asks no price again; a failed price request is not
+kept. A failure leaves the affected fields unknown with a reason
 naming the source; token_market never raises. No holder data is read.
 """
 
@@ -32,6 +34,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import aiohttp
+from cachetools import TTLCache
 from eth_abi import decode
 from eth_abi.exceptions import DecodingError
 from eth_utils import keccak
@@ -61,6 +64,8 @@ REQUEST_TIMEOUT_SECONDS = 10
 CONCURRENCY = 2
 RETRY_BACKOFF_SECONDS = 1.0
 POOLS_TTL_SECONDS = 60
+PRICE_TTL_SECONDS = 60
+PRICE_CACHE_SIZE = 512
 INVENTORY_TTL_SECONDS = 600
 POOLS_PAGE_SIZE = 100
 RPC_BATCH_SIZE = 50
@@ -119,7 +124,7 @@ def parse_price_reply(answer, token: str) -> Optional[float]:
         return None
     try:
         price = float(raw_price)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if not math.isfinite(price) or price <= 0:
         return None
@@ -194,6 +199,10 @@ class BotChainMarket:
         self._listed_at = 0.0
         # Block timestamps never change, so a pool once dated stays dated.
         self._created_at: Dict[str, int] = {}
+        # The module's clock, so the cache ages with time.monotonic as every other cache here.
+        self._prices: TTLCache = TTLCache(
+            maxsize=PRICE_CACHE_SIZE, ttl=PRICE_TTL_SECONDS, timer=lambda: time.monotonic()
+        )
 
     async def token_market(self, token: str) -> dict:
         result = {
@@ -518,6 +527,8 @@ class BotChainMarket:
     ) -> Tuple[Optional[float], Optional[str]]:
         if token == USDT:
             return 1.0, None
+        if token in self._prices:
+            return self._prices[token]
         try:
             answer = await self._send(
                 session,
@@ -529,9 +540,13 @@ class BotChainMarket:
         except SourceError as e:
             return None, f"Price unknown: {e}"
         price = parse_price_reply(answer, token)
-        if price is None:
-            return None, "Price unknown: BDEX prices no route from this token to USDT"
-        return price, None
+        note = (
+            "Price unknown: BDEX prices no route from this token to USDT" if price is None else None
+        )
+        # Only a reply that succeeded is kept: success false is the API failing, not an answer.
+        if isinstance(answer, dict) and answer.get("success") is True:
+            self._prices[token] = (price, note)
+        return price, note
 
     @staticmethod
     def _listed_amounts(
