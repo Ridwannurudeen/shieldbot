@@ -543,6 +543,19 @@ async def test_pools_list_down_reads_the_amounts_on_chain(clock):
 
 
 @pytest.mark.asyncio
+async def test_a_pools_page_that_adds_no_pool_ends_the_read(clock):
+    pools = copy.deepcopy(POOLS)
+    pools[1]["meta"]["total"] = 200
+    pools[2] = pools[1]
+    pools[3] = pools[1]
+    result, server = await scan(COW, Server(pools=pools))
+
+    assert sum(url.endswith("/pools") for url, _ in server.gets) == 2
+    assert result["volume_24h"] is None
+    assert "BDEX pools list unavailable: BDEX pools API listed 53 of 200 pools" in result["reason"]
+
+
+@pytest.mark.asyncio
 async def test_rpc_timeout_is_unknown_and_not_asked_again(clock):
     server = Server()
     server.rpc_fault = lambda body: asyncio.TimeoutError()

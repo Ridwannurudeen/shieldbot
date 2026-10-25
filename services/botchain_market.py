@@ -368,7 +368,7 @@ class BotChainMarket:
                             if status == 200
                             else None
                         )
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 raise SourceError(f"{source} timed out")
             except aiohttp.ClientConnectionError as e:
                 retry = f"{source} connection failed ({type(e).__name__})"
@@ -495,12 +495,14 @@ class BotChainMarket:
                 total = (answer.get("meta") or {}).get("total")
                 if not isinstance(rows, list) or type(total) is not int:
                     raise SourceError("BDEX pools API reply malformed")
+                before = len(listed)
                 for row in rows:
                     if isinstance(row, dict) and isinstance(row.get("poolId"), str):
                         listed[row["poolId"].lower()] = row
                 if len(listed) >= total:
                     break
-                if not rows:
+                # A page that adds no pool ends the read, so a repeating page cannot loop.
+                if len(listed) == before:
                     raise SourceError(
                         f"BDEX pools API listed {len(listed)} of {total} pools"
                     )
