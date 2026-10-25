@@ -150,6 +150,23 @@ async def test_start_publishers_runs_one_drain_task_in_chain_order(monkeypatch):
     botchain._reconcile = AsyncMock(return_value=0)
     robinhood.drain_once = AsyncMock(side_effect=lambda: order.append(4663) or "idle")
     botchain.drain_once = AsyncMock(side_effect=lambda: order.append(677) or "idle")
+    robinhood_lease_lost = asyncio.Event()
+    robinhood._take_lease = AsyncMock(wraps=robinhood._take_lease)
+    keeper_calls = 0
+
+    async def keep_robinhood_lease(expiry):
+        nonlocal keeper_calls
+        keeper_calls += 1
+        if keeper_calls == 1:
+            await robinhood_lease_lost.wait()
+        else:
+            await asyncio.Event().wait()
+
+    async def keep_botchain_lease(expiry):
+        await asyncio.Event().wait()
+
+    robinhood._keep_lease = keep_robinhood_lease
+    botchain._keep_lease = keep_botchain_lease
     robinhood.start_publishers([robinhood, botchain])
     assert robinhood._drain_task is not None
     assert botchain._drain_task is None
@@ -158,6 +175,12 @@ async def test_start_publishers_runs_one_drain_task_in_chain_order(monkeypatch):
             break
         await asyncio.sleep(0.01)
     assert len(order) >= 2
+    robinhood_lease_lost.set()
+    for _ in range(100):
+        if robinhood._take_lease.await_count >= 2:
+            break
+        await asyncio.sleep(0.01)
+    assert robinhood._take_lease.await_count >= 2
     await robinhood.stop()
     await database.close()
     assert order[:2] == [4663, 677]

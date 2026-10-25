@@ -516,10 +516,13 @@ class VerdictPublisher:
             try:
                 while True:
                     idle = True
+                    reacquire = False
                     for publisher in held:
                         if keepers[publisher].done():
                             publisher._lease_lost = True
-                            continue
+                            reacquire = True
+                            idle = False
+                            break
                         if time.monotonic() < retry_after[publisher]:
                             continue
                         publisher._wake.clear()
@@ -551,10 +554,18 @@ class VerdictPublisher:
                         wakes = [asyncio.create_task(publisher._wake.wait()) for publisher in held if not publisher._lease_lost]
                         if not wakes:
                             break
-                        done, pending = await asyncio.wait(wakes, timeout=DRAIN_POLL_SECONDS, return_when=asyncio.FIRST_COMPLETED)
-                        for task in pending:
+                        wake_set = set(wakes)
+                        done, pending = await asyncio.wait(
+                            [*wakes, *keepers.values()],
+                            timeout=DRAIN_POLL_SECONDS,
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        pending_wakes = [task for task in pending if task in wake_set]
+                        for task in pending_wakes:
                             task.cancel()
-                        await asyncio.gather(*pending, return_exceptions=True)
+                        await asyncio.gather(*pending_wakes, return_exceptions=True)
+                    if reacquire:
+                        break
             finally:
                 for publisher, keeper in keepers.items():
                     publisher._lease_lost = False
