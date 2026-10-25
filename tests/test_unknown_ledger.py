@@ -374,6 +374,25 @@ async def test_explorer_requests_are_counted_per_provider_and_cached_answers_are
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("is_verified, expected", [(True, "verified"), (False, "unverified")])
+async def test_botchain_verification_uses_blockscout_without_sourcify(
+    ledger, is_verified, expected
+):
+    from services.explorer_service import ExplorerService
+
+    reply = {**BLOCKSCOUT_CONTRACT, "is_verified": is_verified}
+    patcher = _aiohttp("services.explorer_service", (200, reply))
+    try:
+        result = await ExplorerService().get_verification_status(TOKEN, 677)
+    finally:
+        patcher.stop()
+
+    assert result.status == expected
+    assert result.provider == "blockscout"
+    assert _chain_counts(ledger, 677) == {"blockscout": _counts(answered=1)}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "reply, outcome",
     [

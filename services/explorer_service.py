@@ -27,6 +27,10 @@ BLOCKSCOUT_INSTANCES = {
     if info["blockscout_instance"] is not None
 }
 
+# Sourcify's /server/chains listed 453 chains without 677 on 25 Oct 2026; its
+# /server/v2/contract/677/<address> endpoint answers 400.
+SOURCIFY_UNSUPPORTED_CHAINS = {677}
+
 
 # An answer holds for five minutes; a failed lookup is asked again after 30 seconds, so one
 # provider blip does not leave a contract Unknown for five minutes.
@@ -425,6 +429,27 @@ class ExplorerService:
         if not _is_address(address):
             return ExplorerResult("unknown", reason="Invalid address")
         address = address.lower()
+        if chain_id in SOURCIFY_UNSUPPORTED_CHAINS:
+            blockscout = await self._blockscout(f"addresses/{address}", chain_id)
+            if blockscout.status == "known":
+                data = blockscout.data
+                if (
+                    isinstance(data.get("hash"), str)
+                    and data["hash"].lower() == address
+                    and data.get("is_contract") is True
+                    and type(data.get("is_verified")) is bool
+                ):
+                    return ExplorerResult(
+                        "verified" if data["is_verified"] else "unverified",
+                        provider="blockscout",
+                    )
+                blockscout = ExplorerResult(
+                    "unknown",
+                    reason="Missing or mismatched contract verification evidence",
+                    provider="blockscout",
+                )
+            return blockscout
+
         sourcify = await self.get_sourcify_verification(address, chain_id)
         if sourcify.status == "verified":
             return sourcify
