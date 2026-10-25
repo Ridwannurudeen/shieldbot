@@ -114,6 +114,18 @@ CHAIN_INFO: Dict[int, Dict[str, Any]] = {
         'public_log_window_blocks': None,
         'picker_order': 6,
     },
+    677: {
+        'name': 'BOT Chain',
+        'explorer_url': 'https://scan.botchain.ai',
+        'dexscreener_slug': None,
+        'native_symbol': 'BOT',
+        'explorer_backend': 'sourcify_blockscout',
+        'blockscout_instance': 'https://scan.botchain.ai',
+        'pending_transactions': False,
+        'token_sniffer': False,
+        'public_log_window_blocks': 1_000_000,
+        'picker_order': 8,
+    },
 }
 
 # Chain prefix aliases for parsing "eth:0x..." or "base:0x..."
@@ -132,6 +144,8 @@ CHAIN_PREFIXES: Dict[str, int] = {
     'optimism': 10,
     'robinhood': 4663,
     'rh': 4663,
+    'bot': 677,
+    'botchain': 677,
 }
 
 
