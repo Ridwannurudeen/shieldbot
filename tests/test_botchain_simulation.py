@@ -9,6 +9,7 @@ import inspect
 import itertools
 import json
 import re
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -300,6 +301,30 @@ def simulator_for(post, **kwargs):
     simulator = BotChainSimulator(**kwargs)
     simulator._post = post
     return simulator
+
+
+def two_trapped_pools():
+    """USDT's two recorded pools, each refusing the sell in its sized run and in its confirmation."""
+    v3_first, v3_sized, v2_first, v2_sized = usdt_runs()
+    v3_trapped = failed_sell(v3_sized, error_string("STF"))
+    v2_trapped = failed_sell(v2_sized, error_string(BDEX_REFUSED))
+    answers = [
+        v3_first.result,
+        v3_trapped,
+        as_confirmation(v3_trapped),
+        v2_first.result,
+        v2_trapped,
+        as_confirmation(v2_trapped),
+    ]
+    order = [
+        v3_first,
+        v3_sized,
+        ("confirm", v3_sized),
+        v2_first,
+        v2_sized,
+        ("confirm", v2_sized),
+    ]
+    return answers, order
 
 
 # --- constants and request shapes ----------------------------------------------------------------
@@ -1229,6 +1254,24 @@ async def test_every_request_gives_up_after_twelve_seconds():
             "0x68caea9104419203cf8b8f0b222e75709b97bfc6"
         )
     assert captured["timeout"].total == RPC_TIMEOUT_SECONDS == 12
+
+
+# --- the time budget and the lane ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_two_pools_with_a_trap_in_each_finish_under_twenty_seconds_at_two_seconds_a_call():
+    answers, order = two_trapped_pools()
+    replay = Replay("usdt", answers, delay=2.2)
+    started = time.monotonic()
+    with run_addresses(*order):
+        result = await simulator_for(replay).simulate(USDT)
+    elapsed = time.monotonic() - started
+    assert (result["is_honeypot"], result["can_sell"]) == (True, False)
+    # Discovery, the depth batch with the header, and per pool a first run, a sized run and a
+    # confirmation: eight requests, none retried.
+    assert len(replay.calls) == 8
+    assert elapsed < 20
 
 
 @pytest.mark.asyncio
