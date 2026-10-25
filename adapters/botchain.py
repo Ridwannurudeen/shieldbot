@@ -1,4 +1,4 @@
-"""BOT Chain adapter for chain-wide reads and approval scanning."""
+"""BOT Chain adapter for chain-wide reads, approval scanning and the BDEX sell simulation."""
 
 import os
 import asyncio
@@ -6,6 +6,7 @@ import logging
 from typing import Dict
 
 from adapters.evm_base import ERC20_ABI, EvmAdapter
+from adapters.robinhood import SIMULATION_PROVIDER, _simulation_response
 from web3 import Web3
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,11 @@ ROUTER_V2_FACTORIES = {
 class BotChainAdapter(EvmAdapter):
     """BOT Chain adapter for chain_id=677."""
 
+    supports_honeypot_simulation = True
+
     def __init__(self, rpc_url: str = None):
+        from services.botchain_simulation import BotChainSimulator
+
         rpc = rpc_url or os.getenv('BOTCHAIN_RPC_URL') or 'https://rpc.botchain.ai'
         super().__init__(
             chain_id_value=677,
@@ -53,6 +58,8 @@ class BotChainAdapter(EvmAdapter):
             known_spenders=KNOWN_SPENDERS,
             router_v2_factories=ROUTER_V2_FACTORIES,
         )
+        # No provider serves BOT Chain; ShieldBot simulates the BDEX buy and sell itself.
+        self._simulator = BotChainSimulator(rpc, sim_rpc_url=os.getenv('BOTCHAIN_SIM_RPC_URL') or None)
 
     async def get_token_info(self, address: str) -> Dict:
         try:
@@ -79,25 +86,16 @@ class BotChainAdapter(EvmAdapter):
             return {}
 
     async def check_honeypot(self, address: str) -> Dict:
-        return {
-            'is_honeypot': None,
-            'status': 'unknown',
-            'reason': 'no sell simulation on BOT Chain yet',
-            'field_providers': {},
-        }
+        simulation = await self._simulator.simulate(address)
+        return _simulation_response(simulation, ('is_honeypot', 'can_buy', 'can_sell'), ('is_honeypot',))
 
     async def get_tax_info(self, address: str) -> Dict:
-        return {
-            'buy_tax': None,
-            'sell_tax': None,
-            'status': 'unknown',
-            'reason': 'no sell simulation on BOT Chain yet',
-            'field_providers': {},
-        }
+        simulation = await self._simulator.simulate(address)
+        return _simulation_response(simulation, ('buy_tax', 'sell_tax'), ('buy_tax', 'sell_tax'))
 
     def capabilities(self) -> Dict:
         return {
             **super().capabilities(),
-            'sell_simulation': 'none',
+            'sell_simulation': SIMULATION_PROVIDER,
             'verification': 'blockscout',
         }

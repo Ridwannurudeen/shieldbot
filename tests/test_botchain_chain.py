@@ -64,18 +64,36 @@ async def test_botchain_token_info_retries_a_transient_429():
     assert [call.args[0] for call in sleep.await_args_list] == [1.0]
 
 
-@pytest.mark.asyncio
-async def test_botchain_honeypot_fields_are_unknown_without_a_provider():
+NO_POOL = "No supported pool found (BDEX V3 or BDEX V2, paired with WBOT)"
+
+
+def test_botchain_simulates_the_bdex_sell_itself(monkeypatch):
+    monkeypatch.delenv("BOTCHAIN_SIM_RPC_URL", raising=False)
     adapter = BotChainAdapter("https://rpc.invalid")
+    assert adapter.supports_honeypot_simulation is True
+    assert adapter._simulator._rpc_url == "https://rpc.invalid"
+    assert adapter._simulator._sim_rpc_url is None
+    assert adapter.capabilities()["sell_simulation"] == "eth_simulateV1"
+    assert adapter.capabilities()["verification"] == "blockscout"
+    monkeypatch.setenv("BOTCHAIN_SIM_RPC_URL", "https://sim.invalid")
+    assert BotChainAdapter("https://rpc.invalid")._simulator._sim_rpc_url == "https://sim.invalid"
+
+
+@pytest.mark.asyncio
+async def test_botchain_honeypot_fields_come_from_the_simulation_and_stay_unknown_outside_bdex():
+    from services.robinhood_simulation import aggregate_outcomes
+
+    adapter = BotChainAdapter("https://rpc.invalid")
+    adapter._simulator.simulate = AsyncMock(return_value=aggregate_outcomes([], [NO_POOL]))
     with patch("adapters.evm_base.aiohttp.ClientSession") as session:
         honeypot = await adapter.check_honeypot(TOKEN)
         taxes = await adapter.get_tax_info(TOKEN)
     session.assert_not_called()
     assert honeypot["status"] == taxes["status"] == "unknown"
-    assert honeypot["reason"] == taxes["reason"] == (
-        "no sell simulation on BOT Chain yet"
-    )
-    assert adapter.capabilities()["sell_simulation"] == "none"
+    assert honeypot["reason"] == taxes["reason"] == NO_POOL
+    assert honeypot["is_honeypot"] is None and taxes["sell_tax"] is None
+    assert honeypot["field_providers"] == taxes["field_providers"] == {}
+    assert [call.args for call in adapter._simulator.simulate.await_args_list] == [(TOKEN,), (TOKEN,)]
 
 
 @pytest.mark.asyncio
@@ -138,6 +156,84 @@ async def test_bot_token_returns_still_running_unknown_at_the_request_deadline(m
 
 
 @pytest.mark.asyncio
+async def test_bot_token_on_677_whose_simulator_never_finishes_is_still_running_unknown(
+    monkeypatch, bot_module,
+):
+    from analyzers.honeypot import HoneypotAnalyzer, STILL_RUNNING
+    from core.analyzer import AnalyzerResult
+    from core.registry import AnalyzerRegistry
+    from services.honeypot_service import HoneypotService
+    from utils.web3_client import Web3Client
+
+    adapter = BotChainAdapter("https://rpc.invalid")
+    pending_result = asyncio.get_running_loop().create_future()
+
+    async def never_finishes(address):
+        return await pending_result
+
+    adapter._simulator.simulate = AsyncMock(side_effect=never_finishes)
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {677: adapter}
+    registry = AnalyzerRegistry()
+    structural_result = AnalyzerResult(
+        name="structural", weight=0.4, score=0, data={"status": "ok"},
+    )
+    structural = MagicMock()
+    structural.name = "structural"
+    structural.weight = 0.4
+    structural.analyze = AsyncMock(return_value=structural_result)
+    registry.register(structural)
+    registry.register(HoneypotAnalyzer(HoneypotService(client)))
+    bot_module.container.registry = registry
+    bot_module._get_token_info_with_timeout = AsyncMock(return_value={})
+    captured = []
+
+    def compute(results):
+        captured.extend(results)
+        return {
+            "status": "unknown", "risk_level": "unknown",
+            "coverage": {"honeypot": 0}, "coverage_reasons": {"honeypot": STILL_RUNNING},
+        }
+
+    bot_module.risk_engine = SimpleNamespace(compute_from_results=compute)
+    monkeypatch.setattr(bot_module, "format_full_report", lambda *args, **kwargs: "report")
+    monkeypatch.setattr("core.registry.RUN_ALL_DEADLINE_SECONDS", 0.1)
+    clock_now = time.monotonic()
+    monkeypatch.setattr(
+        bot_module, "time", SimpleNamespace(
+            monotonic=lambda: clock_now - 24.95, time=time.time,
+        ),
+    )
+    status = SimpleNamespace(delete=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=status)))
+
+    await bot_module.check_token(update, TOKEN, chain_id=677)
+    pending_result.cancel()
+    await asyncio.sleep(0)
+
+    _, honeypot_row = captured
+    assert honeypot_row.name == "honeypot"
+    assert honeypot_row.error is None
+    assert honeypot_row.data["status"] == "unknown"
+    assert honeypot_row.data["reason"] == STILL_RUNNING
+    adapter._simulator.simulate.assert_awaited_once_with(TOKEN)
+    assert update.message.reply_text.await_args_list[-1].args[0] == "report"
+
+
+def test_a_677_firewall_request_carries_the_request_deadline(monkeypatch):
+    import api
+    from utils.web3_client import Web3Client
+
+    client = Web3Client.__new__(Web3Client)
+    client._adapters = {677: BotChainAdapter("https://rpc.invalid")}
+    monkeypatch.setattr(api, "web3_client", client)
+    assert client.supports_honeypot_simulation(677) is True
+    assert api._firewall_deadline(SimpleNamespace(chainId=677), 100.0) == (
+        100.0 + api.FIREWALL_REQUEST_DEADLINE_SECONDS
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("chain_id", [56, 677])
 async def test_bot_contract_scan_passes_a_request_deadline_to_analyzers(monkeypatch, bot_module, chain_id):
     from core.analyzer import AnalysisContext
@@ -168,8 +264,8 @@ async def test_scan_bot_prefix_runs_analyzers_and_reports_unknown_sellability(mo
     from core.analyzer import AnalyzerResult
     from core.risk_engine import RiskEngine
 
-    reason = "no sell simulation on BOT Chain yet"
-    rendered_flag = "Sellability unknown: no sell simulation on BOT Chain yet"
+    reason = NO_POOL
+    rendered_flag = f"Sellability unknown: {NO_POOL}"
     service = SimpleNamespace(fetch_honeypot_data=AsyncMock(return_value={"status": "unknown", "reason": reason}))
     honeypot = HoneypotAnalyzer(service)
     results = [

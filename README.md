@@ -29,7 +29,7 @@ Live: [shieldbotsecurity.online](https://shieldbotsecurity.online) · [threat da
 
 ## Telegram commands
 
-In `@shieldbot_bnb_bot`, `/rescue bot:<wallet>` scans BOT Chain token approvals and shows BDEX spender names, dollar values and revoke links. BOT Chain: contract checks, approvals and revoke links. Checks that cannot run are reported as Unknown.
+In `@shieldbot_bnb_bot`, `/rescue bot:<wallet>` scans BOT Chain token approvals and shows BDEX spender names, dollar values and revoke links. BOT Chain: contract checks, approvals and revoke links; BDEX buy and sell simulation for tokens with a supported WBOT pool.
 
 ## On-chain permission before funds move
 
@@ -171,7 +171,7 @@ The [container](core/container.py) and [Web3 client](utils/web3_client.py) confi
 | opBNB | 204 |
 | BOT Chain | 677 |
 
-Provider availability varies by chain. Robinhood Chain and Arbitrum use ShieldBot's own `eth_simulateV1` path. On Arbitrum it simulates only pools pairing the token with WETH on Uniswap V3, Uniswap V2 or SushiSwap ([arbitrum_simulation.py](services/arbitrum_simulation.py)); a token with no such pool, for example one traded only on Camelot or only against stablecoins, gets GoPlus's honeypot and tax flags alone. Robinhood Chain and BOT Chain are excluded from pending-transaction mempool monitoring, as are Base, Arbitrum and Optimism, which have no public mempool. BOT Chain verification comes from Blockscout; Sourcify does not support chain 677 as of 25 Oct 2026. A pool larger than 8 MB (Ethereum's and Polygon's today) is watched through the node's candidate next block, its pending block, rather than the whole pool; the pool's size is checked again every 10 minutes. A configured adapter does not establish supported honeypot simulation, reputation or liquidity data for every token.
+Provider availability varies by chain. Robinhood Chain, Arbitrum and BOT Chain use ShieldBot's own `eth_simulateV1` path. On Arbitrum it simulates only pools pairing the token with WETH on Uniswap V3, Uniswap V2 or SushiSwap ([arbitrum_simulation.py](services/arbitrum_simulation.py)); a token with no such pool, for example one traded only on Camelot or only against stablecoins, gets GoPlus's honeypot and tax flags alone. On BOT Chain it simulates only BDEX V2 and V3 pools pairing the token with WBOT ([botchain_simulation.py](services/botchain_simulation.py)); GoPlus does not cover BOT Chain, so a token with no such pool reads Unknown. Robinhood Chain and BOT Chain are excluded from pending-transaction mempool monitoring, as are Base, Arbitrum and Optimism, which have no public mempool. BOT Chain verification comes from Blockscout; Sourcify does not support chain 677 as of 25 Oct 2026. A pool larger than 8 MB (Ethereum's and Polygon's today) is watched through the node's candidate next block, its pending block, rather than the whole pool; the pool's size is checked again every 10 minutes. A configured adapter does not establish supported honeypot simulation, reputation or liquidity data for every token.
 
 ## Run the local evidence path
 
