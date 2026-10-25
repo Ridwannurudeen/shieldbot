@@ -2362,7 +2362,7 @@ async def verdict_vocabulary():
 async def chain_coverage(chain_id: int):
     """What a scan on this chain can check, from its configuration, and how its providers are answering.
 
-    `capabilities`: `sell_simulation` is honeypot.is, eth_simulateV1, or goplus_reported (no sell is
+    `capabilities`: `sell_simulation` is honeypot.is, eth_simulateV1, goplus_reported, or none (no sell is
     simulated; GoPlus's own flags only); `contract_age` and `verification` name the explorer each lookup
     asks (`contract_age` is null where no request can be sent: Robinhood Chain's creation lookup needs
     the Blockscout gateway key, and without it verification is Sourcify alone); `liquidity_lock` says
