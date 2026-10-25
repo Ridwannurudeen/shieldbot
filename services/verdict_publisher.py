@@ -521,11 +521,12 @@ class VerdictPublisher:
                         continue
                     if not acquired:
                         until_expiry = expiry - time.time()
-                        retry_delay = (
-                            min(LEASE_SECONDS, until_expiry)
-                            if until_expiry > 0
-                            else min(LEASE_SECONDS, DRAIN_POLL_SECONDS)
-                        )
+                        if until_expiry > 0:
+                            retry_delay = min(LEASE_SECONDS, until_expiry)
+                        elif expiry > 0:
+                            retry_delay = 0.01
+                        else:
+                            retry_delay = min(LEASE_SECONDS, DRAIN_POLL_SECONDS)
                         lease_retry_after[publisher] = now + retry_delay
                         continue
                     held.add(publisher)
