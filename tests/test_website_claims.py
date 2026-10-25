@@ -87,8 +87,8 @@ def test_mechanism_and_try_it_chain_maps_match_the_registry():
 
 
 def test_bot_chain_row_claims_only_its_own_bdex_simulation():
-    # GoPlus does not cover BOT Chain tokens; the only sell simulation there is ShieldBot's own, on BDEX
-    # pools with WBOT, so the row names that scope and no GoPlus flags.
+    # GoPlus token security does not cover BOT Chain; sell simulation there is ShieldBot's own, on BDEX
+    # pools with WBOT, while address labels are checked separately.
     row = re.search(r'\{\s*//[^\n]*\n\s*chainId: 677,(.*?)logo:', read(COMPONENTS / "Chains.tsx"), re.S)
     assert row, "Chains.tsx should have a BOT Chain row"
     assert 'simulation: "ShieldBot",' in row.group(1)
@@ -193,8 +193,16 @@ def test_botchain_simulation_scope_matches_the_code():
     for path in (COMPONENTS / "Chains.tsx", LANDING_SRC / "public" / "about.html", ROOT / "README.md"):
         assert scope in " ".join(read(path).split()), path.name
     unknown = {
-        LANDING_SRC / "public" / "about.html": "so a BOT Chain token with no such pool reads Unknown",
-        ROOT / "README.md": "so a token with no such pool reads Unknown",
+        LANDING_SRC / "public" / "about.html": (
+            "GoPlus token security does not cover BOT Chain. ShieldBot checks GoPlus address labels "
+            "for the token and, when Blockscout supplies its creator, the creator; a BOT Chain token "
+            "with no supported BDEX pool reads Unknown for sellability."
+        ),
+        ROOT / "README.md": (
+            "GoPlus token security does not cover BOT Chain. ShieldBot checks GoPlus address labels "
+            "for the token and, when Blockscout supplies its creator, the creator; a token with no "
+            "supported BDEX pool still reads Unknown for sellability."
+        ),
     }
     for path, sentence in unknown.items():
         assert sentence in " ".join(read(path).split()), path.name
