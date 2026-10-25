@@ -109,7 +109,7 @@ async def verdict_api(monkeypatch):
     import api
 
     registry = Web3Client.__new__(Web3Client)
-    registry._adapters = {chain_id: MagicMock(chain_id=chain_id) for chain_id in (56, 4663)}
+    registry._adapters = {chain_id: MagicMock(chain_id=chain_id) for chain_id in (56, 4663, 677)}
     database = Database(":memory:")
     await database.initialize()
     services = MagicMock()
@@ -165,6 +165,20 @@ async def test_permalink_serves_the_latest_evidence_and_how_to_verify(verdict_ap
     assert "retried automatically" not in body["verify"]
     assert f"only until {MAX_SEND_ATTEMPTS} transactions have been signed" in body["verify"]
     assert "only looked up" in body["verify"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [4663, 677])
+async def test_permalink_links_the_record_transaction_to_its_chain_explorer(verdict_api, chain_id):
+    from utils.chain_info import CHAIN_INFO
+
+    _, client, database = verdict_api
+    publisher = VerdictPublisher(database, registry_address="", chain_id=chain_id)
+    result = await publisher.publish(chain_id, TOKEN, COMPLETE_HIGH)
+    tx_hash = "0x" + "ab" * 32
+    await database.update_verdict_onchain(result["evidence_id"], "submitted", tx_hash=tx_hash)
+    body = client.get(f"/api/verdict/{chain_id}/{TOKEN}").json()
+    assert body["explorer_tx_url"] == f"{CHAIN_INFO[chain_id]['explorer_url']}/tx/{tx_hash}"
 
 
 @pytest.mark.asyncio

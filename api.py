@@ -2438,6 +2438,7 @@ async def verdict_permalink(chain_id: int, address: str):
     """Latest published ShieldBot verdict for a token, with its evidence document and on-chain record."""
     from core.verdict_evidence import Verdict
     from services.verdict_publisher import MAX_SEND_ATTEMPTS
+    from utils.chain_info import CHAIN_INFO
 
     _validate_chain_id(chain_id)
     if not web3_client.is_valid_address(address):
@@ -2478,6 +2479,11 @@ async def verdict_permalink(chain_id: int, address: str):
         "onchain_status": stored["onchain_status"],
         "registry": stored["registry"],
         "tx_hash": stored["tx_hash"],
+        "explorer_tx_url": (
+            f"{CHAIN_INFO[chain_id]['explorer_url']}/tx/{stored['tx_hash']}"
+            if stored["tx_hash"] and CHAIN_INFO.get(chain_id, {}).get("explorer_url")
+            else None
+        ),
         "onchain_error": stored["onchain_error"],
         "verify": (
             "keccak256 of the UTF-8 bytes of `canonical`, exactly as served, must equal evidence_hash. "
