@@ -21,7 +21,7 @@ ADDRESS = "0x" + "a" * 40
 BAD_CHECKSUM = "0xAAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa"
 HOSTILE_ADDRESS = "0x`[Claim](https://evil.example)`aaaa"
 # The order core.container registers the adapters in.
-REGISTERED = [56, 1, 8453, 42161, 137, 204, 10, 4663]
+REGISTERED = [56, 1, 8453, 42161, 137, 204, 10, 4663, 677]
 # The product's order, which the picker uses.
 CANONICAL = [
     (1, "Ethereum"),
@@ -32,6 +32,7 @@ CANONICAL = [
     (137, "Polygon"),
     (10, "Optimism"),
     (4663, "Robinhood Chain"),
+    (677, "BOT Chain"),
 ]
 INVALID = "\N{CROSS MARK} Invalid address format."
 UNSUPPORTED = f"Unsupported chain selection. Supported: {REGISTERED}"
@@ -121,16 +122,16 @@ async def test_a_bare_paste_asks_which_chain_and_scans_nothing(bot):
 @pytest.mark.asyncio
 async def test_the_picker_offers_every_supported_chain_in_the_products_order_two_to_a_row(bot):
     # A chain outside the product's order, such as a demo chain, follows it.
-    bot.web3_client._adapters[677] = MagicMock()
+    bot.web3_client._adapters[999001] = MagicMock()
     update = _message(ADDRESS)
 
     await bot.handle_address(update, SimpleNamespace(user_data={}))
 
     _, rows = _picker(update)
     buttons = [(name, f"pick_a_{chain_id}_{ADDRESS}") for chain_id, name in CANONICAL]
-    buttons.append(("Chain 677", f"pick_a_677_{ADDRESS}"))
+    buttons.append(("Chain 999001", f"pick_a_999001_{ADDRESS}"))
     assert rows == [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
-    assert [len(row) for row in rows] == [2, 2, 2, 2, 1]
+    assert [len(row) for row in rows] == [2, 2, 2, 2, 2]
 
 
 @pytest.mark.asyncio

@@ -34,7 +34,7 @@ def bot_module(monkeypatch):
     mock_settings = MagicMock(return_value=settings)
     mock_container = MagicMock()
     mock_container.return_value.web3_client.get_supported_chain_ids.return_value = [
-        56, 1, 8453, 42161, 137, 204, 10, 4663,
+        56, 1, 8453, 42161, 137, 204, 10, 4663, 677,
     ]
     monkeypatch.setattr(core.config, "Settings", mock_settings)
     monkeypatch.setattr(core.container, "ServiceContainer", mock_container)

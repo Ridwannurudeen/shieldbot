@@ -36,6 +36,7 @@ from adapters.polygon import PolygonAdapter
 from adapters.opbnb import OpBNBAdapter
 from adapters.optimism import OptimismAdapter
 from adapters.robinhood import RobinhoodAdapter
+from adapters.botchain import BotChainAdapter
 from services.mempool_service import supports_pending_transactions
 from services.cache import CacheService
 from services.counterparty_service import CounterpartyService
@@ -114,6 +115,8 @@ class ServiceContainer:
             rpc_url=settings.robinhood_rpc_url, read_rpc_url=settings.robinhood_read_rpc_url or None,
         )
         self.web3_client.register_adapter(self.robinhood_adapter)
+        self.botchain_adapter = BotChainAdapter(settings.botchain_rpc_url)
+        self.web3_client.register_adapter(self.botchain_adapter)
 
         # Scanners (legacy fallback); /api/scan reads the same local blacklist as the analyzers
         self.tx_scanner = TransactionScanner(self.web3_client, self.ai_analyzer, self.scam_db)
