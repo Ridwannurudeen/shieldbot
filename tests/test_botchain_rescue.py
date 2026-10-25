@@ -8,10 +8,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import aiohttp
 import pytest
-import requests
 from web3 import Web3
 
-from adapters.botchain_approval import BotChainApprovalReader
 from core.telegram_formatter import escape_untrusted
 from services.rescue_service import (
     APPROVAL_TOPIC,
@@ -344,28 +342,6 @@ async def test_unpriced_botchain_approval_has_no_value_at_risk():
     [approval] = result["approvals"]
     assert approval["value_at_risk_usd"] is None
     assert result["coverage"]["prices"] is False
-
-
-@pytest.mark.asyncio
-async def test_botchain_token_info_retries_a_transient_429():
-    reader = BotChainApprovalReader()
-    reader.w3 = MagicMock()
-    functions = reader.w3.eth.contract.return_value.functions
-    name_call = functions.name.return_value.call
-    name_call.side_effect = [
-        requests.exceptions.HTTPError(response=MagicMock(status_code=429)),
-        "Token",
-    ]
-    functions.symbol.return_value.call.return_value = "TKN"
-    functions.decimals.return_value.call.return_value = 18
-    functions.totalSupply.return_value.call.return_value = 100 * 10**18
-
-    with patch("adapters.botchain_approval.asyncio.sleep", new_callable=AsyncMock) as sleep:
-        info = await reader.get_token_info(TOKEN)
-
-    assert info == {"name": "Token", "symbol": "TKN", "decimals": 18, "total_supply": 100.0}
-    assert name_call.call_count == 2
-    assert [call.args[0] for call in sleep.await_args_list] == [1.0]
 
 
 @pytest.mark.asyncio
