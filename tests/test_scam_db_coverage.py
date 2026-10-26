@@ -651,6 +651,7 @@ async def test_creator_address_timeout_keeps_token_check_and_adds_unavailable_no
     assert structural.data["coverage"]["scam_database"] is True
     assert structural.data["token_security_unsupported"] is True
     assert structural.data["creator_address_status"] == "unknown"
+    assert structural.data["creator_address_reason"] == "GoPlus address security: timed out"
     assert any("Creator labels were unavailable." in note for note in structural.data["notes"])
     assert scam_db.fetch_address_security.await_count == 1
 
