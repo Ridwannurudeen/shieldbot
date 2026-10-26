@@ -2805,7 +2805,7 @@ async def agent_chat(req: ChatRequest, request: Request):
                     # The server's own words only: no model text beside a scan without a verdict.
                     resp['response'] = unknown_reply(
                         alert['coverage_reasons'],
-                        observed_facts(scan_data.get('flags') or [], alert['coverage'], scan_data.get('market')),
+                        observed_facts(alert['coverage'], scan_data.get('market'), scan_data.get('contract')),
                     )
             return resp
         # Backward compat: plain string return
@@ -2831,8 +2831,9 @@ async def agent_explain(req: ExplainRequest, request: Request):
             alert = format_extension_alert({
                 **req.scan_result, 'rug_probability': req.scan_result.get('risk_score') or 0,
             })
-            flags = req.scan_result.get('critical_flags') or req.scan_result.get('flags') or []
-            return {"explanation": unknown_reply(alert['coverage_reasons'], observed_facts(flags, alert['coverage']))}
+            verified = req.scan_result.get('contract_verified')
+            contract = {'is_verified': verified, 'coverage': {'is_verified': isinstance(verified, bool)}}
+            return {"explanation": unknown_reply(alert['coverage_reasons'], observed_facts(alert['coverage'], None, contract))}
         explanation = await container.advisor.explain_scan(req.scan_result)
         return {"explanation": explanation}
     except UnsupportedChainError:

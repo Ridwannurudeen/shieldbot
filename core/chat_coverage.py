@@ -2,6 +2,8 @@
 
 import re
 
+from core.risk_engine import database_matches
+
 
 FIELD_LABELS = {
     "buy_tax": "buy tax",
@@ -13,8 +15,6 @@ FIELD_LABELS = {
 UNKNOWN_LINE = "ShieldBot could not finish checking this token, so it has no verdict."
 
 OBSERVED_LINE = "What ShieldBot did observe:"
-# The flags that name a check which could not run (core.risk_engine adds them): notes, not observations.
-_NOTE_FLAG = re.compile(r"^(?:Sellability|Honeypot coverage) unknown:")
 
 
 def _clean_reason(reason: str) -> str:
@@ -63,11 +63,23 @@ def readable_coverage_gaps(reasons: dict) -> list[str]:
                 gaps.append(gap)
     return gaps
 
-def observed_facts(flags, coverage: dict, market: dict = None) -> list[str]:
-    """What the scan itself measured, in plain words: its observation flags (a note about a check that could
-    not run is not one) and, when the market analyzer was covered, the pair's liquidity, volume and age. Never
-    a score or a level, and nothing from a check the scan did not cover."""
-    facts = [str(flag) for flag in flags or () if not _NOTE_FLAG.match(str(flag))]
+def observed_facts(coverage: dict, market: dict = None, contract: dict = None) -> list[str]:
+    """What the scan measured, in the server's own fixed words and from structured values only, each only when
+    its check was covered: the contract's age, verification and scam database result (the structural analyzer's
+    data, read by its per-field coverage), and from a covered market read the pair's liquidity, 24h volume and
+    age, a new pair being one under 24 hours old. Never a flag, a reason, an address, a score or a level."""
+    facts = []
+    contract = contract or {}
+    fields = contract.get("coverage") or {}
+    if fields.get("contract_age_days") is True and contract.get("contract_age_days") is not None:
+        facts.append(f"Contract age {contract['contract_age_days']} days")
+    if fields.get("is_verified") is True and isinstance(contract.get("is_verified"), bool):
+        facts.append("Source code verified" if contract["is_verified"] else "Source code not verified")
+    if fields.get("scam_database") is True and isinstance(contract.get("scam_matches"), list):
+        matches = len(database_matches(contract["scam_matches"]))
+        facts.append(
+            f"Scam database: {matches} match{'es' if matches != 1 else ''}" if matches else "Scam database: no match"
+        )
     market = market or {}
     if (coverage or {}).get("market", 0) >= 1:
         if market.get("liquidity_usd") is not None:
@@ -76,6 +88,8 @@ def observed_facts(flags, coverage: dict, market: dict = None) -> list[str]:
             facts.append(f"24h volume ${market['volume_24h']:,.2f}")
         if market.get("pair_age_hours") is not None:
             facts.append(f"Pair age {market['pair_age_hours']:.1f} hours")
+            if market["pair_age_hours"] < 24:
+                facts.append("New pair (under 24 hours old)")
     return facts
 
 

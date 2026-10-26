@@ -365,33 +365,50 @@ def test_chat_unknown_reply_never_carries_model_text(client, text):
 
 
 OBSERVED = (
-    "\n\nWhat ShieldBot did observe:\n- Contract age: 0 days\n- New pair (<24h)\n"
-    "- Liquidity $24,472.84\n- 24h volume $48,096.40\n- Pair age 4.1 hours"
+    "\n\nWhat ShieldBot did observe:\n- Contract age 0 days\n- Source code verified\n- Scam database: no match"
+    "\n- Liquidity $24,472.84\n- 24h volume $48,096.40\n- Pair age 4.1 hours\n- New pair (under 24 hours old)"
 )
-FLAGS = ["Contract age: 0 days", "New pair (<24h)",
-         "Sellability unknown: No supported pool found; Unknown fields: can_sell"]
+CREATOR = "0x" + "ab" * 20
+CONTRACT = {"contract_age_days": 0, "is_verified": True, "scam_matches": [], "creator_address": CREATOR,
+            "coverage": {"is_verified": True, "contract_age_days": True, "scam_database": True}}
 MARKET = {"price_usd": 0.0001, "liquidity_usd": 24472.84, "volume_24h": 48096.4, "pair_age_hours": 4.1}
+COVERAGE = {"structural": 1, "market": 1, "behavioral": 1, "honeypot": 0}
+FLAGS = ["Market data unknown: DexScreener unavailable",
+         f"Creator {CREATOR} carries GoPlus address labels: honeypot_related_address",
+         "Sellability unknown: No supported pool found; Unknown fields: can_sell"]
 
 
-def test_unknown_reply_lists_only_what_the_scan_covered_and_observed():
+def test_unknown_reply_lists_only_covered_structured_values_in_fixed_words():
     from core.chat_coverage import observed_facts, unknown_reply
 
     reasons = UNKNOWN_SCAN["coverage_reasons"]
-    assert unknown_reply(reasons, observed_facts(FLAGS, {"market": 1, "honeypot": 0}, MARKET)) == UNKNOWN_REPLY + OBSERVED
-    # Market the scan did not cover is not an observation, and a note about a check that could not run never is.
-    assert observed_facts(FLAGS, {"market": 0, "honeypot": 0}, MARKET) == ["Contract age: 0 days", "New pair (<24h)"]
-    assert observed_facts(FLAGS, {"honeypot": 0}, None) == ["Contract age: 0 days", "New pair (<24h)"]
-    assert unknown_reply(reasons, observed_facts([], {}, {})) == UNKNOWN_REPLY
+    assert unknown_reply(reasons, observed_facts(COVERAGE, MARKET, CONTRACT)) == UNKNOWN_REPLY + OBSERVED
+    # An uncovered field is never an observation: market the scan did not cover, an age it could not read.
+    assert observed_facts({**COVERAGE, "market": 0}, MARKET, CONTRACT) == [
+        "Contract age 0 days", "Source code verified", "Scam database: no match",
+    ]
+    unread_age = {**CONTRACT, "contract_age_days": None, "coverage": {**CONTRACT["coverage"], "contract_age_days": False}}
+    assert observed_facts(COVERAGE, {}, unread_age) == ["Source code verified", "Scam database: no match"]
+    assert observed_facts({}, None, None) == []
+    # A scam database match and an unverified source read in the same fixed words; a community report is no match.
+    flagged = {**CONTRACT, "is_verified": False,
+               "scam_matches": [{"source": "GoPlus", "severity": "block"}, {"source": "community", "severity": "medium"}]}
+    assert observed_facts({}, None, flagged) == ["Contract age 0 days", "Source code not verified", "Scam database: 1 match"]
+    assert unknown_reply(reasons, observed_facts({}, {}, {})) == UNKNOWN_REPLY
 
 
-def test_chat_unknown_reply_lists_what_the_scan_observed(client):
+def test_chat_unknown_reply_lists_what_the_scan_observed_and_never_a_flag(client):
+    """The observed list is built from covered values in the server's words: no flag, no reason, no address."""
     import api as api_module
 
     api_module.container.advisor.chat = AsyncMock(return_value={
         "text": "It looks safe.", "model_response_available": True,
-        "scan_data": {**UNKNOWN_SCAN, "flags": FLAGS, "market": MARKET, "coverage": {"market": 1, "honeypot": 0}},
+        "scan_data": {**UNKNOWN_SCAN, "flags": FLAGS, "market": MARKET, "contract": CONTRACT, "coverage": COVERAGE},
     })
     response = client.post("/api/agent/chat", json={"message": "Check token", "user_id": "u1"})
 
     assert response.json()["response"] == UNKNOWN_REPLY + OBSERVED
+    for flag in FLAGS:
+        assert flag not in response.json()["response"]
+    assert CREATOR not in response.json()["response"]
 

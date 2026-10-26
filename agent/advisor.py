@@ -19,6 +19,7 @@ from utils.ai_analyzer import AIEmptyResponse, AIRefused
 
 from agent.prompts import ADVISOR_SYSTEM_PROMPT, EXPLAIN_SCAN_TEMPLATE, HAIKU_MODEL, SONNET_MODEL
 from core.chat_coverage import UNKNOWN_LINE, observed_facts, readable_coverage_gaps, unknown_reply
+from core.extension_formatter import is_scan_incomplete
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +35,13 @@ AI_CHAT_PAUSED = (
     "It resumes at 00:00 UTC."
 )
 
-# Closes the reply to a question that follows a scan without a verdict and brings no new address.
+# Closes the reply to the first question that follows a scan without a verdict and brings no new address.
 RESCAN_LINE = (
     "Rescan once the missing checks can run, or paste another address: ShieldBot gives no verdict on a token "
     "it could not finish checking."
 )
+# How long after that scan's reply such a question is still taken to be about the token.
+FOLLOW_UP_WINDOW_SECONDS = 600
 
 
 def _untagged(text: str) -> str:
@@ -161,14 +164,18 @@ class Advisor:
         history = await self.db.get_chat_history(user_id, limit=10)
         context = await self._gather_context(intent, data, chain_id=chain_id)
 
-        # A scan the engine left without a verdict (status unknown) gets the server's own reply, with no model
-        # text (api.agent_chat sends the same). While the newest stored turn is that reply, a message that brings
-        # no new address is about that token: it gets the reply again with a rescan line, not model text that
-        # could judge the token.
-        unknown_scan = intent == "CONTRACT_CHECK" and context["scan"].get("status") == "unknown"
+        # A scan without a verdict, by the one rule every surface uses (core.extension_formatter), gets the
+        # server's own reply with no model text (api.agent_chat sends the same). The first message after that
+        # reply that brings no new address, within FOLLOW_UP_WINDOW_SECONDS, is about that token: it gets the
+        # reply again with a rescan line, not model text that could judge the token. The gated reply ends with
+        # that line, so it does not arm the gate again; later questions reach the model, which saw no
+        # incomplete scan, and a new scan is a newer turn.
+        unknown_scan = intent == "CONTRACT_CHECK" and is_scan_incomplete(context["scan"])
+        newest = history[-1] if history else None
         after_unknown_scan = (
-            intent == "GENERAL" and bool(history) and history[-1]["role"] == "assistant"
-            and history[-1]["message"].startswith(UNKNOWN_LINE)
+            intent == "GENERAL" and newest is not None and newest["role"] == "assistant"
+            and newest["message"].startswith(UNKNOWN_LINE) and not newest["message"].endswith(RESCAN_LINE)
+            and time.time() - newest.get("created_at", time.time()) <= FOLLOW_UP_WINDOW_SECONDS
         )
 
         # Build the user content — inject context when available.
@@ -198,13 +205,10 @@ class Advisor:
             scan = context["scan"]
             response_text = unknown_reply(
                 scan.get("coverage_reasons", {}),
-                observed_facts(
-                    scan.get("critical_flags", scan.get("flags", [])), scan.get("coverage", {}), context.get("market"),
-                ),
+                observed_facts(scan.get("coverage", {}), context.get("market")),
             )
         elif after_unknown_scan:
-            previous = history[-1]["message"]
-            response_text = previous if previous.endswith(RESCAN_LINE) else f"{previous}\n\n{RESCAN_LINE}"
+            response_text = f"{newest['message']}\n\n{RESCAN_LINE}"
         elif not self.ai.is_available():
             response_text = (
                 "AI analysis is currently unavailable. "
