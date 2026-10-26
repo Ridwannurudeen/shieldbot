@@ -222,7 +222,7 @@
     }
 
     // Show loading overlay; it must be on screen before any result replaces it
-    await showLoadingOverlay(event.data.method, tx, received);
+    await showLoadingOverlay(requestId, event.data.method, tx, received);
 
     let response;
     try {
@@ -240,6 +240,9 @@
     // is another (address poisoning).
     const recipient = isSignature ? null : recipientOf(tx);
     const lookalike = recipient === null ? null : await pastLookalike(recipient);
+    // The user rejected it on the loading screen: it is settled, so its
+    // result is not shown.
+    if (_rejectedWhileLoading.delete(requestId)) return;
 
     if (Date.now() - received > DECISION_WINDOW_MS) {
       showTimedOutOverlay(requestId);
@@ -352,6 +355,10 @@
   // no-verdict timeout once it knows the overlay is on screen, so a request
   // whose overlay goes away without a decision is rejected here.
   let _awaitingRequestId = null;
+
+  // Requests the user rejected with Escape on the loading screen, before
+  // their analysis came back.
+  const _rejectedWhileLoading = new Set();
 
   // Verdicts carry a proof for their own action, never the token, so the page
   // learns nothing it could use to forge or relabel a verdict.
@@ -703,7 +710,7 @@
   // What is being checked, from the request itself (its method, the address
   // it goes to and the wallet's chain), and the time since it arrived. The
   // check reports no progress, so none is shown.
-  async function showLoadingOverlay(method, tx, received) {
+  async function showLoadingOverlay(requestId, method, tx, received) {
     await _loadContentLang();
     removeOverlay();
 
@@ -735,6 +742,15 @@
     `;
     const root = mountOverlay(overlay);
     const host = _overlayHost;
+    // Nothing is asked of the user yet, but Escape already rejects: the
+    // request is refused at once, and nothing reaches the wallet.
+    overlay.addEventListener("keydown", (event) => {
+      if (!event.isTrusted || event.key !== "Escape" || _overlayHost !== host) return;
+      event.preventDefault();
+      _rejectedWhileLoading.add(requestId);
+      removeOverlay();
+      postVerdict(requestId, "block");
+    });
     const elapsed = root.getElementById("shieldai-elapsed");
     const tick = () => {
       if (_overlayHost !== host) return;

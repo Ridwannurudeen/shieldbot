@@ -1876,6 +1876,47 @@ def test_legacy_typed_data_is_shown_field_by_field_end_to_end(method):
     )
 
 
+def test_escape_on_the_loading_screen_rejects_the_request_while_the_analysis_runs():
+    run_node(
+        FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
+        .replace(
+            "const sent = [];",
+            "const sent = [];\nlet releaseAnalysis;\nconst analysisGate = new Promise(resolve => { releaseAnalysis = resolve; });",
+            1,
+        )
+        .replace(
+            "    async sendMessage(message) {\n",
+            "    async sendMessage(message) {\n      if (message.type === 'SHIELDAI_ANALYZE') await analysisGate;\n",
+            1,
+        )
+        + r"""
+(async () => {
+  const overlay = () => overlayRoot()?.getElementById('shieldai-overlay') || null;
+  let rejected = null;
+  const pending = provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]});
+  pending.catch(error => { rejected = error; });
+  for (let i = 0; i < 20 && !(overlay() && overlay().innerHTML.includes('shieldai-loading')); i++) await flush();
+  assert(overlay() && overlay().innerHTML.includes('shieldai-loading'), 'the loading screen did not appear');
+  // A page's synthetic Escape decides nothing.
+  overlay().dispatch('keydown', {key: 'Escape', isTrusted: false});
+  await flush();
+  assert(overlay(), 'a synthetic Escape removed the loading screen');
+  assert.equal(rejected, null);
+  // The user's Escape rejects the request at once, while the analysis is still running.
+  overlay().dispatch('keydown', {key: 'Escape', isTrusted: true});
+  for (let i = 0; i < 20 && rejected === null; i++) await flush();
+  assert(rejected, 'Escape on the loading screen did not reject the request');
+  assert.equal(rejected.code, 4001);
+  assert.equal(overlay(), null);
+  // The analysis that comes back afterwards shows nothing and sends nothing to the wallet.
+  releaseAnalysis();
+  for (let i = 0; i < 3; i++) await flush();
+  assert.equal(overlay(), null, 'a result was shown for a request the user already rejected');
+  assert.equal(sent.length, 0);
+"""
+    )
+
+
 def test_a_refused_send_or_send_async_call_brings_one_notice():
     run_node(
         FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
