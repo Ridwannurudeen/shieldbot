@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.advisor import Advisor
+from core.chat_coverage import UNKNOWN_LINE
 
 
 def test_anthropic_client_uses_the_interactive_forensic_timeout(monkeypatch):
@@ -458,7 +459,9 @@ async def test_chat_scan_failure_attaches_unknown_scan_data(advisor, mock_tools,
     result = await advisor.chat("user1", "Check 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     assert result["scan_data"]["status"] == "unknown"
     assert result["scan_data"]["coverage_reasons"] == {"scan": "Contract scan unavailable"}
-    assert result["text"] == "Could not scan."
+    # No model text for a scan without a verdict: the reply names the gap, and the model is not asked.
+    assert result["text"] == UNKNOWN_LINE + "\n- Contract scan unavailable"
+    mock_ai.chat_with_usage.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -723,56 +726,81 @@ UNKNOWN_GAPS = [
     "no pool ShieldBot can simulate a sale on, so it could not test selling",
     "whether the token can be sold is unknown",
 ]
+# The server's own reply for that scan beside the fixture's market data (liquidity 5000, volume 200).
+UNKNOWN_REPLY = (
+    UNKNOWN_LINE + "\n- " + UNKNOWN_GAPS[0] + "\n- " + UNKNOWN_GAPS[1]
+    + "\n\nWhat ShieldBot did observe:\n- Contract age: 0 days\n- New pair (<24h)\n- Liquidity $5,000.00\n- 24h volume $200.00"
+)
 
 
 @pytest.mark.asyncio
-async def test_chat_gives_the_model_no_score_for_an_unknown_scan(advisor, mock_tools, mock_ai):
-    """A number the model never saw it cannot cite: an unknown scan reaches it without its scores."""
-    import json
-
+async def test_chat_calls_no_model_for_an_unknown_scan(advisor, mock_tools, mock_ai):
+    """A scan without a verdict gets the server's own reply, the gaps and what the scan observed: no model text,
+    and no model call."""
     mock_tools.scan_contract.return_value = UNKNOWN_SCAN
-    await advisor.chat("u1", "Check 0x" + "a" * 40, chain_id=4663)
+    result = await advisor.chat("u1", "Check 0x" + "a" * 40, chain_id=4663)
 
-    content = mock_ai.chat_with_usage.call_args.kwargs["messages"][-1]["content"]
-    tool_results = json.loads(content[len("<tool_results>\n"):content.index("\n</tool_results>")])
-    for field in ("rug_probability", "risk_level", "risk_archetype", "confidence_level", "category_scores"):
-        assert field not in tool_results["scan"]
-    assert tool_results["scan"]["status"] == "unknown"
-    assert tool_results["scan"]["critical_flags"] == ["Contract age: 0 days", "New pair (<24h)"]
-    assert tool_results["scan"]["coverage_reasons"] == UNKNOWN_SCAN["coverage_reasons"]
-    assert tool_results["coverage_gaps"] == UNKNOWN_GAPS
+    mock_ai.chat_with_usage.assert_not_awaited()
+    assert result["text"] == UNKNOWN_REPLY
+    assert result["model_response_available"] is False
+    assert result["scan_data"]["status"] == "unknown"
 
 
 @pytest.mark.asyncio
 async def test_chat_stores_the_reply_the_user_sees_for_an_unknown_scan(advisor, mock_tools, mock_db, mock_ai):
-    """History holds the Unknown reply the API sends, so a later turn cannot quote a score the user never saw."""
-    from core.chat_coverage import UNKNOWN_LINE
-
+    """History holds exactly the reply the user received, so a later turn cannot quote a score the user never saw."""
     mock_tools.scan_contract.return_value = UNKNOWN_SCAN
-    mock_ai.chat_with_usage = AsyncMock(return_value=(
-        "**Risk verdict**: 25/100, UNKNOWN.\n\n**Category breakdown**: Structural: 85/100 (40%).\n\n"
-        "Selling could not be tested because no supported pool was found.",
-        100,
-    ))
-    await advisor.chat("u1", "Check 0x" + "a" * 40, chain_id=4663)
+    mock_ai.chat_with_usage = AsyncMock(return_value=("**Risk verdict**: 25/100. Structural: 85/100 (40%).", 100))
+    result = await advisor.chat("u1", "Check 0x" + "a" * 40, chain_id=4663)
 
     stored = mock_db.insert_chat_message.call_args_list[1].args[2]
-    assert stored == (
-        UNKNOWN_LINE + "\n- " + UNKNOWN_GAPS[0] + "\n- " + UNKNOWN_GAPS[1] + "\n\n"
-        "Selling could not be tested because no supported pool was found."
-    )
+    assert stored == result["text"] == UNKNOWN_REPLY
     assert "85/100" not in stored
 
 
 @pytest.mark.asyncio
-async def test_chat_stores_only_the_gaps_when_no_model_answered_an_unknown_scan(advisor_no_ai, mock_tools, mock_db):
-    from core.chat_coverage import UNKNOWN_LINE
-
+async def test_chat_without_ai_answers_an_unknown_scan_with_the_same_reply(advisor_no_ai, mock_tools, mock_db):
     mock_tools.scan_contract.return_value = UNKNOWN_SCAN
-    await advisor_no_ai.chat("u1", "Check 0x" + "a" * 40, chain_id=4663)
+    result = await advisor_no_ai.chat("u1", "Check 0x" + "a" * 40, chain_id=4663)
 
-    stored = mock_db.insert_chat_message.call_args_list[1].args[2]
-    assert stored == UNKNOWN_LINE + "\n- " + UNKNOWN_GAPS[0] + "\n- " + UNKNOWN_GAPS[1]
+    assert mock_db.insert_chat_message.call_args_list[1].args[2] == result["text"] == UNKNOWN_REPLY
+
+
+@pytest.mark.asyncio
+async def test_chat_answers_a_follow_up_to_an_unknown_scan_without_the_model(advisor, mock_db, mock_ai):
+    """While the latest scan reached no verdict, a question that brings no new address gets that reply again
+    and a rescan line, never model text that could judge the token."""
+    from agent.advisor import RESCAN_LINE
+
+    mock_db.get_chat_history = AsyncMock(return_value=[
+        {"role": "user", "message": "0x" + "a" * 40},
+        {"role": "assistant", "message": UNKNOWN_REPLY},
+    ])
+    result = await advisor.chat("u1", "can i buy it", chain_id=4663)
+
+    mock_ai.chat_with_usage.assert_not_awaited()
+    assert result["text"] == UNKNOWN_REPLY + "\n\n" + RESCAN_LINE
+    assert "scan_data" not in result
+    assert mock_db.insert_chat_message.call_args_list[1].args[2] == result["text"]
+
+    # The next question in the same state repeats the reply with one rescan line, not two.
+    mock_db.get_chat_history = AsyncMock(return_value=[{"role": "assistant", "message": result["text"]}])
+    again = await advisor.chat("u1", "why not", chain_id=4663)
+    assert again["text"] == result["text"]
+    mock_ai.chat_with_usage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_chat_after_an_unknown_scan_still_asks_the_model_about_threats_and_new_addresses(
+    advisor, mock_db, mock_ai,
+):
+    mock_db.get_chat_history = AsyncMock(return_value=[{"role": "assistant", "message": UNKNOWN_REPLY}])
+    mock_ai.chat_with_usage = AsyncMock(return_value=("Three threats today.", 100))
+
+    # A threat question has tool data of its own; a new address has a scan of its own.
+    assert (await advisor.chat("u1", "any recent threats?"))["text"] == "Three threats today."
+    assert (await advisor.chat("u1", "Check 0x" + "b" * 40))["text"] == "Three threats today."
+    assert mock_ai.chat_with_usage.await_count == 2
 
 
 def test_advisor_prompt_forbids_field_names_and_names_each_providers_evidence():

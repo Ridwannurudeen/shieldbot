@@ -238,7 +238,7 @@ UNKNOWN_REPLY = (
 )
 
 
-def test_chat_unknown_keeps_model_explanation_and_uses_readable_gaps(client):
+def test_chat_unknown_drops_the_model_text_and_uses_readable_gaps(client):
     import api as api_module
 
     api_module.container.advisor.chat = AsyncMock(return_value={
@@ -249,9 +249,7 @@ def test_chat_unknown_keeps_model_explanation_and_uses_readable_gaps(client):
     response = client.post("/api/agent/chat", json={"message": "Check token", "user_id": "u1"})
 
     assert response.status_code == 200
-    assert response.json()["response"] == (
-        UNKNOWN_REPLY + "\n\nSelling could not be tested because no supported pool was found."
-    )
+    assert response.json()["response"] == UNKNOWN_REPLY
     assert "Initialize logs scanned over blocks" not in response.json()["response"]
 
 
@@ -281,17 +279,15 @@ def test_chat_coverage_reason_translation_and_clean_fallback():
     ]
 
 
-def test_unknown_reply_strips_block_ranges_the_model_repeats():
-    from core.chat_coverage import unknown_reply
+def test_unknown_reply_carries_no_block_ranges_and_no_model_text():
+    from core.chat_coverage import UNKNOWN_LINE, unknown_reply
 
     reply = unknown_reply(
         {"honeypot": "Initialize logs scanned over blocks 87222191-87252190; No supported pool found"},
-        "ShieldBot found no pool it can simulate a sale on (initialize logs scanned over blocks "
-        "87222191-87252190), so selling is untested.",
     )
     assert "87222191" not in reply
     assert "blocks" not in reply
-    assert reply.endswith("ShieldBot found no pool it can simulate a sale on, so selling is untested.")
+    assert reply == UNKNOWN_LINE + "\n- no pool ShieldBot can simulate a sale on, so it could not test selling"
 
 
 @pytest.mark.parametrize("supported", [
@@ -340,36 +336,62 @@ def test_chat_coverage_keeps_the_no_sell_reason_readable():
     ]
 
 
-@pytest.mark.parametrize("judging", [
+@pytest.mark.parametrize("text", [
     "The token appears fine and has no issues.",
     "can_sell is null; can_buy is true",
     "It looks safe.",
     "This one seems legit.",
     "There is nothing suspicious here.",
     "You should be fine buying a small amount.",
-    "The field can_sell could not be read.",
-    "The sell check returned null.",
-    "Nothing in the data suggests a scam and the deployer is clean.",
-    "Liquidity is healthy and the buy side checks out.",
-])
-def test_unknown_reply_drops_a_paragraph_that_judges_the_token_or_names_an_internal(judging):
-    from core.chat_coverage import unknown_reply
-
-    describing = "Selling could not be tested because no supported pool was found."
-    assert unknown_reply(UNKNOWN_SCAN["coverage_reasons"], judging) == UNKNOWN_REPLY
-    # Beside a paragraph that only describes the gap, the judging one alone is dropped.
-    assert unknown_reply(UNKNOWN_SCAN["coverage_reasons"], f"{judging}\n\n{describing}") == (
-        UNKNOWN_REPLY + "\n\n" + describing
-    )
-
-
-@pytest.mark.parametrize("describing", [
+    "Risk 12.",
+    "The risk is 0%.",
+    "El token es seguro.",
+    "Riesgo 0 de 100, sin problemas.",
+    "该代币是安全的。",
+    "Score 12 / 100, low.",
     "Selling could not be tested because no supported pool was found.",
-    "The pair is 4.1 hours old with $24,472.84 of liquidity and $48,096.40 of 24h volume.",
-    "ShieldBot has no deployer history for this address. Re-scan once a supported pool exists.",
 ])
-def test_unknown_reply_keeps_a_paragraph_that_only_describes_the_gap_or_the_data(describing):
-    from core.chat_coverage import unknown_reply
+def test_chat_unknown_reply_never_carries_model_text(client, text):
+    """An incomplete scan's reply is the server's own: no model sentence, in any words or language, reaches it."""
+    import api as api_module
 
-    assert unknown_reply(UNKNOWN_SCAN["coverage_reasons"], describing) == UNKNOWN_REPLY + "\n\n" + describing
+    api_module.container.advisor.chat = AsyncMock(return_value={
+        "text": text, "model_response_available": True, "scan_data": UNKNOWN_SCAN,
+    })
+    response = client.post("/api/agent/chat", json={"message": "Check token", "user_id": "u1"})
+
+    assert response.json()["response"] == UNKNOWN_REPLY
+    assert text not in response.json()["response"]
+
+
+OBSERVED = (
+    "\n\nWhat ShieldBot did observe:\n- Contract age: 0 days\n- New pair (<24h)\n"
+    "- Liquidity $24,472.84\n- 24h volume $48,096.40\n- Pair age 4.1 hours"
+)
+FLAGS = ["Contract age: 0 days", "New pair (<24h)",
+         "Sellability unknown: No supported pool found; Unknown fields: can_sell"]
+MARKET = {"price_usd": 0.0001, "liquidity_usd": 24472.84, "volume_24h": 48096.4, "pair_age_hours": 4.1}
+
+
+def test_unknown_reply_lists_only_what_the_scan_covered_and_observed():
+    from core.chat_coverage import observed_facts, unknown_reply
+
+    reasons = UNKNOWN_SCAN["coverage_reasons"]
+    assert unknown_reply(reasons, observed_facts(FLAGS, {"market": 1, "honeypot": 0}, MARKET)) == UNKNOWN_REPLY + OBSERVED
+    # Market the scan did not cover is not an observation, and a note about a check that could not run never is.
+    assert observed_facts(FLAGS, {"market": 0, "honeypot": 0}, MARKET) == ["Contract age: 0 days", "New pair (<24h)"]
+    assert observed_facts(FLAGS, {"honeypot": 0}, None) == ["Contract age: 0 days", "New pair (<24h)"]
+    assert unknown_reply(reasons, observed_facts([], {}, {})) == UNKNOWN_REPLY
+
+
+def test_chat_unknown_reply_lists_what_the_scan_observed(client):
+    import api as api_module
+
+    api_module.container.advisor.chat = AsyncMock(return_value={
+        "text": "It looks safe.", "model_response_available": True,
+        "scan_data": {**UNKNOWN_SCAN, "flags": FLAGS, "market": MARKET, "coverage": {"market": 1, "honeypot": 0}},
+    })
+    response = client.post("/api/agent/chat", json={"message": "Check token", "user_id": "u1"})
+
+    assert response.json()["response"] == UNKNOWN_REPLY + OBSERVED
 

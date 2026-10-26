@@ -41,7 +41,7 @@ from core.config import Settings
 from core.container import ServiceContainer
 from core.database import LAUNCH_OUTCOMES, SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
-from core.chat_coverage import readable_coverage_gaps, unknown_reply
+from core.chat_coverage import observed_facts, readable_coverage_gaps, unknown_reply
 from core.first_verdict import IN_PROGRESS, FirstVerdictProgress, build_first_verdict
 from core.policy import PolicyMode
 from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
@@ -2802,9 +2802,10 @@ async def agent_chat(req: ChatRequest, request: Request):
                 })
                 resp["scan_data"] = {**scan_data, **_coverage_fields(alert)}
                 if alert['status'] == 'unknown':
+                    # The server's own words only: no model text beside a scan without a verdict.
                     resp['response'] = unknown_reply(
                         alert['coverage_reasons'],
-                        result['text'] if result.get('model_response_available') else "",
+                        observed_facts(scan_data.get('flags') or [], alert['coverage'], scan_data.get('market')),
                     )
             return resp
         # Backward compat: plain string return
@@ -2830,7 +2831,8 @@ async def agent_explain(req: ExplainRequest, request: Request):
             alert = format_extension_alert({
                 **req.scan_result, 'rug_probability': req.scan_result.get('risk_score') or 0,
             })
-            return {"explanation": unknown_reply(alert['coverage_reasons'])}
+            flags = req.scan_result.get('critical_flags') or req.scan_result.get('flags') or []
+            return {"explanation": unknown_reply(alert['coverage_reasons'], observed_facts(flags, alert['coverage']))}
         explanation = await container.advisor.explain_scan(req.scan_result)
         return {"explanation": explanation}
     except UnsupportedChainError:

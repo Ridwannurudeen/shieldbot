@@ -18,7 +18,7 @@ from utils.web3_client import UnsupportedChainError
 from utils.ai_analyzer import AIEmptyResponse, AIRefused
 
 from agent.prompts import ADVISOR_SYSTEM_PROMPT, EXPLAIN_SCAN_TEMPLATE, HAIKU_MODEL, SONNET_MODEL
-from core.chat_coverage import readable_coverage_gaps, unknown_reply
+from core.chat_coverage import UNKNOWN_LINE, observed_facts, readable_coverage_gaps, unknown_reply
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,11 @@ AI_CHAT_PAUSED = (
     "It resumes at 00:00 UTC."
 )
 
-# A scan without a verdict still carries its partial reading as a score and a level. The prompt forbids citing
-# them; the model's view of such a scan leaves them out, so a number it never saw it cannot cite.
-_SCORE_FIELDS = ("rug_probability", "risk_score", "risk_level", "risk_archetype", "category_scores", "confidence_level")
+# Closes the reply to a question that follows a scan without a verdict and brings no new address.
+RESCAN_LINE = (
+    "Rescan once the missing checks can run, or paste another address: ShieldBot gives no verdict on a token "
+    "it could not finish checking."
+)
 
 
 def _untagged(text: str) -> str:
@@ -159,23 +161,22 @@ class Advisor:
         history = await self.db.get_chat_history(user_id, limit=10)
         context = await self._gather_context(intent, data, chain_id=chain_id)
 
-        # A scan the engine left without a verdict (status unknown): the model sees it without its scores, and
-        # history keeps the Unknown reply the user is shown (api.agent_chat shapes the response the same way),
-        # so a later turn cannot quote a score or verdict the user never received.
+        # A scan the engine left without a verdict (status unknown) gets the server's own reply, with no model
+        # text (api.agent_chat sends the same). While the newest stored turn is that reply, a message that brings
+        # no new address is about that token: it gets the reply again with a rescan line, not model text that
+        # could judge the token.
         unknown_scan = intent == "CONTRACT_CHECK" and context["scan"].get("status") == "unknown"
+        after_unknown_scan = (
+            intent == "GENERAL" and bool(history) and history[-1]["role"] == "assistant"
+            and history[-1]["message"].startswith(UNKNOWN_LINE)
+        )
 
         # Build the user content — inject context when available.
         # Wrap in XML delimiters to mitigate prompt injection via API data; nothing inside can close them.
         if context:
-            shown = context
-            if unknown_scan:
-                shown = {
-                    **context,
-                    "scan": {key: value for key, value in context["scan"].items() if key not in _SCORE_FIELDS},
-                }
             user_content = (
                 "<tool_results>\n"
-                f"{_untagged(json.dumps(shown, default=str))}\n"
+                f"{_untagged(json.dumps(context, default=str))}\n"
                 "</tool_results>\n\n"
                 f"<user_message>{_untagged(message)}</user_message>"
             )
@@ -193,7 +194,18 @@ class Advisor:
 
         # Call AI or return fallback
         model_response_available = False
-        if not self.ai.is_available():
+        if unknown_scan:
+            scan = context["scan"]
+            response_text = unknown_reply(
+                scan.get("coverage_reasons", {}),
+                observed_facts(
+                    scan.get("critical_flags", scan.get("flags", [])), scan.get("coverage", {}), context.get("market"),
+                ),
+            )
+        elif after_unknown_scan:
+            previous = history[-1]["message"]
+            response_text = previous if previous.endswith(RESCAN_LINE) else f"{previous}\n\n{RESCAN_LINE}"
+        elif not self.ai.is_available():
             response_text = (
                 "AI analysis is currently unavailable. "
                 "Please try again later or check your API key configuration."
@@ -253,16 +265,11 @@ class Advisor:
                 except Exception as e:
                     logger.error("AI token usage record failed: %s", type(e).__name__)
 
-        # Persist both sides of the conversation; a paused reply would only crowd tomorrow's history
+        # Persist both sides of the conversation, the reply exactly as the user receives it; a paused reply would
+        # only crowd tomorrow's history
         if response_text != AI_CHAT_PAUSED:
-            stored = response_text
-            if unknown_scan:
-                stored = unknown_reply(
-                    context["scan"].get("coverage_reasons", {}),
-                    response_text if model_response_available else "",
-                )
             await self.db.insert_chat_message(user_id, "user", message)
-            await self.db.insert_chat_message(user_id, "assistant", stored)
+            await self.db.insert_chat_message(user_id, "assistant", response_text)
 
         result: Dict[str, Any] = {"text": response_text, "model_response_available": model_response_available}
 
