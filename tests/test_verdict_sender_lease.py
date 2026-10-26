@@ -720,6 +720,41 @@ async def test_a_waiting_drain_asks_again_when_the_lease_expires_not_a_whole_per
 
 
 @pytest.mark.asyncio
+async def test_a_waiting_drain_does_not_ask_again_before_the_lease_expires(monkeypatch):
+    """The wait until another holder's lease expires is measured after the lease call returns, so a slow database
+    call must not bring the next attempt forward to before the expiry."""
+    database = Database(":memory:")
+    await database.initialize()
+    monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
+    publisher = VerdictPublisher(database, registry_address=REGISTRY)
+    attempts = []
+    expiry = None
+
+    async def take_lease():
+        nonlocal expiry
+        attempts.append(time.time())
+        await asyncio.sleep(0.05)  # a database call that takes a while
+        if expiry is None:
+            expiry = time.time() + 0.1
+            return False, expiry
+        return True, time.time() + 90
+
+    async def keep_lease(_expiry):
+        await asyncio.Event().wait()
+
+    publisher._take_lease = take_lease
+    publisher._keep_lease = keep_lease
+    publisher._recover_claims = AsyncMock(return_value=0)
+    publisher._reconcile = AsyncMock(return_value=0)
+    publisher.drain_once = AsyncMock(return_value="idle")
+    publisher.start_publishers([publisher])
+    await until(lambda: asyncio.sleep(0, len(attempts) >= 2))
+    await publisher.stop()
+    await database.close()
+    assert attempts[1] >= expiry, f"asked again {expiry - attempts[1]:.3f} s before the lease expired"
+
+
+@pytest.mark.asyncio
 async def test_a_holder_that_finds_another_holder_stops_sending_until_it_can_take_the_lease_again(
     two_processes, short_lease, caplog
 ):

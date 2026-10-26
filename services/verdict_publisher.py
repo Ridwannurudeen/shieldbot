@@ -479,12 +479,14 @@ class VerdictPublisher:
                     if not acquired:
                         until_expiry = expiry - time.time()
                         if until_expiry > 0:
-                            retry_delay = min(LEASE_SECONDS, until_expiry)
+                            # Just past the expiry: a timer can fire a moment early.
+                            retry_delay = min(LEASE_SECONDS, until_expiry + 0.01)
                         elif expiry > 0:
                             retry_delay = 0.01
                         else:
                             retry_delay = min(LEASE_SECONDS, DRAIN_POLL_SECONDS)
-                        lease_retry_after[publisher] = now + retry_delay
+                        # From after the lease call returned: `now` predates it, by however long the database took.
+                        lease_retry_after[publisher] = time.monotonic() + retry_delay
                         continue
                     held.add(publisher)
                     lease_retry_after[publisher] = 0.0
