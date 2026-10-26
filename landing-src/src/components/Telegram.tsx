@@ -10,7 +10,7 @@ const commands = [
   },
   {
     command: "/scan <address>",
-    desc: "Contract risk report: scam database matches, verification, code and market checks. Results on Robinhood Chain and BOT Chain can be recorded in the on-chain registries.",
+    desc: "Contract risk report: scam database matches, verification, code and market checks.",
   },
   {
     command: "/rescue <wallet>",
