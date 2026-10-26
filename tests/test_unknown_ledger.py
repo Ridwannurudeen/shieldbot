@@ -54,7 +54,7 @@ def ledger(monkeypatch):
 def _aiohttp(module, *replies):
     """Patch `module`'s aiohttp.ClientSession so successive GETs get `replies`: (status, body) or an exception.
 
-    A body that is an exception is raised by the reply's .json().
+    A body that is an exception is raised by the reply's .json(), and an async function is awaited by it.
     """
     session = MagicMock()
     contexts = []
@@ -66,7 +66,8 @@ def _aiohttp(module, *replies):
             status, body = reply
             response = MagicMock(status=status)
             response.json = (
-                AsyncMock(side_effect=body) if isinstance(body, Exception) else AsyncMock(return_value=body)
+                AsyncMock(side_effect=body) if isinstance(body, Exception) or callable(body)
+                else AsyncMock(return_value=body)
             )
             context.__aenter__ = AsyncMock(return_value=response)
         contexts.append(context)
@@ -542,7 +543,48 @@ async def test_counterparty_address_lookup_without_chain_stays_chain_independent
 
 
 @pytest.mark.asyncio
-async def test_botchain_contract_scan_records_token_and_creator_address_lookups(ledger, mock_web3_client):
+async def test_coalesced_address_lookup_makes_one_request_recorded_under_the_starting_chain(
+    ledger, monkeypatch
+):
+    import asyncio
+
+    import utils.scam_db
+    from utils.scam_db import ScamDatabase
+
+    monkeypatch.setattr(utils.scam_db, "_GOPLUS_ADDRESS_CACHE", {})
+    monkeypatch.setattr(utils.scam_db, "_GOPLUS_ADDRESS_INFLIGHT", {})
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_response():
+        started.set()
+        await release.wait()
+        return {"code": 1, "result": {"address": TOKEN}}
+
+    patcher = _aiohttp("utils.scam_db", (200, slow_response), (200, slow_response))
+    try:
+        session = utils.scam_db.aiohttp.ClientSession.return_value.__aenter__.return_value
+        first = asyncio.create_task(ScamDatabase.fetch_address_security(TOKEN, ledger_chain=677))
+        await started.wait()
+        second = asyncio.create_task(ScamDatabase.fetch_address_security(TOKEN))
+        await asyncio.sleep(0)
+        release.set()
+        results = await asyncio.gather(first, second)
+    finally:
+        patcher.stop()
+
+    assert session.get.call_count == 1
+    assert results[0] is results[1]
+    assert results[0]["status"] == "ok"
+    assert _chain_counts(ledger, 677) == {"goplus_address": _counts(answered=1)}
+    assert _chain_counts(ledger, None) == {}
+
+
+@pytest.mark.asyncio
+async def test_botchain_contract_scan_records_token_and_creator_address_lookups(
+    ledger, monkeypatch, mock_web3_client
+):
+    import utils.scam_db
     from services.contract_service import ContractService
     from utils.scam_db import ScamDatabase
 
@@ -550,30 +592,30 @@ async def test_botchain_contract_scan_records_token_and_creator_address_lookups(
     mock_web3_client.get_contract_creation_info.return_value = {
         "creator": creator, "age_days": 138,
     }
-    clean_record = {
-        "status": "ok", "reason": None,
-        "data": {"address": TOKEN, "data_source": "", "stealing_attack": "0"},
-    }
-    creator_record = {
-        "status": "ok", "reason": None,
-        "data": {"address": creator, "data_source": "", "stealing_attack": "0"},
-    }
-    fetch_address_security = AsyncMock(side_effect=[clean_record, creator_record])
-    with (
-        patch.object(
-            ScamDatabase, "fetch_address_security", new=fetch_address_security,
-        ),
-        patch("services.contract_service.BSCSCAN_DELAY", 0),
-    ):
-        data = await ContractService(mock_web3_client, ScamDatabase()).fetch_contract_data(
-            TOKEN, chain_id=677,
-        )
+    monkeypatch.setattr(utils.scam_db, "_GOPLUS_ADDRESS_CACHE", {})
+    monkeypatch.setattr(utils.scam_db, "_GOPLUS_ADDRESS_INFLIGHT", {})
+    clean_record = {"data_source": "", "stealing_attack": "0"}
+    patcher = _aiohttp(
+        "utils.scam_db",
+        (200, {"code": 1, "result": clean_record}),
+        (200, {"code": 1, "result": clean_record}),
+    )
+    try:
+        with patch("services.contract_service.BSCSCAN_DELAY", 0):
+            data = await ContractService(mock_web3_client, ScamDatabase()).fetch_contract_data(
+                TOKEN, chain_id=677,
+            )
+        session = utils.scam_db.aiohttp.ClientSession.return_value.__aenter__.return_value
+        requested = sorted(call.args[0] for call in session.get.call_args_list)
+    finally:
+        patcher.stop()
 
     assert data["creator_address"] == creator
-    assert [call.kwargs for call in fetch_address_security.await_args_list] == [
-        {"ledger_chain": 677}, {"ledger_chain": 677},
-    ]
-    assert _chain_counts(ledger, 677) == {}
+    assert data["creator_address_status"] == "ok"
+    assert requested == sorted(
+        f"https://api.gopluslabs.io/api/v1/address_security/{address}" for address in (TOKEN, creator)
+    )
+    assert _chain_counts(ledger, 677) == {"goplus_address": _counts(answered=2)}
     assert _chain_counts(ledger, None) == {}
 
 
