@@ -380,6 +380,53 @@ ready().then(() => {
     assert result.returncode == 0 and "completed" in result.stdout, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("granted", [True, False], ids=["granted", "withheld"])
+def test_welcome_asks_only_for_https_access_and_only_when_it_is_missing(granted):
+    # https://*/* is a required host permission, granted at install; localhost is optional and the
+    # popup asks for it only when the user configures a localhost API.
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for extension JavaScript regression tests")
+    script = r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const elements = {};
+const element = id => elements[id] ||= {textContent: '', style: {}, disabled: false, listeners: {},
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }};
+let ready;
+const granted = JSON.parse(process.argv[1]);
+const asked = [], checked = [];
+const context = vm.createContext({
+  window: {addEventListener(type, fn) { if (type === 'DOMContentLoaded') ready = fn; }},
+  document: {getElementById: element, querySelector: selector => selector === '.version' ? element('version') : null},
+  initI18n: async () => {}, applyTranslations() {}, t: key => key, AbortSignal,
+  chrome: {
+    runtime: {getManifest: () => JSON.parse(fs.readFileSync('extension/manifest.json', 'utf8'))},
+    permissions: {
+      contains: async request => { checked.push(JSON.stringify(request)); return granted; },
+      request: async request => { asked.push(JSON.stringify(request)); return true; },
+    },
+    storage: {local: {get: async defaults => defaults}},
+  },
+  fetch: async () => ({ok: true}),
+});
+vm.runInContext(fs.readFileSync('extension/welcome.js', 'utf8'), context);
+(async () => {
+  await ready();
+  for (const fn of element('connectBtn').listeners.click) await fn();
+  assert.deepEqual(checked, ['{"origins":["https://*/*"]}']);
+  assert.deepEqual(asked, granted ? [] : ['{"origins":["https://*/*"]}']);
+  assert.equal(element('connectBtn').textContent, 'welcomeProtected');
+  assert.equal(element('statusMsg').textContent, 'welcomeFullyConnected');
+  console.log('completed');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run(
+        [node, "-e", script, "--", json.dumps(granted)],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert result.returncode == 0 and "completed" in result.stdout, result.stdout + result.stderr
+
+
 def test_extension_states_the_scan_chain_count_and_no_mempool_count():
     count = len(CHAIN_INFO)
     html = (EXTENSION / "popup.html").read_text(encoding="utf-8")
