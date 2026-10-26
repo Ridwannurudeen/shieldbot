@@ -2,7 +2,7 @@
 
 This document provides the exact wording to use when completing the Chrome Web Store Developer Dashboard privacy questionnaire for ShieldBot Transaction Firewall.
 
-These disclosures describe version 3.4.0. Since 3.1.0, the version the store serves, the permissions, the data sent, the API endpoints and the stored keys are unchanged; 3.4.0 renames the product ShieldBot in every string (the store title follows the package name, ShieldBot Transaction Firewall), adds BOT Chain (677) to the extension's own screens, restyles the overlay, popup, side panel and welcome page, and packages its fonts locally. As in 3.1.0, it asks the wallet which chain it is on before analysing a request, so a dApp that omits `chainId` no longer defaults to BNB Chain. A request whose chain cannot be read, does not match the wallet's, or is not supported is not analysed, and the overlay offers only Block. Version 3.0.1 and earlier defaulted to BNB Chain in that case (see [TECHNICAL.md](TECHNICAL.md)).
+These disclosures describe version 3.4.0. Since 3.1.0, the version the store serves, the data sent, the API endpoints and the stored keys are unchanged; 3.4.0 drops the `tabs` permission (the active tab's address, read for the side panel's "Scan this page", comes with the https host permission), requires Chrome 116 or later (for the side panel it opens), renames the product ShieldBot in every string (the store title follows the package name, ShieldBot Transaction Firewall), adds BOT Chain (677) to the extension's own screens, restyles the overlay, popup, side panel and welcome page, and packages its fonts locally. As in 3.1.0, it asks the wallet which chain it is on before analysing a request, so a dApp that omits `chainId` no longer defaults to BNB Chain. A request whose chain cannot be read, does not match the wallet's, or is not supported is not analysed, and the overlay offers only Block. Version 3.0.1 and earlier defaulted to BNB Chain in that case (see [TECHNICAL.md](TECHNICAL.md)).
 
 ## Privacy Practices
 
@@ -156,9 +156,6 @@ SECURITY MEASURES:
 
 ### `sidePanel`
 **Justification:** Required to open the ShieldBot assistant, wallet health, guardian alerts, and prompt-injection scanner in Chrome's side panel.
-
-### `tabs`
-**Justification:** Required to open extension pages and to read the active tab URL/title only when a popup or side panel page starts the "Scan this page" workflow. Content scripts are blocked from requesting active tab details.
 
 ---
 

@@ -60,7 +60,7 @@ Limits
 • A page can still hide or cover the warning, or lay something over it to trick you into clicking (clickjacking). The extension makes this harder (continue and sign buttons wait half a second after the warning appears, and work only once the warning has been fully visible for half a second since it last became visible) but cannot fully prevent it. If the page covers or alters the warning, those buttons do nothing and the warning says why. A page that makes the warning invisible without moving it away leaves the request waiting; nothing is sent. A page-wide filter from another extension (for example a dark-mode filter) can keep the continue button unavailable on that site.
 • A batch of calls (wallet_sendCalls) is checked one call at a time, each with its own warning. How the calls work together is not analysed.
 • A delegation (EIP-7702) your wallet signs in its own screens, and a send you make from the wallet itself, are not seen. The look-alike check only knows addresses you sent to through a page in this browser.
-• It runs on https pages only, in Chrome 111 or later.
+• It runs on https pages only, in Chrome 116 or later.
 ```
 
 Do not add claims the 3.4.0 extension does not make good on: no "blocks", no simulation or asset
@@ -83,7 +83,7 @@ smoke test in section 3 has passed with them.
    python -c "import pathlib, zipfile; root = pathlib.Path('extension'); z = zipfile.ZipFile('shieldbot-extension-v3.4.0.zip', 'w', zipfile.ZIP_DEFLATED); [z.write(p, p.relative_to(root).as_posix()) for p in sorted(root.rglob('*')) if p.is_file() and p.relative_to(root).as_posix() != 'README.md']; z.close()"
    ```
 
-4. In a clean Chrome profile (Chrome 111 or later, which the manifest now requires) open
+4. In a clean Chrome profile (Chrome 116 or later, which the manifest now requires) open
    `chrome://extensions`, turn on Developer mode, use Load unpacked
    on the `extension` folder, and check: name "ShieldBot Transaction Firewall", version 3.4.0,
    no Errors button. Then run the smoke test below. Its manual release gate remains outstanding on

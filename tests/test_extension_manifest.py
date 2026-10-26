@@ -150,3 +150,37 @@ def test_readme_names_every_way_a_page_can_tell_the_extension_is_there():
     for surface in ("`SHIELDAI_TX_VERDICT`", "`request`", "`window.ethereum`", "accessor", "use_dynamic_url"):
         assert surface in section, surface
 
+
+
+def test_minimum_chrome_version_has_the_side_panel_the_popup_opens():
+    # chrome.sidePanel arrived in Chrome 114 and sidePanel.open(), which the popup calls, in 116.
+    assert "chrome.sidePanel.open(" in (EXTENSION / "popup.js").read_text(encoding="utf-8")
+    assert int(MANIFEST["minimum_chrome_version"]) >= 116
+    version = f"Chrome {MANIFEST['minimum_chrome_version']} or later"
+    assert version in (EXTENSION / "README.md").read_text(encoding="utf-8")
+    listing = (EXTENSION.parent / "docs" / "store-listing.md").read_text(encoding="utf-8")
+    assert re.findall(r"Chrome \d+ or later", listing) == [version, version]
+
+
+def test_no_tabs_permission():
+    # chrome.tabs.create needs no permission, and the active tab's url and title, read for the side
+    # panel's "Scan this page", come with the https host permission on the pages it reads.
+    assert "tabs" not in MANIFEST["permissions"]
+    disclosure = (EXTENSION.parent / "docs" / "CHROME_WEB_STORE_DISCLOSURE.md").read_text(encoding="utf-8")
+    section = disclosure.split("## Permission Justifications", 1)[1].split("\n## ", 1)[0]
+    assert set(re.findall(r"^### `(\w+)`", section, re.M)) == set(MANIFEST["permissions"])
+
+
+def test_pages_can_fetch_only_what_the_content_script_loads():
+    # content.js loads overlay.css, its language files and the overlay's fonts by their extension
+    # URL; nothing else needs to be reachable from a page.
+    resources = {item for entry in MANIFEST["web_accessible_resources"] for item in entry["resources"]}
+    assert resources == {
+        "overlay.css",
+        "locales/en/messages.json",
+        "locales/zh/messages.json",
+        "locales/vi/messages.json",
+        "fonts/geist-latin-400-normal.woff2",
+        "fonts/geist-latin-500-normal.woff2",
+        "fonts/ibm-plex-mono-latin-400-normal.woff2",
+    }
