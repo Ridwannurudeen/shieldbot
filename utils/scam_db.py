@@ -152,19 +152,13 @@ class ScamDatabase:
         )
 
     async def _check_goplus_address(self, address: str) -> ScamMatches:
-        async def fetch_and_record():
-            try:
-                response = await asyncio.wait_for(
-                    self.fetch_address_security(address, ledger_chain=677),
-                    timeout=GOPLUS_ADDRESS_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError:
-                response = {'status': 'unknown', 'reason': 'timed out', 'data': {}}
-            return response
-
-        task = asyncio.create_task(fetch_and_record())
-        task.add_done_callback(lambda pending: pending.exception() if not pending.cancelled() else None)
-        response = await asyncio.shield(task)
+        try:
+            response = await asyncio.wait_for(
+                self.fetch_address_security(address, ledger_chain=677),
+                timeout=GOPLUS_ADDRESS_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            response = {'status': 'unknown', 'reason': 'timed out', 'data': {}}
         record = response.get('data')
         valid_record = (
             isinstance(record, dict)
