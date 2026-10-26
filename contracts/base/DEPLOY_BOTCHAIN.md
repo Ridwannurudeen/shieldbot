@@ -39,7 +39,7 @@ else
 fi
 ```
 
-For a rollback, use the backup directory printed by the deploy command:
+For a rollback, use the backup directory printed by the deploy command. A rollback restores the database saved at that cutover and loses every row written since; to keep the data, run `--cutover` with the previous release instead (see Rollback of P3 configuration):
 
 ```bash
 BACKUP=<backup-directory>
@@ -219,18 +219,7 @@ All five records are separate `record()` transactions (the publisher sends `RECO
 
 ## Rollback of P3 configuration
 
-If P3 needs to roll back, use the deploy rollback to restore the previous release. When the workers unit is active, stop it before the rollback and start it after the rollback completes:
-
-```bash
-BACKUP=<backup-directory>
-if systemctl is-active --quiet shieldbot-workers; then
-  sudo systemctl stop shieldbot-workers
-  bash /root/shieldbot-deploy.sh --rollback "$BACKUP"
-  sudo systemctl start shieldbot-workers
-else
-  bash /root/shieldbot-deploy.sh --rollback "$BACKUP"
-fi
-```
+Turning BOT Chain publishing off needs no code rollback: remove the 677 settings below and restart, and the P3 code keeps 4663 publishing on with 677 off. Do not use `--rollback <backup-directory>` for this. It restores the database saved at the P3 cutover, so every 4663 verdict evidence and transaction row written since then is lost, and verdicts already recorded on Robinhood Chain lose their documents.
 
 Remove only the 677 registry and RPC settings from `/opt/shieldbot/.env` and only the BOTCHAIN key line from the recorder environment file:
 
@@ -247,3 +236,11 @@ sudo journalctl -u shieldbot-bot -n 100 --no-pager
 ```
 
 Confirm 4663 publishing remains on and 677 publishing is off. The bot log should show `BOT Chain verdict registry: disabled (set BOTCHAIN_VERDICT_REGISTRY to enable)`. The 677 registry remains onchain. Its deployment is not reversible.
+
+To also revert the P3 code, P3 changed no database schema, so go back on code only and keep the data, using the release that ran before P3 (the deploy command prints it as the rollback point). Use the step 0 workers pattern if the workers unit is active:
+
+```bash
+bash /root/shieldbot-deploy.sh --cutover <previous release sha>
+```
+
+Use `--rollback <backup-directory>` only for a failure found right at the P3 cutover, before new verdict rows matter.
