@@ -2,6 +2,7 @@
 unknown, even beside a complete and clean GoPlus answer: GoPlus misses the honeypots the simulation exists to
 catch (it reports the real Arbitrum honeypot ARBROKER as not a honeypot)."""
 
+import asyncio
 import copy
 import dataclasses
 import logging
@@ -14,6 +15,7 @@ from requests.exceptions import HTTPError
 from web3.exceptions import ContractLogicError
 
 from adapters.arbitrum import ArbitrumAdapter
+from adapters.botchain import BotChainAdapter
 from adapters.evm_base import EvmAdapter
 from adapters.robinhood import RobinhoodAdapter
 from analyzers.honeypot import HoneypotAnalyzer
@@ -26,6 +28,9 @@ from scanner.token_scanner import TokenScanner
 from services.honeypot_service import HoneypotService
 from services.robinhood_simulation import SimulationUnavailable, aggregate_outcomes
 from services.arbitrum_simulation import V2_ROUTES
+import services.arbitrum_simulation as arbitrum_simulation
+import services.botchain_simulation as botchain_simulation
+import services.robinhood_simulation as robinhood_simulation
 from tests.test_arbitrum_simulation import FakeRpc as ArbitrumRpc
 from tests.test_arbitrum_simulation import (
     _answering,
@@ -613,6 +618,32 @@ async def test_the_telegram_report_never_calls_a_token_not_a_honeypot_after_a_si
     report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data, chain_id=chain_id)
     assert "Not Honeypot" not in report
     assert "\n  Unknown (" in report
+    assert "Sellability: Unknown" in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663, 677])
+async def test_a_simulation_refused_at_the_cap_stays_unknown_beside_a_complete_clean_goplus_answer(chain_id):
+    adapter, module = {
+        42161: (ArbitrumAdapter, arbitrum_simulation),
+        4663: (RobinhoodAdapter, robinhood_simulation),
+        677: (BotChainAdapter, botchain_simulation),
+    }[chain_id]
+    adapter = adapter("https://rpc.invalid")
+    adapter._simulator._request = request = AsyncMock()
+    cap = module.MAX_SIMULATIONS
+    # User simulations of other tokens on this loop fill the cap.
+    loop = asyncio.get_running_loop()
+    adapter._simulator._inflight = {(loop, f"other {index}"): None for index in range(cap)}
+    data, analyzed, risk, extension = await scan(chain_id, adapter)
+    request.assert_not_awaited()
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    assert data["can_sell"] is None and data["coverage"]["can_sell"] is False
+    assert data["rpc_failed"] is True and analyzed.score == 0
+    assert f"Simulation not run: {cap} simulations already in progress" in data["reason"]
+    assert "Honeypot simulation could not run (unresolved)" in data["reason"]
+    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data, chain_id=chain_id)
+    assert "Not Honeypot" not in report
     assert "Sellability: Unknown" in report
 
 

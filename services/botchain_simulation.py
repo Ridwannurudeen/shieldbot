@@ -92,6 +92,12 @@ V2_ROUTES = {
 # run and a confirmation, fit the interactive deadline; one request gives up after 12 s.
 MAX_POOLS = 2
 RPC_TIMEOUT_SECONDS = 12
+# Simulations admitted and not finished: the one holding the lane and those waiting for it. A run takes
+# several seconds at about 2 s a call, so a token waiting behind more would miss the firewall's 7.5 s and
+# the bot's 25 s deadlines anyway; a new token at the cap is left unknown without a simulation.
+# Background work counts every simulation in progress, a user only users', so background work never
+# fills a user's slot.
+MAX_SIMULATIONS = 4
 BUY_CAP_WEI = 5 * 10**17
 DEPTH_DIVISOR = 50
 # 0.05 BOT. A shallower pool would size a buy under 0.001 BOT, where swap rounding can pass for a tax;
@@ -593,20 +599,46 @@ class BotChainSimulator:
         self._lane = _Lane()
         # Tokens whose background simulation a user has since joined: they take a user's turn.
         self._promoted = set()
+        # Flights a background caller started that no user has joined: they hold no user's slot.
+        self._background = set()
 
     async def simulate(self, token: str) -> dict:
         token = token.lower()
         cached = self._cache.get(token)
         if cached is not None:
             return cached
-        flight_key = (asyncio.get_running_loop(), token)
+        loop = asyncio.get_running_loop()
+        flight_key = (loop, token)
+        background = BACKGROUND.get()
         if flight_key not in self._inflight:
+            # Only this loop's simulations can finish, so only they hold a slot. Background work counts
+            # every simulation in progress; a user counts only users', since the lane takes users first.
+            in_progress = sum(
+                key[0] is loop and (background or key not in self._background)
+                for key in self._inflight
+            )
+            if in_progress >= MAX_SIMULATIONS:
+                # Not cached, so the token is simulated once a simulation in progress finishes.
+                result = aggregate_outcomes(
+                    [],
+                    [
+                        f"Simulation not run: {MAX_SIMULATIONS} simulations already in progress"
+                    ],
+                )
+                # The simulation could not run, so it cannot say the token sells.
+                result["rpc_failed"] = True
+                result["observed_at"] = time.time()
+                unknown_ledger.record(SIMULATION_PROVIDER, self.chain_id, "unknown")
+                return result
             self._inflight[flight_key] = asyncio.create_task(
                 self._simulate(token, flight_key)
             )
-        elif not BACKGROUND.get():
+            if background:
+                self._background.add(flight_key)
+        elif not background:
             self._promoted.add(token)
             self._lane.promote(token)
+            self._background.discard(flight_key)
         return await asyncio.shield(self._inflight[flight_key])
 
     async def _simulate(self, token: str, flight_key: tuple) -> dict:
@@ -648,6 +680,7 @@ class BotChainSimulator:
         finally:
             self._inflight.pop(flight_key, None)
             self._promoted.discard(token)
+            self._background.discard(flight_key)
         result["observed_at"] = observed_at
         self._cache[token] = result
         return result

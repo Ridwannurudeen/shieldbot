@@ -115,6 +115,10 @@ CONFIRMATION_DELAY_SECONDS = 3600
 CONFIRMATION_RUN = "a re-run whose buy a separate address paid and whose sell ran an hour later"
 # A confirmation's first block holds the buy and the balance it delivered; the second, the rest.
 BUY_CALLS = 2
+# Simulations admitted and not finished. They run side by side, each its own stream of requests to the
+# RPC, whose rate limits are retried with backoff; a new token at the cap is left unknown without a
+# simulation rather than slowing every simulation already running.
+MAX_SIMULATIONS = 8
 
 
 @dataclass(frozen=True)
@@ -529,8 +533,20 @@ class ArbitrumSimulator:
         cached = self._cache.get(token)
         if cached is not None:
             return cached
-        flight_key = (asyncio.get_running_loop(), token)
+        loop = asyncio.get_running_loop()
+        flight_key = (loop, token)
         if flight_key not in self._inflight:
+            # Only this loop's simulations can finish, so only they hold a slot.
+            if sum(key[0] is loop for key in self._inflight) >= MAX_SIMULATIONS:
+                # Not cached, so the token is simulated once a simulation in progress finishes.
+                result = aggregate_outcomes(
+                    [], [f"Simulation not run: {MAX_SIMULATIONS} simulations already in progress"]
+                )
+                # The simulation could not run, so it cannot say the token sells; nor can GoPlus.
+                result["rpc_failed"] = True
+                result["observed_at"] = time.time()
+                unknown_ledger.record(SIMULATION_PROVIDER, CHAIN_ID, "unknown")
+                return result
             self._inflight[flight_key] = asyncio.create_task(self._simulate(token, flight_key))
         return await asyncio.shield(self._inflight[flight_key])
 

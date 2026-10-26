@@ -27,6 +27,7 @@ from services.robinhood_simulation import (
     LOG_WINDOW_BLOCKS,
     MAX_LOG_WINDOWS,
     MAX_POOLS,
+    MAX_SIMULATIONS,
     MIN_TRAP_COST_WEI,
     ROUTES,
     TOKEN_REFUSED,
@@ -2308,6 +2309,245 @@ async def test_distinct_token_simulations_are_serialized():
     await asyncio.gather(first, second)
     assert second_started.is_set()
     assert maximum_active == 1
+
+
+# --- the admission cap ----------------------------------------------------------------------------
+
+
+def distinct_tokens(count):
+    return ["0x" + f"{i:040x}" for i in range(1, count + 1)]
+
+
+def held_simulator(tokens):
+    """A simulator whose run for each token waits until that token's event is set."""
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    releases = {token: asyncio.Event() for token in tokens}
+    started = []
+
+    async def run(token):
+        started.append(token)
+        await releases[token].wait()
+        return aggregate_outcomes([], ["No supported pool found"])
+
+    simulator._run = run
+    return simulator, releases, started
+
+
+@pytest.mark.asyncio
+async def test_a_new_token_at_the_cap_is_unknown_without_a_task_or_an_rpc_call(monkeypatch):
+    ledger = UnknownLedger()
+    monkeypatch.setattr("services.robinhood_simulation.unknown_ledger", ledger)
+    *admitted, refused = distinct_tokens(MAX_SIMULATIONS + 1)
+    simulator, releases, started = held_simulator(admitted)
+    callers = [asyncio.create_task(simulator.simulate(token)) for token in admitted]
+    await asyncio.sleep(0)
+    with (
+        patch.object(
+            robinhood_simulation.asyncio, "create_task", wraps=asyncio.create_task
+        ) as create_task,
+        patch.object(robinhood_simulation.aiohttp, "ClientSession") as session,
+    ):
+        result = await simulator.simulate(refused)
+    create_task.assert_not_called()
+    session.assert_not_called()
+    # A refusal is no answer from the provider, nor a failure of it.
+    counts = ledger.for_chain(4663)[robinhood_simulation.SIMULATION_PROVIDER]
+    assert (counts["answered"], counts["unknown"], counts["failed"]) == (0, 1, 0)
+    assert refused not in started
+    assert len(simulator._inflight) == MAX_SIMULATIONS
+    assert all(result[field] is None for field in FIELDS)
+    assert result["rpc_failed"] is True
+    assert result["reason"] == (
+        f"Simulation not run: {MAX_SIMULATIONS} simulations already in progress"
+    )
+    assert refused not in simulator._cache
+    for release in releases.values():
+        release.set()
+    await asyncio.gather(*callers)
+
+
+@pytest.mark.asyncio
+async def test_the_same_token_at_the_cap_joins_its_simulation():
+    tokens = distinct_tokens(MAX_SIMULATIONS)
+    simulator, releases, started = held_simulator(tokens)
+    callers = [asyncio.create_task(simulator.simulate(token)) for token in tokens]
+    await asyncio.sleep(0)
+    joined = asyncio.create_task(simulator.simulate(tokens[0]))
+    await asyncio.sleep(0)
+    assert len(simulator._inflight) == MAX_SIMULATIONS
+    for release in releases.values():
+        release.set()
+    results = await asyncio.gather(*callers)
+    assert await joined is results[0]
+    assert "not run" not in results[0]["reason"]
+    assert started.count(tokens[0]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_new_token_is_admitted_again_once_a_simulation_finishes():
+    *tokens, later = distinct_tokens(MAX_SIMULATIONS + 1)
+    simulator, releases, started = held_simulator([*tokens, later])
+    callers = [asyncio.create_task(simulator.simulate(token)) for token in tokens]
+    await asyncio.sleep(0)
+    assert (await simulator.simulate(later))["rpc_failed"] is True
+    releases[tokens[0]].set()
+    await callers[0]
+    assert len(simulator._inflight) == MAX_SIMULATIONS - 1
+    admitted = asyncio.create_task(simulator.simulate(later))
+    await asyncio.sleep(0)
+    assert len(simulator._inflight) == MAX_SIMULATIONS
+    for release in releases.values():
+        release.set()
+    await asyncio.gather(*callers)
+    result = await admitted
+    assert later in started
+    assert result["reason"] == "No supported pool found"
+    assert "rpc_failed" not in result
+    assert simulator._inflight == {}
+
+
+@pytest.mark.asyncio
+async def test_the_count_returns_to_zero_after_simulations_raise():
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+
+    async def run(token):
+        raise RuntimeError("boom")
+
+    simulator._run = run
+    tokens = distinct_tokens(MAX_SIMULATIONS + 1)
+    results = await asyncio.gather(
+        *(simulator.simulate(token) for token in tokens[:-1])
+    )
+    assert all(result["rpc_failed"] is True for result in results)
+    assert simulator._inflight == {}
+    result = await simulator.simulate(tokens[-1])
+    assert result["reason"] == "Simulation RPC request failed (RuntimeError)"
+
+
+@pytest.mark.asyncio
+async def test_the_count_returns_to_zero_after_simulations_are_cancelled():
+    *tokens, later = distinct_tokens(MAX_SIMULATIONS + 1)
+    simulator, releases, started = held_simulator([*tokens, later])
+    callers = [asyncio.create_task(simulator.simulate(token)) for token in tokens]
+    # Let every simulation start: one cancelled before its first step never runs its finally.
+    while not started:
+        await asyncio.sleep(0)
+    for task in list(simulator._inflight.values()):
+        task.cancel()
+    outcomes = await asyncio.gather(*callers, return_exceptions=True)
+    assert all(isinstance(outcome, asyncio.CancelledError) for outcome in outcomes)
+    assert simulator._inflight == {}
+    admitted = asyncio.create_task(simulator.simulate(later))
+    await asyncio.sleep(0)
+    assert len(simulator._inflight) == 1
+    releases[later].set()
+    assert (await admitted)["reason"] == "No supported pool found"
+    assert simulator._inflight == {}
+
+
+def test_entries_a_closed_loop_left_behind_hold_no_slot():
+    *stale, fresh = distinct_tokens(MAX_SIMULATIONS + 1)
+    simulator, releases, started = held_simulator([fresh])
+    loop = asyncio.new_event_loop()
+
+    async def leave_entries():
+        callers = [asyncio.ensure_future(simulator.simulate(token)) for token in stale]
+        await asyncio.sleep(0)
+        # Cancelled before its first step, a simulation never runs the finally that pops its entry.
+        simulations = list(simulator._inflight.values())
+        for task in [*simulations, *callers]:
+            task.cancel()
+        await asyncio.gather(*simulations, *callers, return_exceptions=True)
+
+    loop.run_until_complete(leave_entries())
+    loop.close()
+    assert len(simulator._inflight) == MAX_SIMULATIONS
+    releases[fresh].set()
+    result = asyncio.run(simulator.simulate(fresh))
+    assert result["reason"] == "No supported pool found"
+    assert started == [fresh]
+
+
+def background_simulations(simulator, tokens):
+    """Start each token's simulation as the hunter or the launch watch would, under BACKGROUND."""
+    background = robinhood_simulation.BACKGROUND.set(True)
+    try:
+        return [asyncio.create_task(simulator.simulate(token)) for token in tokens]
+    finally:
+        robinhood_simulation.BACKGROUND.reset(background)
+
+
+async def background_simulate(simulator, token):
+    background = robinhood_simulation.BACKGROUND.set(True)
+    try:
+        return await simulator.simulate(token)
+    finally:
+        robinhood_simulation.BACKGROUND.reset(background)
+
+
+@pytest.mark.asyncio
+async def test_background_work_at_the_cap_is_refused_and_a_users_new_token_is_still_simulated():
+    *queued, theirs, mine = distinct_tokens(MAX_SIMULATIONS + 2)
+    simulator, releases, started = held_simulator([*queued, mine])
+    callers = background_simulations(simulator, queued)
+    await asyncio.sleep(0)
+    refused = await background_simulate(simulator, theirs)
+    assert refused["rpc_failed"] is True
+    assert refused["reason"] == (
+        f"Simulation not run: {MAX_SIMULATIONS} simulations already in progress"
+    )
+    user = asyncio.create_task(simulator.simulate(mine))
+    await asyncio.sleep(0)
+    assert len(simulator._inflight) == MAX_SIMULATIONS + 1
+    releases[queued[0]].set()
+    releases[mine].set()
+    result = await user
+    assert result["reason"] == "No supported pool found"
+    # The lane took the user's simulation ahead of the background ones waiting.
+    assert started[:2] == [queued[0], mine]
+    for release in releases.values():
+        release.set()
+    await asyncio.gather(*callers)
+    assert simulator._inflight == {}
+
+
+@pytest.mark.asyncio
+async def test_users_are_capped_on_their_own_beside_background_work():
+    tokens = distinct_tokens(2 * MAX_SIMULATIONS + 2)
+    theirs = tokens[:MAX_SIMULATIONS]
+    mine = tokens[MAX_SIMULATIONS : 2 * MAX_SIMULATIONS]
+    user_refused, background_refused = tokens[-2:]
+    simulator, releases, started = held_simulator([*theirs, *mine])
+    callers = background_simulations(simulator, theirs)
+    callers += [asyncio.create_task(simulator.simulate(token)) for token in mine]
+    await asyncio.sleep(0)
+    assert len(simulator._inflight) == 2 * MAX_SIMULATIONS
+    reason = f"Simulation not run: {MAX_SIMULATIONS} simulations already in progress"
+    assert (await simulator.simulate(user_refused))["reason"] == reason
+    assert (await background_simulate(simulator, background_refused))["reason"] == reason
+    assert user_refused not in started and background_refused not in started
+    for release in releases.values():
+        release.set()
+    await asyncio.gather(*callers)
+    assert simulator._inflight == {}
+
+
+@pytest.mark.asyncio
+async def test_a_background_simulation_a_user_joined_counts_against_users():
+    tokens = distinct_tokens(MAX_SIMULATIONS + 1)
+    simulator, releases, started = held_simulator(tokens[:-1])
+    callers = background_simulations(simulator, tokens[:-1])
+    await asyncio.sleep(0)
+    callers += [asyncio.create_task(simulator.simulate(token)) for token in tokens[:-1]]
+    await asyncio.sleep(0)
+    result = await simulator.simulate(tokens[-1])
+    assert result["reason"] == (
+        f"Simulation not run: {MAX_SIMULATIONS} simulations already in progress"
+    )
+    for release in releases.values():
+        release.set()
+    await asyncio.gather(*callers)
+    assert simulator._inflight == {}
 
 
 # --- adapter shapes and integration -------------------------------------------------------------
