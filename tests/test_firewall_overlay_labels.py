@@ -516,12 +516,35 @@ def test_a_router_call_whose_commands_cannot_be_read_keeps_the_permit_warning():
     unreadable = DECODER.decode("0x3593564c" + "00" * 96)
     assert api._granting_access(unreadable) == "Unknown (may include a Permit2 permit)"
     assert api._build_calldata_details(unreadable)["fields"] == [{"label": "Function", "value": "execute"}]
-    # A V4 swap: the commands are read, its tokens are not, and no permit is among them.
+    # A V4 swap: the commands are read, but what 0x10 does depends on the router, so no permit is ruled out.
     v4 = DECODER.decode(router_swap_calldata(
         (V4_SWAP, v4_input([SWAP_EXACT_IN_SINGLE], [single(TOKEN_A, TOKEN_B, True)])),
     ))
-    assert api._granting_access(v4) == "None"
+    assert api._granting_access(v4) == "Unknown (may include a Permit2 permit)"
     assert api._build_calldata_details(v4)["fields"] == [
         {"label": "Function", "value": "execute"},
         {"label": "Commands", "value": "0x10"},
     ]
+
+
+@pytest.mark.parametrize(
+    "command, command_input",
+    [(0x21, "subplan"), (0x0D, b"\x00" * 32)],
+    ids=["permit-nested-in-a-subplan", "unknown-command-byte"],
+)
+def test_a_router_call_with_a_command_the_decoder_does_not_read_never_says_none(command, command_input):
+    import api
+    from tests.test_universal_router_path import (
+        ROUTER, TOKEN_A, TOKEN_B, PERMIT2_PERMIT, V2_SWAP_EXACT_IN, permit_input, v2_input, v4_input,
+    )
+
+    if command_input == "subplan":
+        command_input = v4_input([PERMIT2_PERMIT], [permit_input(ROUTER)])
+    decoded = DECODER.decode(router_swap_calldata(
+        (command, command_input), (V2_SWAP_EXACT_IN, v2_input(TOKEN_A, TOKEN_B)),
+    ))
+
+    assert api._granting_access(decoded) == "Unknown (may include a Permit2 permit)"
+    fields = {field["label"] for field in api._build_calldata_details(decoded)["fields"]}
+    assert "Grants" not in fields
+    assert fields == {"Function", "Commands", "Token Path"}

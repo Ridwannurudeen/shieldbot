@@ -3293,7 +3293,8 @@ def _granting_access(decoded: Dict) -> str:
     """Say what spending rights a call grants. "None" only when it grants nothing."""
     if decoded.get("selector") == _UNIVERSAL_ROUTER_EXECUTE:
         summary = universal_router_summary(decoded.get("raw") or "")
-        if summary is None:
+        # Unreadable commands, or one the summary does not look inside (a sub-plan), may hide a permit.
+        if summary is None or summary["permits"] is None:
             return "Unknown (may include a Permit2 permit)"
         grants = []
         for permit in summary["permits"]:

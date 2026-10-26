@@ -541,7 +541,7 @@ def test_the_summary_marks_a_batch_permit_it_does_not_decode():
 
 def test_the_summary_leaves_the_path_unknown_when_a_swap_command_cannot_be_read():
     calldata = execute([V4_SWAP], [v4_input([SWAP_EXACT_IN_SINGLE], [single(TOKEN_A, TOKEN_B, True)])])
-    assert universal_router_summary(calldata) == {"commands": [V4_SWAP], "tokens": None, "permits": []}
+    assert universal_router_summary(calldata) == {"commands": [V4_SWAP], "tokens": None, "permits": None}
 
 
 @pytest.mark.parametrize(
@@ -551,3 +551,18 @@ def test_the_summary_leaves_the_path_unknown_when_a_swap_command_cannot_be_read(
 )
 def test_an_unreadable_call_has_no_summary(calldata):
     assert universal_router_summary(calldata) is None
+
+
+@pytest.mark.parametrize(
+    "commands, inputs",
+    [
+        ([EXECUTE_SUB_PLAN, V2_SWAP_EXACT_IN], [v4_input([PERMIT2_PERMIT], [permit_input(ROUTER)]), v2_input(TOKEN_A, TOKEN_B)]),
+        ([0x0D, V2_SWAP_EXACT_IN], [b"\x00" * 32, v2_input(TOKEN_A, TOKEN_B)]),
+        ([V4_SWAP], [v4_input([SWAP_EXACT_IN_SINGLE], [single(TOKEN_A, TOKEN_B, True)])]),
+    ],
+    ids=["nested-permit-in-a-subplan", "unknown-command-byte", "v4-swap"],
+)
+def test_a_command_the_summary_does_not_read_leaves_the_permits_unknown(commands, inputs):
+    summary = universal_router_summary(execute(commands, inputs))
+    assert summary["commands"] == commands
+    assert summary["permits"] is None

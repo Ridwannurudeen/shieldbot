@@ -234,6 +234,11 @@ UR_COMMAND_NAMES = {
     0x0C: "UNWRAP_WETH",
     0x0E: "BALANCE_CHECK_ERC20",
 }
+# The commands universal_router_summary reads in full: a PERMIT2_PERMIT is read, a PERMIT2_PERMIT_BATCH is
+# named, and none of the others grants anything. Any other byte (EXECUTE_SUB_PLAN 0x21 and its nested
+# commands, 0x10, which is V4_SWAP only on some routers, PERMIT2_TRANSFER_FROM_BATCH 0x0D) may carry a
+# permit the summary did not see, so it leaves the permits unknown.
+UR_SUMMARY_COMMANDS = frozenset(UR_COMMAND_NAMES)
 # Recipients that keep funds with the caller: the sender, or the router between commands.
 UR_MSG_SENDER = "0x" + "0" * 39 + "1"
 UR_ADDRESS_THIS = "0x" + "0" * 39 + "2"
@@ -254,7 +259,9 @@ def universal_router_summary(calldata: str) -> Optional[Dict]:
     breakdown and its Granting Access row: the commands it runs (each without its revert bit), the tokens
     its V2 and V3 swap commands name in order (None when a swap command's tokens cannot be read: a V4 swap,
     whose reading depends on the router, or a malformed input), and its Permit2 permits (PERMIT2_PERMIT's
-    token, amount, expiration and spender; PERMIT2_PERMIT_BATCH as {"batch": True}, not decoded).
+    token, amount, expiration and spender; PERMIT2_PERMIT_BATCH as {"batch": True}, not decoded). The
+    permits are None when any command is outside UR_SUMMARY_COMMANDS, a sub-plan among them: a permit may
+    be nested where the summary did not look, so an empty list is only ever a list of commands all read.
 
     None when the call is not an execute() or its commands cannot be read, so the caller says it does not
     know rather than that the call grants nothing.
@@ -282,7 +289,7 @@ def universal_router_summary(calldata: str) -> Optional[Dict]:
             return None
         decoder = CalldataDecoder()
         tokens: Optional[List[str]] = []
-        permits = []
+        permits: Optional[List[Dict]] = [] if all(cmd in UR_SUMMARY_COMMANDS for cmd in commands) else None
         for index, cmd in enumerate(commands):
             elem_hex = CalldataDecoder._abi_bytes_element(words, ptr_inputs + 1, index)
             if cmd in UR_V2_SWAPS or cmd in UR_V3_SWAPS:
@@ -291,7 +298,7 @@ def universal_router_summary(calldata: str) -> Optional[Dict]:
                 tokens = tokens + swapped if tokens is not None and swapped else None
             elif cmd == UR_V4_SWAP:
                 tokens = None
-            elif cmd == UR_PERMIT2_PERMIT:
+            elif cmd == UR_PERMIT2_PERMIT and permits is not None:
                 # abi.encode(PermitSingle(PermitDetails(token, amount, expiration, nonce), spender,
                 # sigDeadline), bytes signature)
                 iw = [elem_hex[j:j + 64] for j in range(0, len(elem_hex), 64)]
@@ -301,7 +308,7 @@ def universal_router_summary(calldata: str) -> Optional[Dict]:
                     "expiration": int(iw[2], 16),
                     "spender": "0x" + iw[4][24:],
                 })
-            elif cmd == UR_PERMIT2_PERMIT_BATCH:
+            elif cmd == UR_PERMIT2_PERMIT_BATCH and permits is not None:
                 permits.append({"batch": True})
         if tokens is not None:
             tokens = list(dict.fromkeys(tokens))
