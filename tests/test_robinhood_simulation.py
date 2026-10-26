@@ -1721,10 +1721,7 @@ async def test_no_pool_note_names_the_routes_the_simulator_supports():
     simulator = RobinhoodSimulator("https://rpc.invalid")
     simulator._request = FakeRpc(TOKEN, 10**27)
     result = await simulator.simulate(TOKEN)
-    supported = (
-        "Uniswap V4 pools without hooks or with the Doppler hook paired with ETH, WETH or USDG, "
-        "or Uniswap V3 or V2 pools paired with WETH"
-    )
+    supported = "V4 hookless or Doppler pools with ETH, WETH or USDG, or V3 or V2 pools with WETH"
     assert f"No supported pool found ({supported})" in result["reason"]
     assert (
         f"no pool ShieldBot can simulate a sale on ({supported}), so it could not test selling"

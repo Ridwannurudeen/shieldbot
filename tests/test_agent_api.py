@@ -297,7 +297,7 @@ def test_unknown_reply_strips_block_ranges_the_model_repeats():
 @pytest.mark.parametrize("supported", [
     "Uniswap V3, Uniswap V2 or SushiSwap, paired with WETH",
     "BDEX V3 or BDEX V2, paired with WBOT",
-    "Uniswap V4 pools without hooks or with the Doppler hook paired with ETH, WETH or USDG, or Uniswap V3 or V2 pools paired with WETH",
+    "V4 hookless or Doppler pools with ETH, WETH or USDG, or V3 or V2 pools with WETH",
 ])
 def test_chat_coverage_names_the_pools_a_simulator_supports(supported):
     from core.chat_coverage import readable_coverage_gaps
@@ -323,4 +323,53 @@ def test_chat_scan_data_carries_the_readable_coverage_gaps(client):
         "no pool ShieldBot can simulate a sale on, so it could not test selling",
         "buy tax, sell tax and whether the token can be sold are unknown",
     ]
+
+
+def test_chat_coverage_keeps_the_no_sell_reason_readable():
+    from core.chat_coverage import readable_coverage_gaps
+
+    reason = (
+        "No supported pool found (BDEX V3 or BDEX V2, paired with WBOT); "
+        "Own simulation made no sell (unresolved); "
+        "Unknown fields: sell_tax, can_sell"
+    )
+    assert readable_coverage_gaps({"honeypot": reason}) == [
+        "no pool ShieldBot can simulate a sale on (BDEX V3 or BDEX V2, paired with WBOT), so it could not test selling",
+        "Own simulation made no sell (unresolved)",
+        "sell tax and whether the token can be sold are unknown",
+    ]
+
+
+@pytest.mark.parametrize("judging", [
+    "The token appears fine and has no issues.",
+    "can_sell is null; can_buy is true",
+    "It looks safe.",
+    "This one seems legit.",
+    "There is nothing suspicious here.",
+    "You should be fine buying a small amount.",
+    "The field can_sell could not be read.",
+    "The sell check returned null.",
+    "Nothing in the data suggests a scam and the deployer is clean.",
+    "Liquidity is healthy and the buy side checks out.",
+])
+def test_unknown_reply_drops_a_paragraph_that_judges_the_token_or_names_an_internal(judging):
+    from core.chat_coverage import unknown_reply
+
+    describing = "Selling could not be tested because no supported pool was found."
+    assert unknown_reply(UNKNOWN_SCAN["coverage_reasons"], judging) == UNKNOWN_REPLY
+    # Beside a paragraph that only describes the gap, the judging one alone is dropped.
+    assert unknown_reply(UNKNOWN_SCAN["coverage_reasons"], f"{judging}\n\n{describing}") == (
+        UNKNOWN_REPLY + "\n\n" + describing
+    )
+
+
+@pytest.mark.parametrize("describing", [
+    "Selling could not be tested because no supported pool was found.",
+    "The pair is 4.1 hours old with $24,472.84 of liquidity and $48,096.40 of 24h volume.",
+    "ShieldBot has no deployer history for this address. Re-scan once a supported pool exists.",
+])
+def test_unknown_reply_keeps_a_paragraph_that_only_describes_the_gap_or_the_data(describing):
+    from core.chat_coverage import unknown_reply
+
+    assert unknown_reply(UNKNOWN_SCAN["coverage_reasons"], describing) == UNKNOWN_REPLY + "\n\n" + describing
 

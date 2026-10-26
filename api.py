@@ -1128,6 +1128,7 @@ def _firewall_deadline_response(
         **{source: 0 for source in pending},
     }
     response["coverage_reasons"] = {source: reason for source in pending}
+    response["coverage_gaps"] = readable_coverage_gaps(response["coverage_reasons"])
     response["risk_display"] = "Unknown (provider deadline reached)"
     response["verdict"] = f"{response['classification']} — {response['risk_display']}"
     response["partial"] = True

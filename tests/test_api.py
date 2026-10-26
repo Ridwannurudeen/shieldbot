@@ -609,6 +609,7 @@ async def test_firewall_deadline_returns_structural_pending_for_a_hung_lookup(mo
         "Provider timed out at the firewall request deadline"
     )
     assert response["pending_sources"] == ["structural"]
+    assert response["coverage_gaps"] == ["Provider timed out at the firewall request deadline"]
 
 
 @pytest.mark.asyncio
