@@ -101,7 +101,7 @@ units_settled() {
 
 # ---------------------------------------------------------------- preflight (read-only)
 preflight() {
-  local head rc=0 api_unit bot_unit db_kib refs ref branches
+  local head rc=0 api_unit bot_unit db_kib refs ref branches key
   head=$(git -C "$APP" rev-parse HEAD)
 
   say "Current state"
