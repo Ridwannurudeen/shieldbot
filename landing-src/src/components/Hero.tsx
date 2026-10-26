@@ -16,8 +16,8 @@ export default function Hero() {
             <p className="text-base leading-[26px] text-secondary md:text-lg md:leading-7">
               ShieldBot checks a transaction before your wallet signs it. When a
               check cannot run it says Unknown, never Safe. The verdicts it
-              publishes on Robinhood Chain sit in a public registry any contract
-              can read.
+              publishes on Robinhood Chain and BOT Chain sit in public registries
+              any contract can read.
             </p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <Button

@@ -6,11 +6,11 @@ import Icon from "./Icon";
 const commands = [
   {
     command: "/token <address>",
-    desc: "Can this token be sold? Honeypot, taxes, ownership and liquidity checks. Unknown when a check cannot run.",
+    desc: "Can this token be sold? Honeypot, taxes, ownership and liquidity checks. Unknown when a check cannot run. Telegram /scan and /token results can be recorded in on-chain registries on Robinhood Chain and BOT Chain.",
   },
   {
     command: "/scan <address>",
-    desc: "Contract risk report: scam database matches, verification, code and market checks. Robinhood Chain verdicts are recorded in the on-chain registry.",
+    desc: "Contract risk report: scam database matches, verification, code and market checks. Results on Robinhood Chain and BOT Chain can be recorded in the on-chain registries.",
   },
   {
     command: "/rescue <wallet>",

@@ -2,7 +2,7 @@
 
 # ShieldBot
 
-**ShieldBot is the security layer that says what it checked.** Every verdict carries its coverage, and an agent can refuse to act on anything stale or Unknown; the verdict registry and guard that let a Robinhood Chain contract do the same are built, tested and deployed on Robinhood Chain ([addresses](docs/DEPLOYMENTS.md)). We build on GoPlus, honeypot.is and others; we do not pretend to replace them.
+**ShieldBot is the security layer that says what it checked.** Every verdict carries its coverage, and an agent can refuse to act on anything stale or Unknown; the verdict registry and guard that let a Robinhood Chain contract do the same are built, tested and deployed on Robinhood Chain ([addresses](docs/DEPLOYMENTS.md)), and a verdict registry without a guard is deployed on BOT Chain. We build on GoPlus, honeypot.is and others; we do not pretend to replace them.
 
 [Try it](#try-it) · [Browser extension](extension/) · [Judge guide](docs/JUDGE_GUIDE.md) · [Recorded simulations](tests/fixtures/robinhood_simulation/) · [Verdict registry source](contracts/base/src/ShieldBotVerdictRegistry.sol) · [Deployed contracts](docs/DEPLOYMENTS.md) · [Test results](docs/TESTING.md)
 
@@ -68,7 +68,7 @@ contract GuardedRouter {
 - **Simulation is route-bounded:** Robinhood support covers the implemented native/WETH/USDG v4 routes, Doppler-hooked v4 routes, WETH-quoted V2 pairs, and WETH-quoted Uniswap V3 pools at the 0.01%, 0.05%, 0.3% and 1% fee tiers (a V3 pool with no liquidity at its current price is skipped). Hookless NATIVE, WETH and USDG pools are found by direct lookup at standard fee and tick-spacing pairs; probed pools with no active liquidity are skipped, but when every probed pool is empty and no pool is otherwise found, one is still simulated so the result stays unknown rather than no pool; pools found by the Initialize-log fallback are not liquidity-checked. The V2 adapter discovers WETH pairs, not USDG pairs. No V2 USDG route is covered. Whether any V2 USDG pairs exist has not been rechecked.
 - **Unknown is an outcome:** RPC failure, unsupported routes, insufficient liquidity, unattributed reverts or unmeasurable fields must not be read as a clean bill of health. A successful simulated round-trip describes that amount, route and recorded state, not future sellability.
 - **Coverage is partial across surfaces:** scan metadata reaches the REST, MCP, Telegram and SDK paths, but auxiliary MCP tools, phishing checks, signature heuristics and dashboard summaries do not all have equivalent coverage semantics. The dashboard's Robinhood Chain panel links each blocked launch to its stored evidence document at `/api/verdict`; its other tiles are summaries. See [the detailed limitations](docs/TECHNICAL.md).
-- **On-chain publication covers a bounded set:** the registry is live on Robinhood Chain ([DEPLOYMENTS.md](docs/DEPLOYMENTS.md)). Production records Telegram scans, guard rescans, and launches or rechecks that are blocked or guard-watched; other launch verdicts are stored with `onchain_status: off`, which is not on-chain evidence.
+- **On-chain publication covers a bounded set:** registries are live on Robinhood Chain and BOT Chain ([DEPLOYMENTS.md](docs/DEPLOYMENTS.md)). On Robinhood Chain, production records Telegram scans, guard rescans, and launches or rechecks that are blocked or guard-watched; other launch verdicts are stored with `onchain_status: off`, which is not on-chain evidence. On BOT Chain, Telegram `/scan` and `/token` results are the verdicts recorded; there is no guard, guarded transfer or launch discovery there.
 
 ## What is different
 
@@ -141,14 +141,14 @@ Chain adapters / provider lookups / Robinhood eth_simulateV1
                          exact recipient credit
 ```
 
-The registry publication path is wired to Robinhood Telegram scans and hunter scans, not every REST request. With `PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0`, the hunter's launch and recheck verdicts are stored and served but recorded on-chain only when blocked or watched by the guard; guard rescans are always recorded. Launch discovery and its feed are 4663-specific. Backend services use FastAPI, async HTTP and SQLite; contract, market, behavioral, honeypot, intent and signature analyzers have different data requirements. Consumer policy and display behavior differ.
+The registry publication path is wired to Telegram scans on Robinhood Chain and BOT Chain and to Robinhood hunter scans, not every REST request. With `PUBLISH_LAUNCH_VERDICTS_ONCHAIN=0`, the hunter's launch and recheck verdicts are stored and served but recorded on-chain only when blocked or watched by the guard; guard rescans are always recorded. Launch discovery and its feed are 4663-specific. Backend services use FastAPI, async HTTP and SQLite; contract, market, behavioral, honeypot, intent and signature analyzers have different data requirements. Consumer policy and display behavior differ.
 
 | Interface in the repository | Entry point and scope |
 |---|---|
 | REST | `POST /api/scan`: a quick contract check with no sell simulation, so a token it recognises reads Unknown there, never SAFE. `POST /api/firewall`: transaction analysis and the full token check. |
 | Agent API | `POST /api/agent/firewall`: policy decision; unknown coverage, or a native value with no USD estimate (any chain but BSC and opBNB), requires owner approval rather than automatic allowance. |
 | API keys | `POST /api/keys/free`: a free key can be requested when the server has an email provider configured (Resend); otherwise the operator issues keys. One free-tier key per email address; a key allows 60 requests a minute and 1,000 a day. See [TECHNICAL.md](docs/TECHNICAL.md#api-demo). |
-| Evidence | `GET /api/verdict/4663/{address}`: latest stored evidence and publication status. |
+| Evidence | `GET /api/verdict/{4663\|677}/{address}`: latest stored evidence and publication status on Robinhood Chain or BOT Chain. |
 | Launch feed | `GET /api/launches/4663`: discovered launches and available scan outcomes; not every token on the chain. |
 | MCP | [mcp_server/](mcp_server/): scan and launch tools; approval-risk and threat-graph stubs explicitly report unknown. |
 | SDKs | [Python](sdk/python/) and [TypeScript](sdk/): retain coverage metadata. Explicit fail-open configuration can allow unavailable analysis. |
@@ -199,7 +199,7 @@ Token names, symbols and pools as listed by GeckoTerminal (network `robinhood`) 
 
 ## Submission status and measured usage
 
-- **Registry deployment:** the Robinhood Chain verdict registry, guard and guarded transfer were deployed on 2026-09-27. Their addresses, owner, recorder and deployment transactions are in [DEPLOYMENTS.md](docs/DEPLOYMENTS.md), with the Base and BNB Smart Chain contracts, which were retired on 2026-09-26 and receive no new records.
+- **Registry deployment:** the Robinhood Chain verdict registry, guard and guarded transfer were deployed on 2026-09-27, and a BOT Chain verdict registry, with no guard, on 2026-10-26. Their addresses, owner, recorder and deployment transactions are in [DEPLOYMENTS.md](docs/DEPLOYMENTS.md), with the Base and BNB Smart Chain contracts, which were retired on 2026-09-26 and receive no new records.
 - **Measured usage:** the `GET /api/stats` snapshot supplied on **2026-09-22** is recorded in [SUBMISSION.md](docs/SUBMISSION.md); its time of day and the revision serving it were not supplied. Dashboard loading values and historical projections are not usage evidence.
 - **Release boundary:** this README describes this repository snapshot. Deployment, live evidence URLs and the browser-store release must be verified separately.
 

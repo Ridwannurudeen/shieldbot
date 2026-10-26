@@ -27,6 +27,9 @@ interface Chain {
 // Chains the scanner accepts (utils/chain_info.py). tests/test_website_claims.py keeps this in sync.
 const SUPPORTED_CHAINS = 9;
 
+// Chains with a ShieldBot verdict registry (docs/DEPLOYMENTS.md): Robinhood Chain and BOT Chain.
+const REGISTRY_CHAINS = [4663, 677];
+
 const chains: Chain[] = [
   {
     chainId: 1,
@@ -141,7 +144,7 @@ const chains: Chain[] = [
     ),
   },
   {
-    // Generic block mark: no third-party logo.
+    // Official BOT Chain mark (scan.botchain.ai/static/address/bot-balance-icon.svg), scaled: identifies the chain, no endorsement implied.
     chainId: 677,
     name: "BOT Chain",
     simulation: "ShieldBot",
@@ -150,8 +153,8 @@ const chains: Chain[] = [
     simulationScope: "BDEX V2 and V3 pools with WBOT",
     logo: (
       <svg viewBox="0 0 32 32" fill="none" className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" aria-hidden="true">
-        <circle cx="16" cy="16" r="16" fill="#0C2A3A"/>
-        <rect x="10" y="10" width="12" height="12" rx="2" stroke="#38BDF8" strokeWidth="2"/>
+        <circle cx="16" cy="16" r="16" fill="#10A37F"/>
+        <path transform="scale(2)" d="M6.5918 3.00057L11.2781 5.66503V7.61119C10.8127 7.82311 10.3657 8.08547 9.92456 8.34411C9.84403 8.39154 9.73943 8.33465 9.7741 8.49356L11.2733 9.30701L11.3407 11.1516L8.14405 13L5 11.2605V9.3659L9.69845 12.094V10.3129L6.59122 8.53182V6.63725L9.69845 8.3805V6.75131C9.69845 6.72924 9.80678 6.66562 9.70418 6.60157L6.59122 4.78108V3L6.5918 3.00057Z" fill="#fff"/>
       </svg>
     ),
   },
@@ -225,7 +228,7 @@ function launchCell(chain: Chain): { state: CellState; label: string } {
 }
 
 // The chains in orbit (index.css, "Orbits"): each chain on its own ellipse, inner ones faster, logos upright; the
-// magenta ellipse is Robinhood Chain's, the registry's chain. A picture of the table below, which carries the facts,
+// magenta ellipses are Robinhood Chain's and BOT Chain's, the chains with a verdict registry. A picture of the table below, which carries the facts,
 // so it is hidden from assistive technology. It moves only while on screen (useAlive). Below 1024 px the planets
 // carry no names (the table does): nine labels do not fit those rings without clipping or overlapping.
 function Orbits() {
@@ -236,7 +239,7 @@ function Orbits() {
         {chains.map((chain, i) => (
           <div
             key={chain.chainId}
-            className={chain.chainId === 4663 ? "orbit orbit-mark" : "orbit"}
+            className={REGISTRY_CHAINS.includes(chain.chainId) ? "orbit orbit-mark" : "orbit"}
             style={{ "--o": i } as CSSProperties}
           >
             <div className="orbit-arm">
@@ -252,7 +255,8 @@ function Orbits() {
           chains
         </p>
       </div>
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-x-4">
+        <p className="font-mono text-[11px] text-secondary">Accent ring: a chain with a ShieldBot verdict registry.</p>
         <PauseButton paused={paused} setPaused={setPaused} />
       </div>
     </div>
@@ -403,7 +407,7 @@ export default function Chains() {
             </details>
           </li>
           <li>
-            Extension 3.1.0 sends Robinhood Chain requests to the API for analysis. It has been tested with Rabby; MetaMask testing is still outstanding.
+            The Chrome Web Store serves extension 3.1.0, which sends Robinhood Chain requests to the API for analysis. BOT Chain support is in extension 3.4.0 in the repository and is not yet on the Store. It has been tested with Rabby; MetaMask testing is still outstanding.
           </li>
         </ul>
       </div>

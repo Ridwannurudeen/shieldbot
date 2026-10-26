@@ -19,6 +19,10 @@ const faqs = [
     a: "It scans Robinhood Chain tokens with a buy and sell simulation on supported pool routes, finds new launches and sends alerts in Telegram. A verdict registry, a freshness guard and a guarded transfer contract were deployed on Robinhood Chain on 27 September 2026.",
   },
   {
+    q: "What does ShieldBot do on BOT Chain?",
+    a: "It simulates buys and sells on supported BDEX V2 and V3 pools paired with WBOT; tokens without a supported pool read Unknown for sellability. It checks GoPlus address labels for the token and, when Blockscout supplies its creator, the creator; /rescue bot: scans BOT Chain approvals. Telegram /scan and /token results can be recorded in the verdict registry deployed on BOT Chain on 26 October 2026. BOT Chain has no guard or guarded transfer.",
+  },
+  {
     q: "How do I install ShieldBot, and what does it cost?",
     a: "Install the extension from the Chrome Web Store. It is free and needs no account, and so is the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report.",
   },

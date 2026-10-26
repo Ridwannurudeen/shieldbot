@@ -645,6 +645,29 @@ def test_launch_counts_the_stats_reply_lacks_show_a_dash_not_zero():
     assert "Provider answers unavailable." in text
 
 
+def test_the_bot_chain_panel_reads_its_own_registry_count_and_explorer():
+    # /api/stats keys registry_records_confirmed_by_chain by chain id, a string after JSON. A real 0 is shown; a reply
+    # without the key is unknown, a dash, never 0.
+    steps = """
+      const links = descendants(document).filter(el => el.tagName === 'A' && el.textContent === 'Registry contract ↗');
+      return {text: document.root.textContent, links: links.map(el => el.getAttribute('href'))};
+    """
+    tile = "Registry Recordsconfirmed on-chain · BOT Chain (677)Registry contract ↗"
+    stats = {**LAUNCH_STATS, "registry_records_confirmed_by_chain": {"4663": 1367, "677": 0}}
+    result = render(stats, steps=steps)
+    assert f"0{tile}" in result["text"]
+    assert "1,367Registry Recordsconfirmed on-chainRegistry contract ↗" in result["text"]
+    assert "Telegram scans publish here; no launch discovery, guard or guarded transfer on BOT Chain." in result["text"]
+    assert result["links"] == [
+        f"https://robinhoodchain.blockscout.com/address/{REGISTRY}",
+        f"https://scan.botchain.ai/address/{REGISTRY}",
+    ]
+    stats = {**LAUNCH_STATS, "registry_records_confirmed_by_chain": {"4663": 1367, "677": 12}}
+    assert f"12{tile}" in render(stats)
+    assert f"—{tile}" in render(LAUNCH_STATS)
+    assert f"0{tile}" not in render(LAUNCH_STATS)
+
+
 def test_an_unavailable_launch_feed_says_so_and_is_partial_data():
     text = render(launches_reply=(503, {"detail": "down"}))
     assert "Robinhood Chain launches unavailable." in text
@@ -808,6 +831,7 @@ def test_sections_lead_with_robinhood_chain_and_end_with_history():
     steps = "return descendants(document).filter(el => el.tagName === 'H2').map(el => el.textContent);"
     assert render(attestations_reply=(200, ATTESTATIONS), steps=steps) == [
         "Robinhood Chain",
+        "BOT Chain",
         "Provider Answers",
         "Firewall Scans",
         "Mempool Monitor",

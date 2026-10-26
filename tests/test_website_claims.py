@@ -718,6 +718,9 @@ HERO_SECTION_COPY = {
         "Contract scans run on all 9 chains. The other checks depend on the chain, and a check that cannot run is "
         "reported as Unknown, never as Safe.",
         "It has been tested with Rabby; MetaMask testing is still outstanding.",
+        "The Chrome Web Store serves extension 3.1.0, which sends Robinhood Chain requests to the API for analysis. BOT "
+        "Chain support is in extension 3.4.0 in the repository and is not yet on the Store.",
+        "Accent ring: a chain with a ShieldBot verdict registry.",
     ),
     "WorkedExample.tsx": (
         "One token. Two transactions.",
@@ -727,6 +730,7 @@ HERO_SECTION_COPY = {
     "OnChain.tsx": (
         "Newest confirmed records in the registry",
         "Records of the newest launches ShieldBot blocked",
+        "Also on BOT Chain (677)",
         "/api/verdicts/recent?chain_id=4663&limit=",
         # The guard's MEDIUM caveat sits beside the visible guard description, not only in a non-default tab.
         "A guard contract allows only a fresh LOW or MEDIUM record; everything else is denied. Permission is not a "
@@ -1430,3 +1434,85 @@ def test_stylesheets_hold_no_c1_control_characters():
         bad = sorted({f"U+{ord(ch):04X}" for ch in read(path) if 0x80 <= ord(ch) <= 0x9F})
         assert not bad, f"{path.name} holds C1 control characters {bad}"
     assert '.disclose[open] > summary::before { content: "' + chr(92) + '2212"; }' in read(source)
+
+
+def test_the_site_shows_the_bot_chain_registry():
+    # docs/DEPLOYMENTS.md records the BOT Chain (677) registry. Its address equals the Robinhood Chain one (the same
+    # owner deployed both at nonce 0), so an address alone proves nothing: each page must carry the row's own
+    # scan.botchain.ai link, the chain id and the deployment date, and must not claim a BOT Chain guard.
+    deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
+    row = re.search(
+        r"^\| `ShieldBotVerdictRegistry` \| BOT Chain \(677\) \| \[`(0x[0-9a-fA-F]{40})`\]\((https://scan\.botchain\.ai/address/0x[0-9a-fA-F]{40})\) \| 2026-10-26 ",
+        deployments,
+        re.MULTILINE,
+    )
+    assert row, "docs/DEPLOYMENTS.md should record the BOT Chain registry"
+    address, url = row.groups()
+    assert url.endswith(address)
+    assert not re.search(r"^\| `ShieldBotVerdict(Guard|GuardedTransfer)` \| BOT Chain", deployments, re.MULTILINE)
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    for name in ("OnChain.tsx", "Footer.tsx"):
+        source = " ".join(read(COMPONENTS / name).split())
+        assert f'href: "{url}",' in source, name
+        assert f'address: "{address}",' in source, name
+        assert "(677)" in source and "26 October 2026" in source, name
+    assert url in bundle, "landing bundle is stale: missing the BOT Chain registry link"
+    assert "Contracts · BOT Chain (677)" in read(COMPONENTS / "Footer.tsx")
+    assert "No guard or guarded transfer on BOT Chain." in " ".join(read(COMPONENTS / "OnChain.tsx").split())
+    about = " ".join(read(LANDING_SRC / "public" / "about.html").split())
+    assert f'<a href="{url}"' in about and "On BOT Chain (677) a verdict registry was deployed on 26 October 2026" in about
+    assert "BOT Chain has no guard or guarded transfer." in about
+
+
+def test_the_registry_figures_read_each_chain_from_the_stats_reply():
+    # api.py public_stats serves registry_records_confirmed_by_chain for 4663 and 677; after JSON the keys are strings.
+    api = " ".join(read(ROOT / "api.py").split())
+    assert '"confirmed", 0) for chain_id in (4663, 677)' in api
+    assert '"registry_records_confirmed_by_chain": registry_records_confirmed_by_chain,' in api
+    stats = read(LANDING_SRC / "src" / "liveStats.ts")
+    assert "registry_records_confirmed_by_chain: Record<string, number> | null;" in stats
+    mechanism = " ".join(read(COMPONENTS / "Mechanism.tsx").split())
+    assert 'stats?.registry_records_confirmed_by_chain?.["4663"] ?? stats?.registry_records_confirmed,' in mechanism
+    assert 'value={count(stats?.registry_records_confirmed_by_chain?.["677"])}' in mechanism
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    for label in (
+        "Verdict records confirmed in the Robinhood Chain registry, all time",
+        "Verdict records confirmed in the BOT Chain registry, all time",
+    ):
+        assert label in mechanism and label in bundle, label
+    # The dashboard's BOT Chain tile reads the same key, an absent count is unknown, and it links the 677 explorer.
+    dashboard = read(DASHBOARD_SRC)
+    assert "const BOT_CHAIN = 677;" in dashboard
+    assert "byChain && byChain[BOT_CHAIN] != null ? byChain[BOT_CHAIN] : null" in dashboard
+    assert "677:'https://scan.botchain.ai'" in dashboard
+    assert "${EXPLORERS[BOT_CHAIN]}/address/${REGISTRY_ADDRESS}" in dashboard
+    assert "confirmed on-chain · BOT Chain (677)" in read(ROOT / "dashboard" / "index.html")
+
+
+def test_the_bot_chain_faq_and_meta_description_match_their_structured_data():
+    question = "What does ShieldBot do on BOT Chain?"
+    html = read(LANDING_SRC / "index.html")
+    faq = read(COMPONENTS / "FAQ.tsx")
+    entities = [
+        entity
+        for block in re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL)
+        for entity in json.loads(block).get("mainEntity", [])
+    ]
+    answers = [entity["acceptedAnswer"]["text"] for entity in entities if entity["name"] == question]
+    assert len(answers) == 1, "index.html JSON-LD should carry the BOT Chain question once"
+    assert f'q: "{question}",' in faq and f'a: "{answers[0]}",' in faq
+    for clause in (
+        "BDEX V2 and V3 pools paired with WBOT",
+        "/rescue bot: scans BOT Chain approvals",
+        "Telegram /scan and /token results can be recorded in the verdict registry deployed on BOT Chain on 26 October 2026.",
+        "BOT Chain has no guard or guarded transfer.",
+    ):
+        assert clause in answers[0], clause
+    description = (
+        "Contract scans on 9 EVM chains, with verdict registries on Robinhood Chain and BOT Chain. "
+        "A check that cannot run is reported as Unknown."
+    )
+    for page in (html, read(ROOT / "landing" / "index.html")):
+        assert page.count(description) == 4
+        assert "On BOT Chain, checks that cannot run" not in page
+        assert "BOT Chain security" in re.search(r'<meta name="keywords" content="([^"]*)"', page).group(1)

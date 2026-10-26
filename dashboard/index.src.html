@@ -7,7 +7,7 @@
   <!-- theme.js -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ShieldBot Threat Dashboard</title>
-  <meta name="description" content="ShieldBot's public threat dashboard: the token launches blocked on Robinhood Chain with their published verdicts, how often each data provider answered, the newest firewall detections and mempool alerts, and the window each count covers." />
+  <meta name="description" content="ShieldBot's public threat dashboard: the token launches blocked on Robinhood Chain with their published verdicts, the verdict registry records confirmed on Robinhood Chain and BOT Chain, how often each data provider answered, the newest firewall detections and mempool alerts, and the window each count covers." />
   <link rel="canonical" href="https://api.shieldbotsecurity.online/dashboard" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBCMEIwQSIvPjxwYXRoIGQ9Ik0xNiA0IDI2IDh2N2MwIDYtNC40IDEwLjctMTAgMTMtNS42LTIuMy0xMC03LTEwLTEzVjhsMTAtNFoiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI0Y3RjZGMiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHBhdGggZD0ibTExIDE2IDMuMiAzLjJMMjEgMTIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI0Y3RjZGMiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" />
 
@@ -183,7 +183,8 @@
     const LAUNCH_LIMIT     = 20;
     // How many loaded blocked launches show before the reader asks for the rest.
     const LAUNCH_VISIBLE   = 5;
-    // The ShieldBotVerdictRegistry on Robinhood Chain (docs/DEPLOYMENTS.md), where a confirmed record is read.
+    // The ShieldBotVerdictRegistry on Robinhood Chain and on BOT Chain (docs/DEPLOYMENTS.md), where a confirmed record is
+    // read. The same owner deployed both at nonce 0, so the address is the same on each chain's explorer.
     const REGISTRY_ADDRESS = '0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138';
     // Blocked launches accumulate over days and campaigns are a slow-moving aggregate, and every request
     // counts against one per-IP limit, so both refresh on their own slower cycle: the fast cycle sends
@@ -945,6 +946,36 @@
       );
     }
 
+    // The BOT Chain registry: its confirmed records only. /api/stats keys registry_records_confirmed_by_chain by chain id
+    // (a string after JSON); a reply without it is unknown, never 0.
+    const BOT_CHAIN = 677;
+    function BotChainPanel({ stats, loading, asOf }) {
+      const byChain   = stats && stats.registry_records_confirmed_by_chain;
+      const confirmed = byChain && byChain[BOT_CHAIN] != null ? byChain[BOT_CHAIN] : null;
+      const registry  = (
+        <a href={`${EXPLORERS[BOT_CHAIN]}/address/${REGISTRY_ADDRESS}`} target="_blank" rel="noopener noreferrer"
+           className="inline-flex items-center min-h-[44px] md:min-h-0" style={{ color:'var(--accent)' }}>
+          Registry contract ↗
+        </a>
+      );
+      const tiles = [
+        { label:'Registry Records', span:'confirmed on-chain · BOT Chain (677)', value: confirmed, note: registry },
+      ];
+      return (
+        <div className="bg-ground-alt border border-hairline rounded-lg p-4 md:p-5" style={{ border:'1px solid var(--hairline)' }}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mb-4">
+            {tiles.map(t => (
+              <StatCard key={t.label} label={t.label} span={t.span} value={t.value} color="var(--ink)"
+                        loading={loading} asOf={asOf} note={t.note} />
+            ))}
+          </div>
+          <div className="text-xs max-w-[72ch]" style={{ color:'var(--secondary)' }}>
+            Telegram scans publish here; no launch discovery, guard or guarded transfer on BOT Chain.
+          </div>
+        </div>
+      );
+    }
+
     // ─── Provider Answers ────────────────────────────────────────────────────
     // The Unknown ledger (core/unknown_ledger.py) as /api/stats carries it: one count per lookup sent
     // to a data provider. The rows come with the stats reply, so this panel sends no request of its own.
@@ -1466,6 +1497,10 @@
               <RobinhoodPanel launches={launches} launchesLoading={slowLoading} cursor={launchCursor}
                               onLoadOlder={loadOlder} loadingOlder={loadingOlder} olderError={olderError}
                               stats={stats} loading={loading} asOf={statsUpdated} />
+            </Section>
+
+            <Section id="bot-chain" title="BOT Chain">
+              <BotChainPanel stats={stats} loading={loading} asOf={statsUpdated} />
             </Section>
 
             <Section title="Provider Answers">
