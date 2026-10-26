@@ -1368,7 +1368,10 @@ class RobinhoodSimulator:
             )
             pools = [Pool(route, numeraire, key=key)]
         if not pools:
-            notes.append("No supported pool found")
+            notes.append(
+                "No supported pool found (Uniswap V4 pools without hooks or with the Doppler hook paired with "
+                "ETH, WETH or USDG, or Uniswap V3 or V2 pools paired with WETH)"
+            )
         pools.sort(key=lambda pool: (ROUTES.index(pool.route), -pool_depths.get(pool, 0)))
         selected = []
         for route in ROUTES:

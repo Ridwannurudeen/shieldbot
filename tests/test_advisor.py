@@ -705,3 +705,89 @@ async def test_gather_context_exposes_readable_unknown_coverage_gaps(advisor, mo
         "no pool ShieldBot can simulate a sale on, so it could not test selling",
         "buy tax, sell tax and whether the token can be sold are unknown",
     ]
+
+
+# A Robinhood Chain token whose pool the simulator could not trade: scored by what it did read, no verdict.
+UNKNOWN_SCAN = {
+    "status": "unknown",
+    "rug_probability": 25,
+    "risk_level": "UNKNOWN",
+    "risk_archetype": "unknown",
+    "confidence_level": 92,
+    "category_scores": {"structural": 85, "market": 30, "behavioral": 0, "honeypot": 0},
+    "critical_flags": ["Contract age: 0 days", "New pair (<24h)"],
+    "coverage": {"structural": 1, "market": 1, "behavioral": 1, "honeypot": 0},
+    "coverage_reasons": {"honeypot": "No supported pool found; Unknown fields: can_sell"},
+}
+UNKNOWN_GAPS = [
+    "no pool ShieldBot can simulate a sale on, so it could not test selling",
+    "whether the token can be sold is unknown",
+]
+
+
+@pytest.mark.asyncio
+async def test_chat_gives_the_model_no_score_for_an_unknown_scan(advisor, mock_tools, mock_ai):
+    """A number the model never saw it cannot cite: an unknown scan reaches it without its scores."""
+    import json
+
+    mock_tools.scan_contract.return_value = UNKNOWN_SCAN
+    await advisor.chat("u1", "Check 0x" + "a" * 40, chain_id=4663)
+
+    content = mock_ai.chat_with_usage.call_args.kwargs["messages"][-1]["content"]
+    tool_results = json.loads(content[len("<tool_results>\n"):content.index("\n</tool_results>")])
+    for field in ("rug_probability", "risk_level", "risk_archetype", "confidence_level", "category_scores"):
+        assert field not in tool_results["scan"]
+    assert tool_results["scan"]["status"] == "unknown"
+    assert tool_results["scan"]["critical_flags"] == ["Contract age: 0 days", "New pair (<24h)"]
+    assert tool_results["scan"]["coverage_reasons"] == UNKNOWN_SCAN["coverage_reasons"]
+    assert tool_results["coverage_gaps"] == UNKNOWN_GAPS
+
+
+@pytest.mark.asyncio
+async def test_chat_stores_the_reply_the_user_sees_for_an_unknown_scan(advisor, mock_tools, mock_db, mock_ai):
+    """History holds the Unknown reply the API sends, so a later turn cannot quote a score the user never saw."""
+    from core.chat_coverage import UNKNOWN_LINE
+
+    mock_tools.scan_contract.return_value = UNKNOWN_SCAN
+    mock_ai.chat_with_usage = AsyncMock(return_value=(
+        "**Risk verdict**: 25/100, UNKNOWN.\n\n**Category breakdown**: Structural: 85/100 (40%).\n\n"
+        "Selling could not be tested because no supported pool was found.",
+        100,
+    ))
+    await advisor.chat("u1", "Check 0x" + "a" * 40, chain_id=4663)
+
+    stored = mock_db.insert_chat_message.call_args_list[1].args[2]
+    assert stored == (
+        UNKNOWN_LINE + "\n- " + UNKNOWN_GAPS[0] + "\n- " + UNKNOWN_GAPS[1] + "\n\n"
+        "Selling could not be tested because no supported pool was found."
+    )
+    assert "85/100" not in stored
+
+
+@pytest.mark.asyncio
+async def test_chat_stores_only_the_gaps_when_no_model_answered_an_unknown_scan(advisor_no_ai, mock_tools, mock_db):
+    from core.chat_coverage import UNKNOWN_LINE
+
+    mock_tools.scan_contract.return_value = UNKNOWN_SCAN
+    await advisor_no_ai.chat("u1", "Check 0x" + "a" * 40, chain_id=4663)
+
+    stored = mock_db.insert_chat_message.call_args_list[1].args[2]
+    assert stored == UNKNOWN_LINE + "\n- " + UNKNOWN_GAPS[0] + "\n- " + UNKNOWN_GAPS[1]
+
+
+def test_advisor_prompt_forbids_field_names_and_names_each_providers_evidence():
+    from agent.prompts import ADVISOR_SYSTEM_PROMPT
+
+    assert "never echo field names" in ADVISOR_SYSTEM_PROMPT
+    assert "goplus" in ADVISOR_SYSTEM_PROMPT
+    assert "not a trade ShieldBot ran" in ADVISOR_SYSTEM_PROMPT
+    assert "stays incomplete in later turns" in ADVISOR_SYSTEM_PROMPT
+    assert "data unavailable" not in ADVISOR_SYSTEM_PROMPT
+
+
+def test_explain_template_keeps_shieldbots_verdict_and_names_unknowns_plainly():
+    from agent.prompts import EXPLAIN_SCAN_TEMPLATE
+
+    assert "final" in EXPLAIN_SCAN_TEMPLATE
+    assert "never call it safe" in EXPLAIN_SCAN_TEMPLATE
+    assert "field names" in EXPLAIN_SCAN_TEMPLATE

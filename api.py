@@ -41,7 +41,7 @@ from core.config import Settings
 from core.container import ServiceContainer
 from core.database import LAUNCH_OUTCOMES, SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
-from core.chat_coverage import unknown_reply
+from core.chat_coverage import readable_coverage_gaps, unknown_reply
 from core.first_verdict import IN_PROGRESS, FirstVerdictProgress, build_first_verdict
 from core.policy import PolicyMode
 from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
@@ -3343,7 +3343,11 @@ def _build_asset_delta(
 
 
 def _coverage_fields(alert: Dict) -> Dict:
-    return {key: alert[key] for key in ('status', 'coverage', 'coverage_reasons', 'risk_display')}
+    # coverage_gaps: the reasons in plain words, for the extension's Unknown lines (core.chat_coverage).
+    return {
+        **{key: alert[key] for key in ('status', 'coverage', 'coverage_reasons', 'risk_display')},
+        'coverage_gaps': readable_coverage_gaps(alert['coverage_reasons']),
+    }
 
 
 def _revert_blocks(risk_output: Dict) -> bool:

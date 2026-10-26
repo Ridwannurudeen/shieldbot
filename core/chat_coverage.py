@@ -33,8 +33,10 @@ def _clean_reason(reason: str) -> str:
 
 def _readable_reason(reason: str) -> str:
     clean = _clean_reason(reason)
-    if clean.lower() == "no supported pool found":
-        return "no pool ShieldBot can simulate a sale on, so it could not test selling"
+    pool_match = re.fullmatch(r"(?i)no supported pool found(?: \((.+)\))?", clean)
+    if pool_match:
+        supported = f" ({pool_match.group(1)})" if pool_match.group(1) else ""
+        return f"no pool ShieldBot can simulate a sale on{supported}, so it could not test selling"
 
     fields_match = re.fullmatch(r"(?i)unknown fields:\s*(.+)", clean)
     if fields_match:

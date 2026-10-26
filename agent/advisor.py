@@ -18,7 +18,7 @@ from utils.web3_client import UnsupportedChainError
 from utils.ai_analyzer import AIEmptyResponse, AIRefused
 
 from agent.prompts import ADVISOR_SYSTEM_PROMPT, EXPLAIN_SCAN_TEMPLATE, HAIKU_MODEL, SONNET_MODEL
-from core.chat_coverage import readable_coverage_gaps
+from core.chat_coverage import readable_coverage_gaps, unknown_reply
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,10 @@ AI_CHAT_PAUSED = (
     "AI chat is paused for today because the daily AI budget is used up. "
     "It resumes at 00:00 UTC."
 )
+
+# A scan without a verdict still carries its partial reading as a score and a level. The prompt forbids citing
+# them; the model's view of such a scan leaves them out, so a number it never saw it cannot cite.
+_SCORE_FIELDS = ("rug_probability", "risk_score", "risk_level", "risk_archetype", "category_scores", "confidence_level")
 
 
 def _untagged(text: str) -> str:
@@ -155,12 +159,23 @@ class Advisor:
         history = await self.db.get_chat_history(user_id, limit=10)
         context = await self._gather_context(intent, data, chain_id=chain_id)
 
+        # A scan the engine left without a verdict (status unknown): the model sees it without its scores, and
+        # history keeps the Unknown reply the user is shown (api.agent_chat shapes the response the same way),
+        # so a later turn cannot quote a score or verdict the user never received.
+        unknown_scan = intent == "CONTRACT_CHECK" and context["scan"].get("status") == "unknown"
+
         # Build the user content — inject context when available.
         # Wrap in XML delimiters to mitigate prompt injection via API data; nothing inside can close them.
         if context:
+            shown = context
+            if unknown_scan:
+                shown = {
+                    **context,
+                    "scan": {key: value for key, value in context["scan"].items() if key not in _SCORE_FIELDS},
+                }
             user_content = (
                 "<tool_results>\n"
-                f"{_untagged(json.dumps(context, default=str))}\n"
+                f"{_untagged(json.dumps(shown, default=str))}\n"
                 "</tool_results>\n\n"
                 f"<user_message>{_untagged(message)}</user_message>"
             )
@@ -240,8 +255,14 @@ class Advisor:
 
         # Persist both sides of the conversation; a paused reply would only crowd tomorrow's history
         if response_text != AI_CHAT_PAUSED:
+            stored = response_text
+            if unknown_scan:
+                stored = unknown_reply(
+                    context["scan"].get("coverage_reasons", {}),
+                    response_text if model_response_available else "",
+                )
             await self.db.insert_chat_message(user_id, "user", message)
-            await self.db.insert_chat_message(user_id, "assistant", response_text)
+            await self.db.insert_chat_message(user_id, "assistant", stored)
 
         result: Dict[str, Any] = {"text": response_text, "model_response_available": model_response_available}
 

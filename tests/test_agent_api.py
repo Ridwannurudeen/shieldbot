@@ -293,3 +293,34 @@ def test_unknown_reply_strips_block_ranges_the_model_repeats():
     assert "blocks" not in reply
     assert reply.endswith("ShieldBot found no pool it can simulate a sale on, so selling is untested.")
 
+
+@pytest.mark.parametrize("supported", [
+    "Uniswap V3, Uniswap V2 or SushiSwap, paired with WETH",
+    "BDEX V3 or BDEX V2, paired with WBOT",
+    "Uniswap V4 pools without hooks or with the Doppler hook paired with ETH, WETH or USDG, or Uniswap V3 or V2 pools paired with WETH",
+])
+def test_chat_coverage_names_the_pools_a_simulator_supports(supported):
+    from core.chat_coverage import readable_coverage_gaps
+
+    reason = f"Initialize logs scanned over blocks 12-34; No supported pool found ({supported}); Unknown fields: can_sell"
+    assert readable_coverage_gaps({"honeypot": reason}) == [
+        f"no pool ShieldBot can simulate a sale on ({supported}), so it could not test selling",
+        "whether the token can be sold is unknown",
+    ]
+
+
+def test_chat_scan_data_carries_the_readable_coverage_gaps(client):
+    import api as api_module
+
+    api_module.container.advisor.chat = AsyncMock(return_value={
+        "text": "AI analysis is currently unavailable.",
+        "model_response_available": False,
+        "scan_data": UNKNOWN_SCAN,
+    })
+    response = client.post("/api/agent/chat", json={"message": "Check token", "user_id": "u1"})
+
+    assert response.json()["scan_data"]["coverage_gaps"] == [
+        "no pool ShieldBot can simulate a sale on, so it could not test selling",
+        "buy tax, sell tax and whether the token can be sold are unknown",
+    ]
+
