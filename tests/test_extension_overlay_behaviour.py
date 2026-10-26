@@ -263,6 +263,9 @@ async function assertVerdicts(expected) {
 async function intercept(requestId, tx = {to: '0x' + 'a'.repeat(40), chainId: 56}, method = 'eth_sendTransaction') {
   deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId, method, tx, proof: await proofFor(token, `${requestId}:intercept`)});
   await flush();
+  // Under load the proof check, storage reads and language file can take longer than one flush: wait until a
+  // screen is up or a verdict was sent, within a bound, so a slow run is not read as a request that was dropped.
+  for (let i = 0; i < 30 && !overlay() && verdicts().length === 0; i++) await flush();
 }
 const scan = (fields) => ({
   status: 'ok', partial: false, classification: 'SAFE', risk_score: 0, coverage: {honeypot: 1},
