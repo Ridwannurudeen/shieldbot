@@ -12,6 +12,7 @@ from eth_utils import keccak
 from adapters.evm_base import BURN_ADDRESSES
 from services.launch_discovery import SOURCES, LaunchDiscoveryError, _decode_log, _quantity
 from services.robinhood_assets import OFFICIAL_LIST_WAIT_SECONDS
+from utils.scam_db import GOPLUS_ADDRESS_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -363,7 +364,17 @@ class ContractService:
                         creator = creation.get('creator') if isinstance(creation, dict) else None
                         if not isinstance(creator, str) or not re.fullmatch(r'0x[0-9a-fA-F]{40}', creator):
                             return None
-                        response = await self.scam_db.fetch_address_security(creator, ledger_chain=677)
+                        try:
+                            response = await asyncio.wait_for(
+                                self.scam_db.fetch_address_security(creator, ledger_chain=677),
+                                timeout=GOPLUS_ADDRESS_TIMEOUT_SECONDS,
+                            )
+                        except asyncio.TimeoutError:
+                            response = {
+                                'status': 'unknown',
+                                'reason': 'GoPlus address security: timed out',
+                                'data': {},
+                            }
                         return creator, response
 
                     creator_security_task = start(creator_lookup())
