@@ -2047,6 +2047,120 @@ def test_a_settled_request_replayed_after_a_hundred_others_is_ignored():
     )
 
 
+def capped_harness(harness, replacements, source="withShortDelays(fs.readFileSync('extension/content.js', 'utf8'))", match=None):
+    """harness with content.js loaded after the given replacements of its source, each asserted.
+    source is the expression the harness loads content.js's source with, found in the text match."""
+    match = match or source
+    steps = "".join(
+        f".replace({json.dumps(old)}, {json.dumps(new)})" for old, new in replacements
+    )
+    checks = " && ".join(f"source.includes({json.dumps(old)})" for old, _ in replacements)
+    patched = harness.replace(
+        match, match.replace(source, f"(source => {{ assert({checks}); return source{steps}; }})({source})"), 1
+    )
+    assert patched != harness
+    return patched
+
+
+def test_open_requests_are_capped_and_a_request_over_the_cap_is_not_taken():
+    run_node(
+        capped_harness(CONTENT_HARNESS, [
+            ("const OPEN_REQUESTS_MAX = 100;", "const OPEN_REQUESTS_MAX = 3;"),
+            ("const OPEN_REQUEST_LIMIT_MS = 65000;", "const OPEN_REQUEST_LIMIT_MS = 3000;"),
+        ])
+        + r"""
+(async () => {
+  // Three analyses that never come back hold three requests open.
+  analyze = () => new Promise(() => {});
+  for (const id of ['a', 'b', 'c']) await intercept(id);
+  assert.equal(analyses.length, 3);
+  await intercept('d', {to: '0x' + 'd'.repeat(40), chainId: 56});
+  assert.equal(analyses.length, 3, 'a request over the cap was analysed');
+  assert(!overlay().innerHTML.includes('d'.repeat(40)), 'a request over the cap was shown');
+  assert.deepEqual(verdicts(), [], 'content.js sent a verdict for a request over the cap');
+  // The user rejects the request on screen; with one settled, a new one is taken again.
+  userKey('Escape');
+  await flush();
+  await assertVerdicts([['c', 'block']]);
+  await intercept('e');
+  assert.equal(analyses.length, 4);
+"""
+    )
+
+
+def test_seen_requests_are_capped_until_their_window_has_passed():
+    run_node(
+        capped_harness(CONTENT_HARNESS, [
+            ("const SEEN_REQUESTS_LIMIT = 100;", "const SEEN_REQUESTS_LIMIT = 2;"),
+            ("const SEEN_REQUESTS_MAX = 200;", "const SEEN_REQUESTS_MAX = 5;"),
+        ])
+        + r"""
+(async () => {
+  // With the firewall switched off, each request is settled at once, with a proceed.
+  storage.enabled = false;
+  for (let i = 0; i < 5; i++) await intercept(`old-${i}`);
+  assert.equal(verdicts().length, 5);
+  await intercept('over');
+  assert.equal(verdicts().length, 5, 'a request over the cap was taken');
+  // Once the window has passed, the oldest ids are let go and a new request is taken.
+  clock += 65001;
+  await intercept('later');
+  await assertVerdicts([...[0, 1, 2, 3, 4].map(i => [`old-${i}`, 'proceed']), ['later', 'proceed']]);
+"""
+    )
+
+
+def test_a_request_over_the_open_cap_is_rejected_by_inject_timer():
+    harness = capped_harness(
+        FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
+        .replace(
+            "const sent = [];",
+            "const sent = [];\nlet analyses = 0;\nconst analysisGate = new Promise(() => {});",
+            1,
+        )
+        .replace(
+            "    async sendMessage(message) {\n",
+            "    async sendMessage(message) {\n"
+            "      if (message.type === 'SHIELDAI_ANALYZE') { analyses++; await analysisGate; }\n",
+            1,
+        ),
+        [
+            ("const OPEN_REQUESTS_MAX = 100;", "const OPEN_REQUESTS_MAX = 1;"),
+            ("const OPEN_REQUEST_LIMIT_MS = 65000;", "const OPEN_REQUEST_LIMIT_MS = 2000;"),
+        ],
+        source="withShortDelays(source)",
+        match="script === 'content' ? withShortDelays(source) : source",
+    )
+    # inject.js fails closed after 300 ms here instead of 60 s.
+    inject_source = "fs.readFileSync(`extension/${script}.js`, 'utf8')"
+    shortened = harness.replace(
+        inject_source,
+        inject_source + ".replace('finish(\"block\"), 60000)', 'finish(\"block\"), 300)')",
+        1,
+    )
+    assert shortened != harness
+    run_node(
+        shortened
+        + r"""
+(async () => {
+  const outcome = () => {
+    const pending = provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]});
+    const result = {value: null};
+    pending.then(() => { result.value = 'sent'; }, error => { result.value = error.code; });
+    return result;
+  };
+  outcome();
+  for (let i = 0; i < 20 && analyses < 1; i++) await flush();
+  assert.equal(analyses, 1);
+  const second = outcome();
+  for (let i = 0; i < 20 && second.value === null; i++) await flush();
+  assert.equal(second.value, 4001, 'the request over the cap was not rejected');
+  assert.equal(analyses, 1, 'the request over the cap was analysed');
+  assert.equal(sent.length, 0);
+"""
+    )
+
+
 def test_a_proceed_after_a_block_for_the_same_request_is_not_forwarded():
     # Verdict proofs are made asynchronously, so a block's check can finish after a later
     # proceed's: here the block's takes longer. The verdict that arrived first decides.

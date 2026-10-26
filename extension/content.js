@@ -170,6 +170,10 @@
   // at most the ids of one such window beyond the limit.
   const _seenRequests = new Map();
   const SEEN_REQUESTS_LIMIT = 100;
+  // A hard cap: while this many ids are kept (none old enough to drop), a
+  // new intercept is not taken, and inject.js's timer rejects it. Twice the
+  // cap on open requests, as an id stays here after its request settles.
+  const SEEN_REQUESTS_MAX = 200;
 
   // Proven requests no verdict has been sent for yet, each with the timer
   // that drops it if no overlay is shown for it in time (null once one is).
@@ -179,6 +183,12 @@
   // it on the loading screen, or it was dropped) is not shown. Only live
   // requests are in it, so it needs no limit.
   const _openRequests = new Map();
+  // At most this many requests are open at once. A new intercept beyond it is
+  // not taken: it is neither analysed nor shown, no verdict is sent, and
+  // inject.js's timer rejects it (fails closed). A dApp's requests wait for
+  // the user one overlay at a time, so a real page has a handful open; a
+  // hundred is only reached by a page flooding the channel.
+  const OPEN_REQUESTS_MAX = 100;
 
   // inject.js fails closed 60 seconds after it posts an intercept. A result
   // that arrives later than this is too late for the user to decide on, so it
@@ -204,16 +214,19 @@
 
     const { requestId, tx, proof } = event.data;
     if (typeof requestId !== "string" || _seenRequests.has(requestId) || _openRequests.has(requestId)) return;
+    for (const [seen, at] of _seenRequests) {
+      if (_seenRequests.size <= SEEN_REQUESTS_LIMIT || Date.now() - at <= OPEN_REQUEST_LIMIT_MS) break;
+      _seenRequests.delete(seen);
+    }
+    // At either cap the intercept is not taken; inject.js's timer rejects it.
+    if (_seenRequests.size >= SEEN_REQUESTS_MAX) return;
     _seenRequests.set(requestId, Date.now());
     // The page can post intercepts too; only inject.js can prove this one.
     if (!sameProof(await channelProof(requestId, "intercept"), proof)) {
       _seenRequests.delete(requestId);
       return;
     }
-    for (const [seen, at] of _seenRequests) {
-      if (_seenRequests.size <= SEEN_REQUESTS_LIMIT || Date.now() - at <= OPEN_REQUEST_LIMIT_MS) break;
-      _seenRequests.delete(seen);
-    }
+    if (_openRequests.size >= OPEN_REQUESTS_MAX) return;
     // Dropped, without a verdict (inject.js has failed closed by then), if
     // no overlay is shown for it in time; a loading screen still up for it
     // goes too.
