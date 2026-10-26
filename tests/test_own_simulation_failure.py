@@ -2,6 +2,7 @@
 unknown, even beside a complete and clean GoPlus answer: GoPlus misses the honeypots the simulation exists to
 catch (it reports the real Arbitrum honeypot ARBROKER as not a honeypot)."""
 
+import asyncio
 import copy
 import dataclasses
 import logging
@@ -631,8 +632,9 @@ async def test_a_simulation_refused_at_the_cap_stays_unknown_beside_a_complete_c
     adapter = adapter("https://rpc.invalid")
     adapter._simulator._request = request = AsyncMock()
     cap = module.MAX_SIMULATIONS
-    # Simulations of other tokens fill the cap.
-    adapter._simulator._inflight = {("other", index): None for index in range(cap)}
+    # User simulations of other tokens on this loop fill the cap.
+    loop = asyncio.get_running_loop()
+    adapter._simulator._inflight = {(loop, f"other {index}"): None for index in range(cap)}
     data, analyzed, risk, extension = await scan(chain_id, adapter)
     request.assert_not_awaited()
     assert_unknown_never_safe(data, analyzed, risk, extension)

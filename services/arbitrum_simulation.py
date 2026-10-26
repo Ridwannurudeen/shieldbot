@@ -533,9 +533,11 @@ class ArbitrumSimulator:
         cached = self._cache.get(token)
         if cached is not None:
             return cached
-        flight_key = (asyncio.get_running_loop(), token)
+        loop = asyncio.get_running_loop()
+        flight_key = (loop, token)
         if flight_key not in self._inflight:
-            if len(self._inflight) >= MAX_SIMULATIONS:
+            # Only this loop's simulations can finish, so only they hold a slot.
+            if sum(key[0] is loop for key in self._inflight) >= MAX_SIMULATIONS:
                 # Not cached, so the token is simulated once a simulation in progress finishes.
                 result = aggregate_outcomes(
                     [], [f"Simulation not run: {MAX_SIMULATIONS} simulations already in progress"]
@@ -543,7 +545,7 @@ class ArbitrumSimulator:
                 # The simulation could not run, so it cannot say the token sells; nor can GoPlus.
                 result["rpc_failed"] = True
                 result["observed_at"] = time.time()
-                unknown_ledger.record(SIMULATION_PROVIDER, CHAIN_ID, "failed")
+                unknown_ledger.record(SIMULATION_PROVIDER, CHAIN_ID, "unknown")
                 return result
             self._inflight[flight_key] = asyncio.create_task(self._simulate(token, flight_key))
         return await asyncio.shield(self._inflight[flight_key])

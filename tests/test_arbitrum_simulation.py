@@ -1169,7 +1169,9 @@ def held_simulator(tokens):
 
 
 @pytest.mark.asyncio
-async def test_a_new_token_at_the_cap_is_unknown_without_a_task_or_an_rpc_call():
+async def test_a_new_token_at_the_cap_is_unknown_without_a_task_or_an_rpc_call(monkeypatch):
+    ledger = UnknownLedger()
+    monkeypatch.setattr("services.arbitrum_simulation.unknown_ledger", ledger)
     *admitted, refused = distinct_tokens(MAX_SIMULATIONS + 1)
     simulator, releases, started = held_simulator(admitted)
     callers = [asyncio.create_task(simulator.simulate(token)) for token in admitted]
@@ -1183,6 +1185,9 @@ async def test_a_new_token_at_the_cap_is_unknown_without_a_task_or_an_rpc_call()
         result = await simulator.simulate(refused)
     create_task.assert_not_called()
     session.assert_not_called()
+    # A refusal is no answer from the provider, nor a failure of it.
+    counts = ledger.for_chain(CHAIN_ID)[arbitrum_simulation.SIMULATION_PROVIDER]
+    assert (counts["answered"], counts["unknown"], counts["failed"]) == (0, 1, 0)
     assert refused not in started
     assert len(simulator._inflight) == MAX_SIMULATIONS
     assert all(result[field] is None for field in FIELDS)
@@ -1273,3 +1278,26 @@ async def test_the_count_returns_to_zero_after_simulations_are_cancelled():
     releases[later].set()
     assert (await admitted)["reason"] == "No supported pool found"
     assert simulator._inflight == {}
+
+
+def test_entries_a_closed_loop_left_behind_hold_no_slot():
+    *stale, fresh = distinct_tokens(MAX_SIMULATIONS + 1)
+    simulator, releases, started = held_simulator([fresh])
+    loop = asyncio.new_event_loop()
+
+    async def leave_entries():
+        callers = [asyncio.ensure_future(simulator.simulate(token)) for token in stale]
+        await asyncio.sleep(0)
+        # Cancelled before its first step, a simulation never runs the finally that pops its entry.
+        simulations = list(simulator._inflight.values())
+        for task in [*simulations, *callers]:
+            task.cancel()
+        await asyncio.gather(*simulations, *callers, return_exceptions=True)
+
+    loop.run_until_complete(leave_entries())
+    loop.close()
+    assert len(simulator._inflight) == MAX_SIMULATIONS
+    releases[fresh].set()
+    result = asyncio.run(simulator.simulate(fresh))
+    assert result["reason"] == "No supported pool found"
+    assert started == [fresh]
