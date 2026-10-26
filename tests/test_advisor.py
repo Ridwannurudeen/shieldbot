@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import time
+
 from agent.advisor import Advisor
 from core.chat_coverage import UNKNOWN_LINE
 
@@ -794,7 +796,9 @@ async def test_chat_calls_no_model_for_a_scan_the_server_shows_as_unknown(adviso
     assert mock_db.insert_chat_message.call_args_list[1].args[2] == expected
     assert result["scan_data"]["status"] == "ok" and result["scan_data"]["coverage"]["honeypot"] == 0.4
 
-    mock_db.get_chat_history = AsyncMock(return_value=[{"role": "assistant", "message": expected}])
+    mock_db.get_chat_history = AsyncMock(return_value=[
+        {"id": 2, "role": "assistant", "message": expected, "created_at": time.time()},
+    ])
     follow_up = await advisor.chat("u1", "can i buy it")
     mock_ai.chat_with_usage.assert_not_awaited()
     assert follow_up["text"] == expected + "\n\n" + RESCAN_LINE
@@ -807,9 +811,10 @@ async def test_chat_gates_only_the_first_general_question_after_an_unknown_scan(
     the model, which has seen no incomplete data (history holds only the server's text for that turn)."""
     from agent.advisor import RESCAN_LINE
 
+    now = time.time()
     mock_db.get_chat_history = AsyncMock(return_value=[
-        {"role": "user", "message": "0x" + "a" * 40},
-        {"role": "assistant", "message": UNKNOWN_REPLY},
+        {"id": 1, "role": "user", "message": "0x" + "a" * 40, "created_at": now - 5},
+        {"id": 2, "role": "assistant", "message": UNKNOWN_REPLY, "created_at": now - 4},
     ])
     result = await advisor.chat("u1", "can i buy it", chain_id=4663)
 
@@ -819,9 +824,9 @@ async def test_chat_gates_only_the_first_general_question_after_an_unknown_scan(
     assert mock_db.insert_chat_message.call_args_list[1].args[2] == result["text"]
 
     mock_db.get_chat_history = AsyncMock(return_value=[
-        {"role": "assistant", "message": UNKNOWN_REPLY},
-        {"role": "user", "message": "can i buy it"},
-        {"role": "assistant", "message": result["text"]},
+        {"id": 2, "role": "assistant", "message": UNKNOWN_REPLY, "created_at": now - 4},
+        {"id": 3, "role": "user", "message": "can i buy it", "created_at": now - 2},
+        {"id": 4, "role": "assistant", "message": result["text"], "created_at": now - 1},
     ])
     mock_ai.chat_with_usage = AsyncMock(return_value=("ShieldBot scans tokens before you trade.", 100))
     again = await advisor.chat("u1", "how does ShieldBot work?", chain_id=4663)
@@ -838,22 +843,28 @@ async def test_chat_follow_up_gate_expires_and_a_new_scan_resets_it(advisor, moc
     mock_ai.chat_with_usage = AsyncMock(return_value=("General answer.", 100))
     # Within the window the question is about the unscored token; after it, the model answers.
     mock_db.get_chat_history = AsyncMock(return_value=[
-        {"role": "assistant", "message": UNKNOWN_REPLY, "created_at": time.time() - FOLLOW_UP_WINDOW_SECONDS + 30},
+        {"id": 2, "role": "assistant", "message": UNKNOWN_REPLY, "created_at": time.time() - FOLLOW_UP_WINDOW_SECONDS + 30},
     ])
     assert (await advisor.chat("u1", "can i buy it"))["text"] != "General answer."
     mock_ai.chat_with_usage.assert_not_awaited()
     mock_db.get_chat_history = AsyncMock(return_value=[
-        {"role": "assistant", "message": UNKNOWN_REPLY, "created_at": time.time() - FOLLOW_UP_WINDOW_SECONDS - 1},
+        {"id": 2, "role": "assistant", "message": UNKNOWN_REPLY, "created_at": time.time() - FOLLOW_UP_WINDOW_SECONDS - 1},
     ])
     assert (await advisor.chat("u1", "can i buy it"))["text"] == "General answer."
-    # A later complete scan is the newest turn: a general question after it reaches the model.
+    # A clock that moved back since the reply (its stored time is now in the future) ends the window too.
     mock_db.get_chat_history = AsyncMock(return_value=[
-        {"role": "assistant", "message": UNKNOWN_REPLY},
-        {"role": "user", "message": "Check 0x" + "b" * 40},
-        {"role": "assistant", "message": "High risk contract detected."},
+        {"id": 2, "role": "assistant", "message": UNKNOWN_REPLY, "created_at": time.time() + 60},
+    ])
+    assert (await advisor.chat("u1", "can i buy it"))["text"] == "General answer."
+    # History comes in insertion order, so a later complete scan is the newest turn even when its clock reads
+    # earlier than the Unknown reply's: a general question after it reaches the model.
+    mock_db.get_chat_history = AsyncMock(return_value=[
+        {"id": 2, "role": "assistant", "message": UNKNOWN_REPLY, "created_at": time.time()},
+        {"id": 3, "role": "user", "message": "Check 0x" + "b" * 40, "created_at": time.time() - 100},
+        {"id": 4, "role": "assistant", "message": "High risk contract detected.", "created_at": time.time() - 100},
     ])
     assert (await advisor.chat("u1", "what should I do?"))["text"] == "General answer."
-    assert mock_ai.chat_with_usage.await_count == 2
+    assert mock_ai.chat_with_usage.await_count == 3
 
 
 @pytest.mark.asyncio

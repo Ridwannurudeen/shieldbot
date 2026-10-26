@@ -175,7 +175,9 @@ class Advisor:
         after_unknown_scan = (
             intent == "GENERAL" and newest is not None and newest["role"] == "assistant"
             and newest["message"].startswith(UNKNOWN_LINE) and not newest["message"].endswith(RESCAN_LINE)
-            and time.time() - newest.get("created_at", time.time()) <= FOLLOW_UP_WINDOW_SECONDS
+            # History comes in insertion order (core.database), so the newest row is the last inserted one; a
+            # clock that moved back since (a negative age) ends the window as surely as time does.
+            and 0 <= time.time() - newest["created_at"] <= FOLLOW_UP_WINDOW_SECONDS
         )
 
         # Build the user content — inject context when available.
