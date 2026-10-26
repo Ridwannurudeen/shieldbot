@@ -2379,8 +2379,10 @@ async def chain_coverage(chain_id: int):
     was read) or only the newest `window_blocks` blocks.
     `provider_health` is this chain's Unknown ledger (core.unknown_ledger): per provider, how many
     lookups were answered, came back unknown or failed since `counting_since`, and the latest outcome;
-    `chain_independent` holds providers asked about no chain. On BOT Chain, scam lookups are recorded
-    under `goplus_address`. A provider with no entry has not been asked since the process started.
+    `chain_independent` holds providers asked about no chain. BOT Chain scam address requests are
+    recorded under `goplus_address` for the chain of the caller that starts a shared request; cache
+    hits and coalesced callers do not add another count. A provider with no entry has not been asked
+    since the process started.
     Nothing here sends a request to any provider.
     With BACKGROUND_WORKERS=external this process reads no mempool, so `public_mempool` is never yes,
     and `provider_health` counts this process's lookups only; `background_workers_note` says so.

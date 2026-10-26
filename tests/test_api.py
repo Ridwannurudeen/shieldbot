@@ -974,6 +974,28 @@ async def test_scan_endpoint_skips_a_discarded_forensic_report(routing_error_api
 
 
 @pytest.mark.asyncio
+async def test_scan_endpoint_preserves_botchain_scam_check_scope(routing_error_api, monkeypatch):
+    api, _, scanner, _ = routing_error_api
+    monkeypatch.setattr(api.web3_client, "validate_chain_id", lambda chain_id: chain_id)
+    label = (
+        "Scam Database: no GoPlus address labels "
+        "(GoPlus token security does not cover BOT Chain)"
+    )
+    scanner.scan_address.return_value = {
+        "is_contract": False,
+        "checks": {"scam_database_clean": True},
+        "check_labels": {"scam_database_clean": label},
+        "coverage": {},
+        "coverage_reasons": {},
+    }
+
+    result = await api.scan(api.ScanRequest(address="0x" + "a" * 40, chainId=677))
+
+    assert result["checks"]["scam_database_clean"] is True
+    assert result["check_labels"]["scam_database_clean"] == label
+
+
+@pytest.mark.asyncio
 async def test_scan_endpoint_preserves_routing_error_from_the_token_check(routing_error_api):
     from utils.web3_client import UnsupportedChainError
 

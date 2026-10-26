@@ -244,6 +244,13 @@ class TransactionScanner:
                 result['checks']['scam_database_clean'] = False
             else:
                 result['checks']['scam_database_clean'] = None if failed_providers else True
+                if chain_id == 677 and result['checks']['scam_database_clean'] is True:
+                    result['check_labels'] = {
+                        'scam_database_clean': (
+                            'Scam Database: no GoPlus address labels '
+                            '(GoPlus token security does not cover BOT Chain)'
+                        ),
+                    }
             # A community report is not a scam database match; its reason names it.
             result['warnings'].extend(match['reason'] for match in medium_matches(matches))
 
