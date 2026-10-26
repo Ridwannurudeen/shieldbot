@@ -168,6 +168,14 @@
   const _seenRequests = new Set();
   const SEEN_REQUESTS_LIMIT = 100;
 
+  // Proven requests no verdict has been sent for yet. One leaves the set
+  // when its verdict is sent, so its first verdict is final: no later one is
+  // sent for it, whatever the order its proof would be made in, and a result
+  // that comes back for it once it has left (the user rejected it on the
+  // loading screen) is not shown. Only live requests are in it, so it needs
+  // no limit.
+  const _openRequests = new Set();
+
   // inject.js fails closed 60 seconds after it posts an intercept. A result
   // that arrives later than this is too late for the user to decide on, so it
   // gets a timed-out screen instead of a decision overlay.
@@ -195,6 +203,7 @@
     if (_seenRequests.size > SEEN_REQUESTS_LIMIT) {
       _seenRequests.delete(_seenRequests.values().next().value);
     }
+    _openRequests.add(requestId);
     const received = Date.now();
 
     // Check if extension is enabled
@@ -242,7 +251,7 @@
     const lookalike = recipient === null ? null : await pastLookalike(recipient);
     // The user rejected it on the loading screen: it is settled, so its
     // result is not shown.
-    if (_settledRequests.has(requestId)) return;
+    if (!_openRequests.has(requestId)) return;
 
     if (Date.now() - received > DECISION_WINDOW_MS) {
       showTimedOutOverlay(requestId);
@@ -356,20 +365,10 @@
   // whose overlay goes away without a decision is rejected here.
   let _awaitingRequestId = null;
 
-  // Requests a verdict has been sent for. The first verdict for a request is
-  // final: no later one is sent for it, whatever the order its proof would
-  // be made in, and a result that comes back for it (the user rejected it on
-  // the loading screen) is not shown. The oldest are dropped past the limit.
-  const _settledRequests = new Set();
-
   // Verdicts carry a proof for their own action, never the token, so the page
   // learns nothing it could use to forge or relabel a verdict.
   function postVerdict(requestId, action) {
-    if (_settledRequests.has(requestId)) return;
-    _settledRequests.add(requestId);
-    if (_settledRequests.size > SEEN_REQUESTS_LIMIT) {
-      _settledRequests.delete(_settledRequests.values().next().value);
-    }
+    if (!_openRequests.delete(requestId)) return;
     channelProof(requestId, action).then((proof) => {
       window.postMessage({ type: "SHIELDAI_TX_VERDICT", requestId, action, proof }, "*");
     });
@@ -908,7 +907,7 @@
   async function showSignatureOverlay(requestId, tx, strict, response) {
     await _loadContentLang();
     // Rejected on the loading screen while the language file loaded.
-    if (_settledRequests.has(requestId)) return;
+    if (!_openRequests.has(requestId)) return;
     removeOverlay();
 
     const signMethod = tx.signMethod || "personal_sign";
@@ -1093,7 +1092,7 @@
   async function showAnalysisOverlay(requestId, result, strict, tx, recipient, lookalike) {
     await _loadContentLang();
     // Rejected on the loading screen while the language file loaded.
-    if (_settledRequests.has(requestId)) return;
+    if (!_openRequests.has(requestId)) return;
     removeOverlay();
 
     const { incomplete, classification: verdict } = verdictOf(result);
@@ -1334,7 +1333,7 @@
   async function showErrorOverlay(requestId, errorMsg, strict, tx, recipient, lookalike) {
     await _loadContentLang();
     // Rejected on the loading screen while the language file loaded.
-    if (_settledRequests.has(requestId)) return;
+    if (!_openRequests.has(requestId)) return;
     removeOverlay();
     // An EIP-7702 delegation is Block Recommended without the API too.
     const delegation = Array.isArray(tx.authorizationList);
@@ -1431,7 +1430,7 @@
   async function showTimedOutOverlay(requestId) {
     await _loadContentLang();
     // Rejected on the loading screen while the language file loaded.
-    if (_settledRequests.has(requestId)) return;
+    if (!_openRequests.has(requestId)) return;
     removeOverlay();
     postVerdict(requestId, "block");
 

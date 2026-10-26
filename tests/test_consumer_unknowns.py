@@ -959,8 +959,8 @@ const context = {
   URLSearchParams, location: {search: ''}, Date, MAX_HISTORY: 50,
   t: key => key, _t: key => key, escapeHtml: String,
   _loadContentLang: async () => {}, removeOverlay() {}, buildCalldataSection: () => '',
-  // content.js's requests a verdict was sent for; none yet.
-  _settledRequests: new Set(),
+  // content.js's requests no verdict has been sent for: this one.
+  _openRequests: new Set(['request']),
   mountOverlay(overlay) {appended.push(overlay); return context.document;}, onDecision() {},
   document: {
     addEventListener() {}, createElement: element,

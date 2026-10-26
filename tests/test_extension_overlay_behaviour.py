@@ -1876,10 +1876,29 @@ def test_legacy_typed_data_is_shown_field_by_field_end_to_end(method):
     )
 
 
+def held_fetch_harness():
+    """CONTENT_HARNESS where a fetch given the delay 'held' waits until the test calls releaseHeld();
+    reachedHeld resolves once such a fetch has started."""
+    harness = CONTENT_HARNESS.replace(
+        "    if (delay) await new Promise(resolve => setTimeout(resolve, delay));",
+        "    if (delay === 'held') { heldStarted(); await held; }\n"
+        "    else if (delay) await new Promise(resolve => setTimeout(resolve, delay));",
+        1,
+    ).replace(
+        "let fetchDelays = [];",
+        "let fetchDelays = [];\nlet releaseHeld, heldStarted;\n"
+        "const held = new Promise(resolve => { releaseHeld = resolve; });\n"
+        "const reachedHeld = new Promise(resolve => { heldStarted = resolve; });",
+        1,
+    )
+    assert "await held;" in harness and "const reachedHeld" in harness
+    return harness
+
+
 @pytest.mark.parametrize("kind", ["analysis", "error", "signature", "timed-out"])
 def test_escape_while_the_result_screen_loads_its_language_shows_no_result(kind):
     run_node(
-        CONTENT_HARNESS
+        held_fetch_harness()
         + r"""
 (async () => {
   const kind = JSON.parse(process.argv[1]);
@@ -1889,21 +1908,51 @@ def test_escape_while_the_result_screen_loads_its_language_shows_no_result(kind)
   };
   // The loading screen's language file comes at once; the result screen's is held, so the user
   // presses Escape while the result screen is waiting for it.
-  fetchDelays = [0, 200];
+  fetchDelays = [0, 'held'];
   if (kind === 'signature') {
     await intercept('request', {signMethod: 'personal_sign', data: '0x68656c6c6f', chainId: 56}, 'personal_sign');
   } else {
     await intercept('request');
   }
+  await reachedHeld;
   assert(overlay() && overlay().innerHTML.includes('shieldai-loading'), 'the loading screen was not on screen');
   userKey('Escape');
-  await new Promise(resolve => setTimeout(resolve, 300));
-  await flush();
+  releaseHeld();
+  for (let i = 0; i < 3; i++) await flush();
   assert.equal(overlay(), null, 'a result screen was mounted for a request the user already rejected');
   await assertVerdicts([['request', 'block']]);
   assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length, 0);
 """,
         kind,
+    )
+
+
+def test_a_rejected_request_stays_rejected_while_more_than_a_hundred_others_settle():
+    run_node(
+        held_fetch_harness()
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  fetchDelays = [0, 'held'];
+  await intercept('request');
+  await reachedHeld;
+  userKey('Escape');
+  // With the firewall switched off, each of these is settled at once, with a proceed, while the
+  // rejected request's result screen still waits for its language file.
+  storage.enabled = false;
+  for (let i = 0; i < 101; i++) {
+    const requestId = `other-${i}`;
+    deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId, method: 'eth_sendTransaction',
+      tx: {to: '0x' + 'a'.repeat(40), chainId: 56}, proof: await proofFor(token, `${requestId}:intercept`)});
+  }
+  for (let i = 0; i < 3; i++) await flush();
+  assert.equal(verdicts().filter(({requestId}) => requestId !== 'request').length, 101);
+  releaseHeld();
+  for (let i = 0; i < 3; i++) await flush();
+  assert.equal(overlay(), null, 'a result screen was mounted for a request the user already rejected');
+  assert.deepEqual(verdicts().filter(({requestId}) => requestId === 'request').map(({action}) => action), ['block']);
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length, 0);
+"""
     )
 
 
