@@ -1956,6 +1956,97 @@ def test_a_rejected_request_stays_rejected_while_more_than_a_hundred_others_sett
     )
 
 
+@pytest.mark.parametrize(
+    "kind", ["loading-never-loads", "analysis-never-returns", "unknown-structure-never-loads", "shown"]
+)
+def test_a_request_left_open_past_the_fail_closed_timer_is_dropped(kind):
+    # inject.js fails closed 60 seconds after an intercept unless the overlay is shown, and does not
+    # tell content.js. content.js drops such a request after its own limit, which outlasts that timer;
+    # the test runs it with a 100 ms limit.
+    content = (ROOT / "extension" / "content.js").read_text(encoding="utf-8")
+    inject = (ROOT / "extension" / "inject.js").read_text(encoding="utf-8")
+    limit = int(re.search(r"const OPEN_REQUEST_LIMIT_MS = (\d+);", content).group(1))
+    ceiling = int(re.search(r'finish\("block"\), (\d+)\)', inject).group(1))
+    assert ceiling < limit <= ceiling + 10000, (ceiling, limit)
+    source = "withShortDelays(fs.readFileSync('extension/content.js', 'utf8'))"
+    harness = held_fetch_harness().replace(
+        source,
+        f"(source => {{ assert(source.includes('const OPEN_REQUEST_LIMIT_MS = {limit};')); return source.replace("
+        f"'const OPEN_REQUEST_LIMIT_MS = {limit};', 'const OPEN_REQUEST_LIMIT_MS = 100;'); }})({source})",
+        1,
+    )
+    assert "const OPEN_REQUEST_LIMIT_MS = 100;" in harness
+    run_node(
+        harness
+        + r"""
+(async () => {
+  const kind = JSON.parse(process.argv[1]);
+  const past = () => new Promise(resolve => setTimeout(resolve, 250));
+  const shown = () => posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length;
+  analyze = async () => ({result: scan({})});
+  if (kind === 'shown') {
+    // A request whose overlay is on screen waits for the user however long they take.
+    await intercept('request');
+    await past();
+    userClick(byId('shieldai-proceed'));
+    await flush();
+    await assertVerdicts([['request', 'proceed']]);
+    return;
+  }
+  if (kind === 'analysis-never-returns') {
+    analyze = () => new Promise(() => {});
+    await intercept('request');
+    assert(overlay() && overlay().innerHTML.includes('shieldai-loading'), 'the loading screen was not on screen');
+    await past();
+  } else {
+    // The language file of the first screen never comes until the limit has passed.
+    fetchDelays = ['held'];
+    await intercept('request', kind === 'unknown-structure-never-loads'
+      ? {unknownStructure: true} : {to: '0x' + 'a'.repeat(40), chainId: 56});
+    await reachedHeld;
+    await past();
+    releaseHeld();
+    for (let i = 0; i < 3; i++) await flush();
+    assert.equal(analyses.length, 0, 'a dropped request was sent for analysis');
+  }
+  assert.equal(overlay(), null, 'a screen stayed or was mounted for a dropped request');
+  assert.deepEqual(verdicts(), [], 'a verdict was sent for a request inject.js already failed closed');
+  assert.equal(shown(), 0);
+""",
+        kind,
+    )
+
+
+def test_a_settled_request_replayed_after_a_hundred_others_is_ignored():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('first');
+  userClick(byId('shieldai-block'));
+  await flush();
+  // With the firewall switched off, each of these is settled at once, with a proceed.
+  storage.enabled = false;
+  for (let i = 0; i < 101; i++) {
+    const requestId = `other-${i}`;
+    deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId, method: 'eth_sendTransaction',
+      tx: {to: '0x' + 'a'.repeat(40), chainId: 56}, proof: await proofFor(token, `${requestId}:intercept`)});
+  }
+  for (let i = 0; i < 3; i++) await flush();
+  assert.equal(verdicts().length, 102);
+  storage.enabled = true;
+  // The page replays the first request's intercept, proof and all.
+  deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId: 'first', method: 'eth_sendTransaction',
+    tx: {to: '0x' + 'a'.repeat(40), chainId: 56}, proof: await proofFor(token, 'first:intercept')});
+  for (let i = 0; i < 3; i++) await flush();
+  assert.equal(analyses.length, 1, 'a replayed request was analysed again');
+  assert.equal(overlay(), null, 'a replayed request was shown again');
+  assert.equal(verdicts().length, 102);
+"""
+    )
+
+
 def test_a_proceed_after_a_block_for_the_same_request_is_not_forwarded():
     # Verdict proofs are made asynchronously, so a block's check can finish after a later
     # proceed's: here the block's takes longer. The verdict that arrived first decides.

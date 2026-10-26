@@ -163,23 +163,33 @@
   // with a harmless-looking payload) and is dropped. The id is recorded before
   // the proof is checked so a replay cannot overtake the original, and removed
   // again if the proof fails, so only proven ids stay and a page cannot flood
-  // the set to push a real one out. The oldest proven ids are dropped past the
-  // limit; by then their requests are long settled.
-  const _seenRequests = new Set();
+  // the set to push a real one out. Each id is kept with the time it came.
+  // Past the limit the oldest proven ids are dropped, but only once
+  // OPEN_REQUEST_LIMIT_MS has passed since they came, so a request is never
+  // opened again while inject.js could still be waiting on it; the set holds
+  // at most the ids of one such window beyond the limit.
+  const _seenRequests = new Map();
   const SEEN_REQUESTS_LIMIT = 100;
 
-  // Proven requests no verdict has been sent for yet. One leaves the set
-  // when its verdict is sent, so its first verdict is final: no later one is
-  // sent for it, whatever the order its proof would be made in, and a result
-  // that comes back for it once it has left (the user rejected it on the
-  // loading screen) is not shown. Only live requests are in it, so it needs
-  // no limit.
-  const _openRequests = new Set();
+  // Proven requests no verdict has been sent for yet, each with the timer
+  // that drops it if no overlay is shown for it in time (null once one is).
+  // One leaves when its verdict is sent, so its first verdict is final: no
+  // later one is sent for it, whatever the order its proof would be made in,
+  // and a result that comes back for it once it has left (the user rejected
+  // it on the loading screen, or it was dropped) is not shown. Only live
+  // requests are in it, so it needs no limit.
+  const _openRequests = new Map();
 
   // inject.js fails closed 60 seconds after it posts an intercept. A result
   // that arrives later than this is too late for the user to decide on, so it
   // gets a timed-out screen instead of a decision overlay.
   const DECISION_WINDOW_MS = 50000;
+
+  // inject.js fails closed 60 seconds after an intercept (its finish("block")
+  // timer in requestAnalysis) unless the overlay was shown, and does not say
+  // so. A request still open here this long after it arrived, with no overlay
+  // shown for it, is dropped: its waits did not resolve in time.
+  const OPEN_REQUEST_LIMIT_MS = 65000;
 
   // Listen for intercepted transactions from inject.js
   window.addEventListener("message", async (event) => {
@@ -193,17 +203,24 @@
     }
 
     const { requestId, tx, proof } = event.data;
-    if (typeof requestId !== "string" || _seenRequests.has(requestId)) return;
-    _seenRequests.add(requestId);
+    if (typeof requestId !== "string" || _seenRequests.has(requestId) || _openRequests.has(requestId)) return;
+    _seenRequests.set(requestId, Date.now());
     // The page can post intercepts too; only inject.js can prove this one.
     if (!sameProof(await channelProof(requestId, "intercept"), proof)) {
       _seenRequests.delete(requestId);
       return;
     }
-    if (_seenRequests.size > SEEN_REQUESTS_LIMIT) {
-      _seenRequests.delete(_seenRequests.values().next().value);
+    for (const [seen, at] of _seenRequests) {
+      if (_seenRequests.size <= SEEN_REQUESTS_LIMIT || Date.now() - at <= OPEN_REQUEST_LIMIT_MS) break;
+      _seenRequests.delete(seen);
     }
-    _openRequests.add(requestId);
+    // Dropped, without a verdict (inject.js has failed closed by then), if
+    // no overlay is shown for it in time; a loading screen still up for it
+    // goes too.
+    _openRequests.set(requestId, setTimeout(() => {
+      _openRequests.delete(requestId);
+      if (_loadingRequestId === requestId) removeOverlay();
+    }, OPEN_REQUEST_LIMIT_MS));
     const received = Date.now();
 
     // Check if extension is enabled
@@ -232,6 +249,7 @@
 
     // Show loading overlay; it must be on screen before any result replaces it
     await showLoadingOverlay(requestId, event.data.method, tx, received);
+    if (!_openRequests.has(requestId)) return;
 
     let response;
     try {
@@ -360,6 +378,9 @@
   // arrived, and stops with the overlay.
   let _elapsedTimer = null;
 
+  // The request the loading screen on display is for, if one is.
+  let _loadingRequestId = null;
+
   // The request whose overlay is waiting for the user. inject.js stops its
   // no-verdict timeout once it knows the overlay is on screen, so a request
   // whose overlay goes away without a decision is rejected here.
@@ -368,7 +389,9 @@
   // Verdicts carry a proof for their own action, never the token, so the page
   // learns nothing it could use to forge or relabel a verdict.
   function postVerdict(requestId, action) {
-    if (!_openRequests.delete(requestId)) return;
+    if (!_openRequests.has(requestId)) return;
+    clearTimeout(_openRequests.get(requestId));
+    _openRequests.delete(requestId);
     channelProof(requestId, action).then((proof) => {
       window.postMessage({ type: "SHIELDAI_TX_VERDICT", requestId, action, proof }, "*");
     });
@@ -391,6 +414,7 @@
       clearTimeout(_elapsedTimer);
       _elapsedTimer = null;
     }
+    _loadingRequestId = null;
     if (_awaitingRequestId !== null) {
       const requestId = _awaitingRequestId;
       _awaitingRequestId = null;
@@ -559,6 +583,12 @@
     (root.getElementById("shieldai-block") || modal).focus();
     if (requestId) {
       _awaitingRequestId = requestId;
+      // inject.js stops its timer on the shown signal, so the request stays
+      // open until the user decides.
+      if (_openRequests.has(requestId)) {
+        clearTimeout(_openRequests.get(requestId));
+        _openRequests.set(requestId, null);
+      }
       channelProof(requestId, "shown").then((proof) => {
         window.postMessage({ type: "SHIELDAI_TX_SHOWN", requestId, proof }, "*");
       });
@@ -718,6 +748,8 @@
   // check reports no progress, so none is shown.
   async function showLoadingOverlay(requestId, method, tx, received) {
     await _loadContentLang();
+    // Dropped while the language file loaded.
+    if (!_openRequests.has(requestId)) return;
     removeOverlay();
 
     const call = tx.callCount ? ` · ${tx.callIndex}/${tx.callCount}` : "";
@@ -748,6 +780,7 @@
     `;
     const root = mountOverlay(overlay);
     const host = _overlayHost;
+    _loadingRequestId = requestId;
     // Nothing is asked of the user yet, but Escape already rejects: the
     // request is refused at once, and nothing reaches the wallet.
     overlay.addEventListener("keydown", (event) => {
@@ -906,7 +939,8 @@
 
   async function showSignatureOverlay(requestId, tx, strict, response) {
     await _loadContentLang();
-    // Rejected on the loading screen while the language file loaded.
+    // Rejected on the loading screen, or dropped, while the language file
+    // loaded.
     if (!_openRequests.has(requestId)) return;
     removeOverlay();
 
@@ -1091,7 +1125,8 @@
 
   async function showAnalysisOverlay(requestId, result, strict, tx, recipient, lookalike) {
     await _loadContentLang();
-    // Rejected on the loading screen while the language file loaded.
+    // Rejected on the loading screen, or dropped, while the language file
+    // loaded.
     if (!_openRequests.has(requestId)) return;
     removeOverlay();
 
@@ -1332,7 +1367,8 @@
   // through on one click.
   async function showErrorOverlay(requestId, errorMsg, strict, tx, recipient, lookalike) {
     await _loadContentLang();
-    // Rejected on the loading screen while the language file loaded.
+    // Rejected on the loading screen, or dropped, while the language file
+    // loaded.
     if (!_openRequests.has(requestId)) return;
     removeOverlay();
     // An EIP-7702 delegation is Block Recommended without the API too.
@@ -1387,6 +1423,8 @@
   // rejects whatever the user decides.
   async function showUnknownStructureOverlay(requestId, strict, wrongChain) {
     await _loadContentLang();
+    // Dropped while the language file loaded.
+    if (!_openRequests.has(requestId)) return;
     removeOverlay();
     const canProceed = !strict && !wrongChain;
 
@@ -1429,7 +1467,8 @@
   // is rejected now, and the user is asked to try again.
   async function showTimedOutOverlay(requestId) {
     await _loadContentLang();
-    // Rejected on the loading screen while the language file loaded.
+    // Rejected on the loading screen, or dropped, while the language file
+    // loaded.
     if (!_openRequests.has(requestId)) return;
     removeOverlay();
     postVerdict(requestId, "block");
