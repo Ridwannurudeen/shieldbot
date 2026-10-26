@@ -211,6 +211,9 @@ const analyses = [];
 let analyze = async () => ({error: 'API error 503: unavailable'});
 let phishing = false, phishingChecks = 0;
 let clock = 1000000;
+// The system clock (Date.now) can be stepped apart from the monotonic one (performance.now), as a
+// time sync does; both otherwise follow clock.
+let wallClockStep = 0;
 let fetchDelays = [];
 const settingsListeners = [];
 const changed = value => settingsListeners.forEach(fn =>
@@ -231,7 +234,7 @@ const chrome = {
 };
 const context = vm.createContext({
   window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,
-  console, Date: {now: () => clock}, MutationObserver: FakeMutationObserver,
+  console, Date: {now: () => clock + wallClockStep}, performance: {now: () => clock}, MutationObserver: FakeMutationObserver,
   IntersectionObserver: FakeIntersectionObserver,
   fetch: async url => {
     const delay = fetchDelays.shift();
@@ -920,6 +923,33 @@ def test_a_new_dialog_starts_its_visibility_afresh():
   await flush();
   await assertVerdicts([['request', 'proceed']]);
 """
+    )
+
+
+@pytest.mark.parametrize("how", ["click", "hold"])
+def test_a_system_clock_set_back_does_not_swallow_the_users_proceed(how):
+    # A time sync can set the system clock back a second (WSL does under load). The half second
+    # before Proceed counts is measured on a clock that does not move with it.
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const how = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: scan(how === 'hold' ? {classification: 'BLOCK_RECOMMENDED', risk_score: 95} : {})});
+  await intercept('request');
+  const proceed = byId('shieldai-proceed');
+  await flush();
+  assert(!proceed.disabled);
+  wallClockStep = -1000;
+  if (how === 'click') {
+    userClick(proceed);
+  } else {
+    proceed.dispatch('pointerdown', {isTrusted: true, button: 0, isPrimary: true});
+  }
+  for (let i = 0; i < 10 && verdicts().length === 0; i++) await flush();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        how,
     )
 
 
@@ -1765,7 +1795,7 @@ const chrome = {
 };
 const contentWorld = vm.createContext({
   window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,
-  console, Date, MutationObserver: FakeMutationObserver, IntersectionObserver: FakeIntersectionObserver,
+  console, Date, performance, MutationObserver: FakeMutationObserver, IntersectionObserver: FakeIntersectionObserver,
   fetch: async url => ({json: async () => JSON.parse(fs.readFileSync(url.replace('chrome-extension://id/', 'extension/'), 'utf8'))}),
 });
 const pageWorld = vm.createContext({

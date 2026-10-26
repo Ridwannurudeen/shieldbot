@@ -215,12 +215,12 @@
     const { requestId, tx, proof } = event.data;
     if (typeof requestId !== "string" || _seenRequests.has(requestId) || _openRequests.has(requestId)) return;
     for (const [seen, at] of _seenRequests) {
-      if (_seenRequests.size <= SEEN_REQUESTS_LIMIT || Date.now() - at <= OPEN_REQUEST_LIMIT_MS) break;
+      if (_seenRequests.size <= SEEN_REQUESTS_LIMIT || performance.now() - at <= OPEN_REQUEST_LIMIT_MS) break;
       _seenRequests.delete(seen);
     }
     // At either cap the intercept is not taken; inject.js's timer rejects it.
     if (_seenRequests.size >= SEEN_REQUESTS_MAX) return;
-    _seenRequests.set(requestId, Date.now());
+    _seenRequests.set(requestId, performance.now());
     // The page can post intercepts too; only inject.js can prove this one.
     if (!sameProof(await channelProof(requestId, "intercept"), proof)) {
       _seenRequests.delete(requestId);
@@ -234,7 +234,7 @@
       _openRequests.delete(requestId);
       if (_loadingRequestId === requestId) removeOverlay();
     }, OPEN_REQUEST_LIMIT_MS));
-    const received = Date.now();
+    const received = performance.now();
 
     // Check if extension is enabled
     const settings = await getSettings();
@@ -284,7 +284,7 @@
     // result is not shown.
     if (!_openRequests.has(requestId)) return;
 
-    if (Date.now() - received > DECISION_WINDOW_MS) {
+    if (performance.now() - received > DECISION_WINDOW_MS) {
       showTimedOutOverlay(requestId);
     } else if (isSignature) {
       showSignatureOverlay(requestId, tx, strict, response);
@@ -378,6 +378,9 @@
   // Sign Anyway) must be held down.
   const HOLD_TO_CONFIRM_MS = 1500;
   let _dialogVisible = false;
+  // Every time content.js measures is read from performance.now(), which a
+  // change of the system clock does not move: set back, Date.now() would make
+  // a real click on Proceed count for nothing until the clock caught up.
   let _visibleSince = Infinity;
   let _visibilityObserver = null;
 
@@ -458,7 +461,7 @@
           root.getElementById("shieldai-covered").textContent = _t("overlayCoveredNote");
           return;
         }
-        if (Date.now() - _visibleSince < PROCEED_DELAY_MS) return;
+        if (performance.now() - _visibleSince < PROCEED_DELAY_MS) return;
       }
       sendVerdict(requestId, action);
       if (afterProceed) afterProceed();
@@ -485,8 +488,8 @@
         root.getElementById("shieldai-covered").textContent = _t("overlayCoveredNote");
         return;
       }
-      if (Date.now() - _visibleSince < PROCEED_DELAY_MS) return;
-      const startedAt = Date.now();
+      if (performance.now() - _visibleSince < PROCEED_DELAY_MS) return;
+      const startedAt = performance.now();
       button.classList.add("shieldai-holding");
       timer = setTimeout(() => {
         cancel();
@@ -564,7 +567,7 @@
       // end.
       const visible = entry.isVisible === true;
       if (!visible) _visibleSince = Infinity;
-      else if (!_dialogVisible) _visibleSince = Date.now();
+      else if (!_dialogVisible) _visibleSince = performance.now();
       _dialogVisible = visible;
       if (entry.isIntersecting !== false) {
         clearTimeout(_outOfViewTimer);
@@ -783,7 +786,7 @@
         <div class="shieldai-loading" role="status">
           <div class="shieldai-loading-head">
             <p>${_t("overlayAnalyzing")}</p>
-            <span class="shieldai-elapsed" aria-hidden="true">${_t("overlayElapsed")}<span class="shieldai-elapsed-value" id="shieldai-elapsed">${formatElapsed(Date.now() - received)}</span></span>
+            <span class="shieldai-elapsed" aria-hidden="true">${_t("overlayElapsed")}<span class="shieldai-elapsed-value" id="shieldai-elapsed">${formatElapsed(performance.now() - received)}</span></span>
           </div>
           <div class="shieldai-sweep" aria-hidden="true"><span></span></div>
           <p class="shieldai-subtext">${_t("overlaySubtext")}</p>
@@ -805,7 +808,7 @@
     const elapsed = root.getElementById("shieldai-elapsed");
     const tick = () => {
       if (_overlayHost !== host) return;
-      const ms = Date.now() - received;
+      const ms = performance.now() - received;
       elapsed.textContent = formatElapsed(ms);
       _elapsedTimer = setTimeout(tick, 1000 - (ms % 1000));
     };
