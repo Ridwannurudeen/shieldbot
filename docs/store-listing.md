@@ -9,10 +9,10 @@ below replaces it. Everything in it is true of the 3.4.0 code in this repository
 
 ## 1. Text to paste
 
-**Name** (unchanged; the manifest reads it from `_locales`):
+**Name** (changes with the package; the manifest reads it from `_locales`):
 
 ```
-ShieldAI Transaction Firewall
+ShieldBot Transaction Firewall
 ```
 
 **Summary** (the manifest description, 116 of 132 characters; Vietnamese and Chinese versions ship
@@ -25,7 +25,7 @@ Warns before you sign on 9 EVM chains, reports Unknown when a check cannot compl
 **Description** (Store listing tab, English):
 
 ```
-ShieldAI Transaction Firewall checks a transaction before your wallet asks you to sign it, and tells you plainly what it found.
+ShieldBot Transaction Firewall checks a transaction before your wallet asks you to sign it, and tells you plainly what it found.
 
 When a website asks your wallet to send a transaction, the extension shows an overlay first. It decodes common calls such as approvals, transfers and swaps, shows how much of your chain's own coin you are sending, what spending rights the call grants, and the full recipient address, and gives a verdict: Safe, Caution, High Risk or Block Recommended. You choose whether to continue or cancel. The extension warns you; it does not stop you.
 
@@ -145,7 +145,7 @@ Run every step on MetaMask and on Rabby before treating this manual release gate
 a step asks for a request that should be refused, press Block or Reject on the warning and never sign.
 
 8. **Everyday calls** (2 minutes). On a dApp, connect the wallet, see the balance, and switch the
-   network from the dApp. All work as without the extension, with no ShieldAI warning.
+   network from the dApp. All work as without the extension, with no ShieldBot warning.
 9. **Chain** (3 minutes). Start a transaction and Proceed: the wallet shows it on the network the
    warning named. Start another, switch the network in the wallet while the warning is open, then
    Proceed: the dApp gets a rejection saying the wallet chain changed, and the wallet shows nothing.
@@ -227,7 +227,7 @@ a step asks for a request that should be refused, press Block or Reject on the w
    send to the same address with a few characters in its middle changed (keep the first six and
    last four): the warning shows both addresses in full with their middles marked, and at least
    HIGH RISK. Press Block. A send to the original address again shows no such warning.
-27. **Unknown network** (2 minutes). Switch the wallet to a network ShieldAI does not support (for
+27. **Unknown network** (2 minutes). Switch the wallet to a network ShieldBot does not support (for
    example Linea or zkSync Era) and start a transaction and a Personal Sign: each warning offers only
    Block (or Reject), in Balanced and Strict mode, and says why.
 28. **Explain button** (1 minute). A SAFE verdict has no "Why is this risky?" button; a CAUTION or

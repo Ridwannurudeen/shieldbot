@@ -21,10 +21,12 @@ These disclosures describe version 3.4.0. Since 3.1.0, the version the store ser
 **Answer:**
 - Financial and payment information (transaction metadata only)
 - Website content (limited to Web3 transaction data and site origin for phishing checks)
+- Web history (the origin of each https page opened in a tab, for the phishing check)
 
 **Justification:**
 The extension intercepts blockchain transaction data (recipient address, sender address, value, encoded function data, and chain ID) to perform security analysis and risk assessment before the user signs the transaction. For a signature request it sends the signing method and any EIP-712 typed data, never the text of a message or a hash to sign (nor, for those, the signer's address); for an EIP-7702 transaction, each delegate's address, never the signed authorization.
 When phishing protection is enabled, the extension also checks the current site origin (scheme, host, and port only) against phishing intelligence. Full paths, query strings, and page contents are not sent.
+Web history: while the firewall is switched on (the default; phishing protection has no separate switch), the origin (scheme, host, port) of each https page opened in a tab is sent to the configured API for the phishing check, unless a verdict for its host is already in the session cache (an hour for a flagged site, five minutes for one not flagged). It is not stored by the extension beyond that session cache, which keeps only the host and its verdict until the browser closes.
 
 ---
 
@@ -216,7 +218,7 @@ Content scripts are injected at document_start to ensure transaction interceptio
 **Answer:**
 
 ```
-Provide pre-signature security analysis of blockchain transactions on nine EVM chains listed on the extension's welcome page, warning users about malicious contracts, phishing sites and scams before they sign.
+Provide pre-signature security analysis of blockchain transactions on nine EVM chains listed on the extension's welcome page, warning users about malicious contracts, phishing sites and scams before they sign. The side panel's prompt-injection scanner is part of the same protection: it checks text the user pastes (an agent prompt, message or tool input) for known injection patterns, so instructions planted to manipulate an AI agent that acts for the user can be caught before the agent acts on them.
 ```
 
 ---
@@ -226,7 +228,6 @@ Provide pre-signature security analysis of blockchain transactions on nine EVM c
 Before submitting to Chrome Web Store, ensure:
 
 - ✅ The privacy policy is published at https://shieldbotsecurity.online/privacy.html
-- ✅ Privacy policy URL is added to manifest.json (optional but recommended)
 - ✅ Extension does not use remote code execution (no `eval()`, `new Function()`, or external scripts)
 - ✅ All API communication uses HTTPS (except localhost for development)
 - ✅ No hardcoded HTTP endpoints or raw IP addresses in production code
