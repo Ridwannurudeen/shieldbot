@@ -152,7 +152,7 @@ class DeployerIndexer:
             return False
 
         chain_names = {56: "BNB Chain", 1: "Ethereum", 8453: "Base", 42161: "Arbitrum",
-                       137: "Polygon", 10: "Optimism", 204: "opBNB"}
+                       137: "Polygon", 10: "Optimism", 204: "opBNB", 677: "BOT Chain"}
         chain_name = chain_names.get(chain_id, f"Chain {chain_id}")
         reason = watch_record.get("watch_reason", "MANUAL")
         severity = watch_record.get("risk_severity", "HIGH")

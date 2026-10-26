@@ -6,7 +6,7 @@ Coverage and operational corrections below describe the current source tree. The
 
 ### System Design
 
-ShieldBot follows a **3-tier architecture**. The delivery, intelligence and data-service layers below are the February 2026 design (the RPC proxy in `rpc/proxy.py`, the MCP server in `mcp_server/` and the SDKs in `sdk/` are not drawn); the BLOCKCHAIN LAYER lists the eight adapters in `adapters/` that `core/container.py` and `utils/web3_client.py` configure today:
+ShieldBot follows a **3-tier architecture**. The delivery, intelligence and data-service layers below are the February 2026 design (the RPC proxy in `rpc/proxy.py`, the MCP server in `mcp_server/` and the SDKs in `sdk/` are not drawn); the BLOCKCHAIN LAYER lists the nine adapters in `adapters/` that `core/container.py` and `utils/web3_client.py` configure today:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -43,7 +43,7 @@ ShieldBot follows a **3-tier architecture**. The delivery, intelligence and data
 │  • Configured chain adapters: Ethereum (1),                      │
 │    BNB Smart Chain (56), opBNB (204), Base (8453),               │
 │    Arbitrum One (42161), Polygon PoS (137), Optimism (10),       │
-│    Robinhood Chain (4663)                                        │
+│    Robinhood Chain (4663), BOT Chain (677)                       │
 │  • BNB Greenfield (optional report storage)                      │
 └─────────────────────────────────────────────────────────────────┘
 ```

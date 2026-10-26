@@ -18,7 +18,7 @@ DB=$APP/shieldbot.db
 API_UNIT=shieldbot
 BOT_UNIT=shieldbot-bot
 API_URL=http://127.0.0.1:8000
-RECORDER_KEY=ROBINHOOD_RECORDER_PRIVATE_KEY
+RECORDER_KEYS=(ROBINHOOD_RECORDER_PRIVATE_KEY BOTCHAIN_RECORDER_PRIVATE_KEY)
 BACKUP=/root/shieldbot-backup-$(date +%Y%m%d-%H%M%S)
 LOCK=/run/shieldbot-deploy.lock
 TARGET=
@@ -62,18 +62,21 @@ wait_ready() {
 # This reads the running bot process itself. grep -z reads the NUL-separated environ without a pipe,
 # and a read error (grep exit 2) counts as a failure, never as a clean result. Nothing is printed from it.
 bot_process_clean() {
-  local pid rc=0
+  local pid key rc
   pid=$(systemctl show -p MainPID --value "$BOT_UNIT")
   if [ "$pid" = 0 ]; then
     echo "bot is not running: no process environment to inspect"
     return 0
   fi
-  grep -qz "^$RECORDER_KEY=" "/proc/$pid/environ" || rc=$?
-  case $rc in
-    1) echo "bot pid $pid: $RECORDER_KEY is not in its environment" ;;
-    0) echo "bot pid $pid has $RECORDER_KEY in its environment" >&2; return 1 ;;
-    *) echo "could not read the environment of bot pid $pid" >&2; return 1 ;;
-  esac
+  for key in "${RECORDER_KEYS[@]}"; do
+    rc=0
+    grep -qz "^$key=" "/proc/$pid/environ" || rc=$?
+    case $rc in
+      1) echo "bot pid $pid: $key is not in its environment" ;;
+      0) echo "bot pid $pid has $key in its environment" >&2; return 1 ;;
+      *) echo "could not read the environment of bot pid $pid" >&2; return 1 ;;
+    esac
+  done
 }
 
 # Fails unless the filesystem holding $1 has more than $2 KiB free.
@@ -98,7 +101,7 @@ units_settled() {
 
 # ---------------------------------------------------------------- preflight (read-only)
 preflight() {
-  local head rc=0 api_unit bot_unit db_kib refs ref branches
+  local head rc=0 api_unit bot_unit db_kib refs ref branches key
   head=$(git -C "$APP" rev-parse HEAD)
 
   say "Current state"
@@ -129,24 +132,29 @@ preflight() {
   say "Only the API can see the recorder key"
   # Both units load the shared .env, and the bot must never hold the key. A comment naming it (as in
   # .env.example) is not an assignment.
-  if [ -f "$APP/.env" ]; then
-    grep -qE "^[[:space:]]*(export[[:space:]]+)?$RECORDER_KEY[[:space:]]*=" "$APP/.env" || rc=$?
-    case $rc in
-      0) fail "$RECORDER_KEY is in the shared $APP/.env, which the bot reads" ;;
-      1) ;;
-      *) fail "could not read $APP/.env" ;;
-    esac
-  fi
-  if grep -q -e recorder.env -e "$RECORDER_KEY" <<<"$bot_unit"; then
-    fail "the $BOT_UNIT unit loads recorder.env or sets $RECORDER_KEY: only the API may"
-  fi
+  for key in "${RECORDER_KEYS[@]}"; do
+    if [ -f "$APP/.env" ]; then
+      rc=0
+      grep -qE "^[[:space:]]*(export[[:space:]]+)?$key[[:space:]]*=" "$APP/.env" || rc=$?
+      case $rc in
+        0) fail "$key is in the shared $APP/.env, which the bot reads" ;;
+        1) ;;
+        *) fail "could not read $APP/.env" ;;
+      esac
+    fi
+    if grep -q -e recorder.env -e "$key" <<<"$bot_unit"; then
+      fail "the $BOT_UNIT unit loads recorder.env or sets $key: only the active sender may"
+    fi
+  done
   echo "shared .env and the $BOT_UNIT unit are clean"
   bot_process_clean || fail "the running bot process check did not pass"
   # With BACKGROUND_WORKERS=external the workers unit runs the drain and holds the key instead (docs/DEPLOYMENT.md).
   if [ -f "$APP/.env" ] && grep -qiE "^[[:space:]]*(export[[:space:]]+)?BACKGROUND_WORKERS[[:space:]]*=[[:space:]]*[\"']?external[\"']?[[:space:]]*(#.*)?$" "$APP/.env"; then
-    if grep -q -e recorder.env -e "$RECORDER_KEY" <<<"$api_unit"; then
-      fail "BACKGROUND_WORKERS=external, but the $API_UNIT unit loads recorder.env or sets $RECORDER_KEY: only the workers unit may"
-    fi
+    for key in "${RECORDER_KEYS[@]}"; do
+      if grep -q -e recorder.env -e "$key" <<<"$api_unit"; then
+        fail "BACKGROUND_WORKERS=external, but the $API_UNIT unit loads recorder.env or sets $key: only the workers unit may"
+      fi
+    done
     echo "BACKGROUND_WORKERS=external: the $API_UNIT unit does not load the recorder key"
   fi
 
@@ -367,7 +375,7 @@ cutover() {
     systemctl stop "$BOT_UNIT"
     trap - ERR INT TERM HUP QUIT
     printf '\033[31mSECURITY: %s stopped. The API is live on %s. Keep %s out of the bot, then start it.\033[0m\n' \
-      "$BOT_UNIT" "${TARGET:0:7}" "$RECORDER_KEY" >&2
+      "$BOT_UNIT" "${TARGET:0:7}" "${RECORDER_KEYS[*]}" >&2
     exit 1
   fi
 

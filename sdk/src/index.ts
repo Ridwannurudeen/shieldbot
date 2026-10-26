@@ -25,9 +25,9 @@ export interface ShieldBotConfig {
 }
 
 /** Chains the ShieldBot API analyzes. `health()` returns the live list as `supported_chains`. */
-export const SUPPORTED_CHAIN_IDS = [56, 1, 8453, 42161, 137, 10, 204, 4663] as const;
+export const SUPPORTED_CHAIN_IDS = [56, 1, 8453, 42161, 137, 10, 204, 4663, 677] as const;
 
-/** 56=BSC, 1=Ethereum, 8453=Base, 42161=Arbitrum, 137=Polygon, 10=Optimism, 204=opBNB, 4663=Robinhood Chain. */
+/** 56=BSC, 1=Ethereum, 8453=Base, 42161=Arbitrum, 137=Polygon, 10=Optimism, 204=opBNB, 4663=Robinhood Chain, 677=BOT Chain. */
 export type ChainId = (typeof SUPPORTED_CHAIN_IDS)[number];
 
 /** True for a chain in SUPPORTED_CHAIN_IDS. The SDK does not reject other chains itself: the API answers them with 400. */

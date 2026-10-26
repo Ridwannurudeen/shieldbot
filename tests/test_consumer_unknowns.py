@@ -30,6 +30,7 @@ def consumer_api(monkeypatch, mock_web3_client):
     import api
     mock_web3_client.is_token_contract = AsyncMock(return_value=True)
     mock_web3_client.is_verified_contract.return_value = (None, 'unavailable')
+    mock_web3_client.supports_honeypot_simulation = lambda chain_id: chain_id in {42161, 4663}
     db = SimpleNamespace(
         get_contract_score=AsyncMock(return_value=None),
         get_deployer_risk_summary=AsyncMock(return_value=None),

@@ -6,7 +6,6 @@ ready-to-sign revocation transactions for one-click cleanup.
 
 import asyncio
 import logging
-import math
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,7 +15,7 @@ from cachetools import TTLCache
 from eth_utils import keccak
 from web3 import Web3
 
-from adapters.botchain_approval import BOTCHAIN_RPC_URL, BotChainApprovalReader
+from services.botchain_market import parse_price_reply
 from utils.chain_info import CHAIN_INFO, get_dexscreener_slug
 
 logger = logging.getLogger(__name__)
@@ -28,7 +27,6 @@ APPROVAL_TOPIC = "0x" + keccak(text="Approval(address,address,uint256)").hex()
 # ApprovalForAll event topic (ERC-721/1155)
 APPROVAL_FOR_ALL_TOPIC = "0x" + keccak(text="ApprovalForAll(address,address,bool)").hex()
 BOTCHAIN_CHAIN_ID = 677
-BOTCHAIN_LOG_WINDOW_BLOCKS = 1_000_000
 BOTCHAIN_USDT = "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
 
 # A chain without a configured logs RPC is read through its adapter's public RPC, which serves no
@@ -281,27 +279,19 @@ class RescueService:
         # Kept for callers that still read it (read-only).
         self._logs_rpc = self._logs_rpcs.get(56, "")
         self._results = TTLCache(maxsize=1024, ttl=RESULT_CACHE_SECONDS)
-        self._botchain_adapter = None
 
     def approval_history(self, chain_id: int) -> Dict[str, Any]:
         """How much approval history a scan on chain_id tries to read: all of it from a configured
         logs RPC (newest first, within HISTORY_DEADLINE_SECONDS; each result's scanned_blocks says
         what was read), or the newest windows from the chain's own RPC. Names no RPC, since its URL
         can carry a key."""
-        if chain_id == BOTCHAIN_CHAIN_ID:
-            return {
-                "history": "recent",
-                "window_blocks": BOTCHAIN_LOG_WINDOW_BLOCKS * RECENT_LOG_WINDOWS,
-            }
         if chain_id in self._logs_rpcs:
             return {"history": "full", "window_blocks": None}
         window = PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
         return {"history": "recent", "window_blocks": window * RECENT_LOG_WINDOWS}
 
-    def _rpc_for(self, chain_id: int, botchain_approval_scan: bool = False) -> str:
+    def _rpc_for(self, chain_id: int) -> str:
         """Resolve archive RPC URL for a chain. Falls back to the registered adapter's RPC."""
-        if botchain_approval_scan and chain_id == BOTCHAIN_CHAIN_ID:
-            return BOTCHAIN_RPC_URL
         adapter = self._web3_client._get_adapter(chain_id) if self._web3_client else None
         url = self._logs_rpcs.get(chain_id)
         if url:
@@ -313,14 +303,8 @@ class RescueService:
                 return endpoint
         return ""
 
-    def _botchain_reader(self):
-        if self._botchain_adapter is None:
-            self._botchain_adapter = BotChainApprovalReader()
-        return self._botchain_adapter
-
     async def scan_approvals(
         self, wallet_address: str, chain_id: int = 56, etherscan_api_key: str = "",
-        *, botchain_approval_scan: bool = False,
     ) -> Dict[str, Any]:
         """Scan a wallet's active token approvals and assess risk.
 
@@ -342,12 +326,6 @@ class RescueService:
         was read. A scan that read none is not: that is often a passing timeout or rate limit, so
         the next call tries again.
         """
-        from utils.web3_client import UnsupportedChainError
-
-        if botchain_approval_scan and chain_id != BOTCHAIN_CHAIN_ID:
-            raise ValueError("BOT Chain approval mode only supports chain 677")
-        if chain_id == BOTCHAIN_CHAIN_ID and not botchain_approval_scan:
-            raise UnsupportedChainError("Unsupported chain ID 677")
         wallet = wallet_address.lower()
         cached = self._results.get((chain_id, wallet))
         if cached is not None:
@@ -358,7 +336,6 @@ class RescueService:
             async with asyncio.timeout(SCAN_DEADLINE_SECONDS) as scan_budget:
                 approvals, coverage_reasons, scanned_blocks = await self._fetch_approvals(
                     wallet, chain_id, scan_budget,
-                    botchain_approval_scan=botchain_approval_scan,
                 )
         except TimeoutError:
             logger.warning(
@@ -426,7 +403,6 @@ class RescueService:
 
     async def _fetch_approvals(
         self, wallet: str, chain_id: int, scan_budget: asyncio.Timeout, api_key: str = "",
-        *, botchain_approval_scan: bool = False,
     ) -> Tuple[List[ApprovalInfo], Dict[str, str], Optional[Dict[str, int]]]:
         """Fetch and verify active token approvals, with reasons for incomplete data.
 
@@ -448,11 +424,11 @@ class RescueService:
 
         approvals = []
         coverage_reasons: Dict[str, str] = {}
-        rpc_url = self._rpc_for(chain_id, botchain_approval_scan=botchain_approval_scan)
+        rpc_url = self._rpc_for(chain_id)
         if not rpc_url:
             logger.warning(f"No logs RPC configured for chain {chain_id}")
             raise RuntimeError(f"Approval scan unavailable: no logs RPC configured for chain {chain_id}")
-        public_rpc = botchain_approval_scan or chain_id not in self._logs_rpcs
+        public_rpc = chain_id not in self._logs_rpcs
         deadline = asyncio.get_running_loop().time() + HISTORY_DEADLINE_SECONDS
         try:
             # The history, allowance and balance reads share one pool of connections to the chain's
@@ -477,11 +453,7 @@ class RescueService:
                         # deadline stopped the read: then nothing more is asked of it.
                         public_rpc = scanned_from > latest and not budget.expired()
                 if public_rpc:
-                    window = (
-                        BOTCHAIN_LOG_WINDOW_BLOCKS
-                        if botchain_approval_scan
-                        else PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
-                    )
+                    window = PUBLIC_LOG_WINDOW_BLOCKS.get(chain_id, RECENT_LOG_WINDOW_BLOCKS)
                     budget = asyncio.timeout_at(deadline)
                     all_logs, scanned_from, latest = await self._fetch_recent_approval_logs(
                         wallet, connector, rpc_url, window, budget
@@ -514,7 +486,7 @@ class RescueService:
                         amount = int(amount_hex, 16) if amount_hex and amount_hex != "0x" else 0
                         block = int(log.get("blockNumber", "0x0"), 16)
                         log_index = 0
-                        if botchain_approval_scan:
+                        if chain_id == BOTCHAIN_CHAIN_ID:
                             log_index_hex = log.get("logIndex", "0x0")
                             log_index = (
                                 int(log_index_hex, 16)
@@ -525,7 +497,7 @@ class RescueService:
                         key = (token, spender.lower())
                         existing = latest_events.get(key)
                         is_newer = not existing or block > existing["block"]
-                        if botchain_approval_scan and existing and block == existing["block"]:
+                        if chain_id == BOTCHAIN_CHAIN_ID and existing and block == existing["block"]:
                             is_newer = log_index > existing["log_index"]
                         if is_newer:
                             latest_event = {
@@ -534,7 +506,7 @@ class RescueService:
                                 "amount": amount,
                                 "block": block,
                             }
-                            if botchain_approval_scan:
+                            if chain_id == BOTCHAIN_CHAIN_ID:
                                 latest_event["log_index"] = log_index
                             latest_events[key] = latest_event
                     except (ValueError, IndexError, KeyError):
@@ -612,12 +584,7 @@ class RescueService:
                 coverage_reasons["allowances"] = SCAN_TIMEOUT_REASON
                 return [], coverage_reasons, scanned_blocks
             try:
-                metadata_calls = [
-                    self._botchain_reader().get_token_info(token)
-                    if botchain_approval_scan
-                    else self._web3_client.get_token_info(token, chain_id)
-                    for token in active_tokens
-                ]
+                metadata_calls = [self._web3_client.get_token_info(token, chain_id) for token in active_tokens]
                 token_info_results = await asyncio.gather(
                     *metadata_calls,
                     return_exceptions=True,
@@ -648,7 +615,7 @@ class RescueService:
                 coverage_reasons["prices"] = f"{price_reason}; {reason}" if price_reason else reason
 
             codeless_spenders = set()
-            if botchain_approval_scan:
+            if chain_id == BOTCHAIN_CHAIN_ID:
                 unknown_spenders = sorted({
                     spender for _, spender in verified
                     if _known_spender(spender, chain_id) is None
@@ -668,7 +635,7 @@ class RescueService:
                 token_info = token_info_map.get(token, {})
                 name = token_info.get("name", "Unknown")
                 symbol = token_info.get("symbol", "???")
-                if botchain_approval_scan:
+                if chain_id == BOTCHAIN_CHAIN_ID:
                     name = truncate_token_text(name if isinstance(name, str) else "Unknown")
                     symbol = truncate_token_text(symbol if isinstance(symbol, str) else "???")
                 # Unread decimals stay unknown: a default of 18 misstated every amount of a token
@@ -1172,31 +1139,7 @@ class RescueService:
                         if resp.status != 200:
                             return token, None
                         answer = await resp.json(content_type=None)
-
-                    if not isinstance(answer, dict) or answer.get("success") is not True:
-                        return token, None
-                    data = answer.get("data")
-                    if not isinstance(data, dict):
-                        return token, None
-                    response_token = data.get("token")
-                    path = data.get("path")
-                    if (
-                        not isinstance(response_token, str)
-                        or response_token.lower() != token.lower()
-                        or not isinstance(path, list)
-                        or not path
-                        or not isinstance(path[-1], str)
-                        or path[-1].lower() != BOTCHAIN_USDT
-                    ):
-                        return token, None
-
-                    raw_price = data.get("price")
-                    if isinstance(raw_price, bool):
-                        return token, None
-                    price = float(raw_price)
-                    if not math.isfinite(price) or price <= 0:
-                        return token, None
-                    return token, price
+                    return token, parse_price_reply(answer, token)
                 except Exception as error:
                     logger.warning("BOT Chain price request failed: %s", type(error).__name__)
                     return token, None
@@ -1218,6 +1161,8 @@ class RescueService:
         is_known_safe = _known_spender(spender.lower(), chain_id) is not None
 
         if amount >= UNLIMITED_THRESHOLD:
+            if is_known_safe and chain_id == BOTCHAIN_CHAIN_ID:
+                return "MEDIUM", f"Unlimited approval to {spender_label}, review the unlimited amount"
             if is_known_safe:
                 return "MEDIUM", f"Unlimited approval to {spender_label} — safe but excessive"
             return "HIGH", f"Unlimited approval to {spender_label.lower()}"

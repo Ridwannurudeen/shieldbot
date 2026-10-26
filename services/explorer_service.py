@@ -27,6 +27,11 @@ BLOCKSCOUT_INSTANCES = {
     if info["blockscout_instance"] is not None
 }
 
+# Sourcify's /server/chains listed 453 chains without 677 on 25 Oct 2026; its
+# /server/v2/contract/677/<address> endpoint answers 400.
+SOURCIFY_UNSUPPORTED_CHAINS = {677}
+BLOCKSCOUT_WITHOUT_CREATION_STATUS = {677}
+
 
 # An answer holds for five minutes; a failed lookup is asked again after 30 seconds, so one
 # provider blip does not leave a contract Unknown for five minutes.
@@ -425,6 +430,27 @@ class ExplorerService:
         if not _is_address(address):
             return ExplorerResult("unknown", reason="Invalid address")
         address = address.lower()
+        if chain_id in SOURCIFY_UNSUPPORTED_CHAINS:
+            blockscout = await self._blockscout(f"addresses/{address}", chain_id)
+            if blockscout.status == "known":
+                data = blockscout.data
+                if (
+                    isinstance(data.get("hash"), str)
+                    and data["hash"].lower() == address
+                    and data.get("is_contract") is True
+                    and type(data.get("is_verified")) is bool
+                ):
+                    return ExplorerResult(
+                        "verified" if data["is_verified"] else "unverified",
+                        provider="blockscout",
+                    )
+                blockscout = ExplorerResult(
+                    "unknown",
+                    reason="Missing or mismatched contract verification evidence",
+                    provider="blockscout",
+                )
+            return blockscout
+
         sourcify = await self.get_sourcify_verification(address, chain_id)
         if sourcify.status == "verified":
             return sourcify
@@ -472,11 +498,18 @@ class ExplorerService:
         data = result.data
         creator = data.get("creator_address_hash")
         tx_hash = data.get("creation_transaction_hash")
+        creation_status = data.get("creation_status")
         if (
             isinstance(data.get("hash"), str)
             and data["hash"].lower() == address.lower()
             and data.get("is_contract") is True
-            and data.get("creation_status") == "success"
+            and (
+                creation_status == "success"
+                or (
+                    chain_id in BLOCKSCOUT_WITHOUT_CREATION_STATUS
+                    and "creation_status" not in data
+                )
+            )
             and _is_address(creator)
             and isinstance(tx_hash, str)
             and re.fullmatch(r"0x[0-9a-fA-F]{64}", tx_hash)

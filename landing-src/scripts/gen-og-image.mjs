@@ -62,7 +62,7 @@ const ogLayers = [
   { ...(await text("Checks a transaction before you sign, and says Unknown when it cannot.", 400, 26, SECONDARY)), left: 72, top: 396 },
   { ...(await text("shieldbotsecurity.online", 400, 22, SECONDARY)), left: 72, top: 560 },
 ];
-const chainsLine = await text("8 chains incl. Robinhood Chain", 400, 22, SECONDARY);
+const chainsLine = await text("9 chains incl. Robinhood Chain and BOT Chain", 400, 22, SECONDARY);
 ogLayers.push({ ...chainsLine, left: W - 72 - chainsLine.width, top: 560 });
 for (const chip of chips) {
   const label = await text(chip.label, 500, 18, chip.color);

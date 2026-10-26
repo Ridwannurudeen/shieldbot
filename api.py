@@ -210,7 +210,9 @@ async def lifespan(app: FastAPI):
     _background_workers = settings.background_workers
     if _background_workers == "api":
         await container.start_mempool_monitor()
-        container.verdict_publisher.start()
+        container.verdict_publishers[4663].start_publishers(
+            list(container.verdict_publishers.values())
+        )
     else:
         logger.info("Background work runs in workers.py (BACKGROUND_WORKERS=external)")
 
@@ -263,7 +265,7 @@ async def lifespan(app: FastAPI):
     await container.launch_watch.stop()
     await container.hunter.stop()
     await container.phishing_service.stop()
-    await container.verdict_publisher.stop()
+    await container.verdict_publishers[4663].stop()
     await container.shutdown()
     rpc_proxy = getattr(app.state, "rpc_proxy", None)
     if rpc_proxy:
@@ -763,9 +765,9 @@ READY_TIMEOUT_SECONDS = 2
 _ready_lock = asyncio.Lock()
 _ready_cache = {"body": None, "expires_at": 0.0}
 # The RPC probes' own threads, so a hung RPC never holds a worker of the default pool that scans
-# use. Eight: the seven chains probed at once, and one more for a probe still hanging from the
+# use. Nine: the eight chains probed at once, and one more for a probe still hanging from the
 # previous check (an RPC request times out after 10 s, twice the cache period).
-_READY_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="readiness")
+_READY_EXECUTOR = ThreadPoolExecutor(max_workers=9, thread_name_prefix="readiness")
 
 
 async def _database_answers() -> bool:
@@ -1096,9 +1098,11 @@ async def firewall(req: FirewallRequest, request: Request):
 
 
 def _firewall_deadline(req: FirewallRequest, started: float) -> Optional[float]:
-    """When a firewall request must answer: FIREWALL_REQUEST_DEADLINE_SECONDS after it started on
-    Robinhood Chain, where it was measured; no request-wide deadline on other chains."""
-    return started + FIREWALL_REQUEST_DEADLINE_SECONDS if req.chainId == 4663 else None
+    """When a chain's own sell simulation requires a firewall request deadline."""
+    return (
+        started + FIREWALL_REQUEST_DEADLINE_SECONDS
+        if web3_client.supports_honeypot_simulation(req.chainId) is True else None
+    )
 
 
 def _firewall_deadline_response(
@@ -2287,11 +2291,10 @@ async def public_stats():
     watch's), and `background_workers_note` says so.
     """
     from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
-    from services.verdict_publisher import CHAIN_ID as REGISTRY_CHAIN_ID
 
     db_stats = {}
     launch_discovery = None
-    evidence_documents = registry_records_confirmed = None
+    evidence_documents = registry_records_confirmed = registry_records_confirmed_by_chain = None
     if container and container.db:
         db_stats = await container.db.get_platform_stats()
         window_hours = 24
@@ -2305,7 +2308,10 @@ async def public_stats():
         }
         evidence = await container.db.get_verdict_evidence_counts()
         evidence_documents = {chain_id: counts["documents"] for chain_id, counts in evidence.items()}
-        registry_records_confirmed = evidence[REGISTRY_CHAIN_ID]["confirmed"] if REGISTRY_CHAIN_ID in evidence else 0
+        registry_records_confirmed_by_chain = {
+            chain_id: evidence.get(chain_id, {}).get("confirmed", 0) for chain_id in (4663, 677)
+        }
+        registry_records_confirmed = registry_records_confirmed_by_chain.get(4663, 0)
 
     mempool = {}
     observable = unobservable = None
@@ -2333,6 +2339,7 @@ async def public_stats():
         "launch_discovery":       launch_discovery,
         "evidence_documents":     evidence_documents,
         "registry_records_confirmed": registry_records_confirmed,
+        "registry_records_confirmed_by_chain": registry_records_confirmed_by_chain,
         "unknown_ledger":         unknown_ledger.summary(),
     }
     if _background_workers == "external":
@@ -2360,7 +2367,7 @@ async def verdict_vocabulary():
 async def chain_coverage(chain_id: int):
     """What a scan on this chain can check, from its configuration, and how its providers are answering.
 
-    `capabilities`: `sell_simulation` is honeypot.is, eth_simulateV1, or goplus_reported (no sell is
+    `capabilities`: `sell_simulation` is honeypot.is, eth_simulateV1, goplus_reported, or none (no sell is
     simulated; GoPlus's own flags only); `contract_age` and `verification` name the explorer each lookup
     asks (`contract_age` is null where no request can be sent: Robinhood Chain's creation lookup needs
     the Blockscout gateway key, and without it verification is Sourcify alone); `liquidity_lock` says
@@ -2372,8 +2379,11 @@ async def chain_coverage(chain_id: int):
     was read) or only the newest `window_blocks` blocks.
     `provider_health` is this chain's Unknown ledger (core.unknown_ledger): per provider, how many
     lookups were answered, came back unknown or failed since `counting_since`, and the latest outcome;
-    `chain_independent` holds providers asked about no chain. A provider with no entry has not been
-    asked since the process started. Nothing here sends a request to any provider.
+    `chain_independent` holds providers asked about no chain. BOT Chain scam address requests are
+    recorded under `goplus_address` for the chain of the caller that starts a shared request; cache
+    hits and coalesced callers do not add another count. A provider with no entry has not been asked
+    since the process started.
+    Nothing here sends a request to any provider.
     With BACKGROUND_WORKERS=external this process reads no mempool, so `public_mempool` is never yes,
     and `provider_health` counts this process's lookups only; `background_workers_note` says so.
     """
@@ -2431,6 +2441,7 @@ async def verdict_permalink(chain_id: int, address: str):
     """Latest published ShieldBot verdict for a token, with its evidence document and on-chain record."""
     from core.verdict_evidence import Verdict
     from services.verdict_publisher import MAX_SEND_ATTEMPTS
+    from utils.chain_info import CHAIN_INFO
 
     _validate_chain_id(chain_id)
     if not web3_client.is_valid_address(address):
@@ -2440,6 +2451,24 @@ async def verdict_permalink(chain_id: int, address: str):
     stored = await container.db.get_latest_verdict_evidence(chain_id, address.lower())
     if stored is None:
         raise HTTPException(status_code=404, detail="No verdict published for this address")
+    chain_name = get_chain_name(chain_id)
+    if chain_id == 4663:
+        onchain_verification = (
+            f"{chain_name} transaction tx_hash emitted "
+            "VerdictRecorded(subject, verdict, evidenceHash, observedBlock, timestamp) from `registry` "
+            "with this subject, verdict_code, evidence_hash and the evidence's observed_block; this is the "
+            "sequencer's soft finality, final on the parent chain once the batch is posted. "
+        )
+    elif chain_id == 677:
+        onchain_verification = (
+            "Compare the evidence hash with the BOT Chain transaction's VerdictRecorded event. "
+        )
+    else:
+        onchain_verification = (
+            f"{chain_name} transaction tx_hash emitted "
+            "VerdictRecorded(subject, verdict, evidenceHash, observedBlock, timestamp) from `registry` "
+            "with this subject, verdict_code, evidence_hash and the evidence's observed_block. "
+        )
     return {
         "chain_id": stored["chain_id"],
         "subject": stored["subject"],
@@ -2453,13 +2482,15 @@ async def verdict_permalink(chain_id: int, address: str):
         "onchain_status": stored["onchain_status"],
         "registry": stored["registry"],
         "tx_hash": stored["tx_hash"],
+        "explorer_tx_url": (
+            f"{CHAIN_INFO[chain_id]['explorer_url']}/tx/{stored['tx_hash']}"
+            if stored["tx_hash"] and CHAIN_INFO.get(chain_id, {}).get("explorer_url")
+            else None
+        ),
         "onchain_error": stored["onchain_error"],
         "verify": (
             "keccak256 of the UTF-8 bytes of `canonical`, exactly as served, must equal evidence_hash. "
-            "onchain_status `confirmed`: Robinhood Chain transaction tx_hash emitted "
-            "VerdictRecorded(subject, verdict, evidenceHash, observedBlock, timestamp) from `registry` "
-            "with this subject, verdict_code, evidence_hash and the evidence's observed_block; this is the "
-            "sequencer's soft finality, final on the parent chain once the batch is posted. "
+            "onchain_status `confirmed`: " + onchain_verification +
             "`reverted`: transaction tx_hash reverted and recorded nothing. "
             "`pending` and `sending`: queued for, or being sent to, the chain. "
             "`submitted`, `unconfirmed` and `failed`: not yet proven on-chain. Every transaction sent for this "

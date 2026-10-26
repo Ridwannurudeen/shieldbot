@@ -1,5 +1,6 @@
 """Integration tests for the FastAPI endpoints (/api/health, /api/firewall fallback)."""
 
+import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 from types import SimpleNamespace
@@ -573,6 +574,39 @@ async def test_strict_blocks_a_provider_unknown_cold_and_warm(cached_firewall_ap
 
 
 @pytest.mark.asyncio
+async def test_firewall_deadline_returns_structural_pending_for_a_hung_lookup(monkeypatch):
+    import time
+    import api
+
+    request = api.FirewallRequest(to="0x" + "a" * 40, sender="0x" + "b" * 40, chainId=677)
+    progress = api.FirstVerdictProgress(["structural"], "BALANCED")
+    progress.pending.add("structural")
+
+    async def slow_verdict(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    async def no_evidence(response, *args, **kwargs):
+        return response
+
+    monkeypatch.setattr(api, "FIREWALL_REQUEST_DEADLINE_SECONDS", 0.08)
+    monkeypatch.setattr(api, "FIREWALL_RESPONSE_RESERVE_SECONDS", 0.01)
+    monkeypatch.setattr(api, "_firewall_verdict", slow_verdict)
+    monkeypatch.setattr(api, "_with_evidence", no_evidence)
+    response = await api._firewall_response(
+        request,
+        SimpleNamespace(headers={}),
+        progress=progress,
+        deadline=time.monotonic() + 0.08,
+    )
+    assert response["risk_display"] == "Unknown (provider deadline reached)"
+    assert response["coverage"]["structural"] == 0
+    assert response["coverage_reasons"]["structural"] == (
+        "Provider timed out at the firewall request deadline"
+    )
+    assert response["pending_sources"] == ["structural"]
+
+
+@pytest.mark.asyncio
 async def test_an_undeclared_allowed_key_is_not_a_revoke_on_the_main_firewall_path(cached_firewall_api):
     from analyzers.signature import SignaturePermitAnalyzer
     from core.registry import AnalyzerRegistry
@@ -937,6 +971,28 @@ async def test_scan_endpoint_skips_a_discarded_forensic_report(routing_error_api
     scanner.scan_address.assert_awaited_once_with(
         api.web3_client.to_checksum_address("0x" + "a" * 40), chain_id=56, forensic=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_scan_endpoint_preserves_botchain_scam_check_scope(routing_error_api, monkeypatch):
+    api, _, scanner, _ = routing_error_api
+    monkeypatch.setattr(api.web3_client, "validate_chain_id", lambda chain_id: chain_id)
+    label = (
+        "Scam Database: no GoPlus address labels "
+        "(GoPlus token security does not cover BOT Chain)"
+    )
+    scanner.scan_address.return_value = {
+        "is_contract": False,
+        "checks": {"scam_database_clean": True},
+        "check_labels": {"scam_database_clean": label},
+        "coverage": {},
+        "coverage_reasons": {},
+    }
+
+    result = await api.scan(api.ScanRequest(address="0x" + "a" * 40, chainId=677))
+
+    assert result["checks"]["scam_database_clean"] is True
+    assert result["check_labels"]["scam_database_clean"] == label
 
 
 @pytest.mark.asyncio

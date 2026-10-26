@@ -9,7 +9,8 @@ verifier, the since-removed `bsc.address` metadata file for the unused second on
 from `https://bsc-dataseed1.binance.org/`, show each creating the contract listed below. The Base
 attestor and the BNB Smart Chain verifier were retired on 2026-09-26: nothing in this repository writes
 to either any more, so no new records are written. The records already on both chains stay. The Robinhood
-Chain (4663) rows were read the same way on **2026-09-27** from `https://rpc.mainnet.chain.robinhood.com`.
+Chain (4663) rows were read the same way on **2026-09-27** from `https://rpc.mainnet.chain.robinhood.com`, and
+the BOT Chain (677) row on **2026-10-26** from `https://rpc.botchain.ai`.
 
 | Contract | Chain | Address | Deployed (UTC) | Records (when read) | Written by |
 |---|---|---|---|---|---|
@@ -19,6 +20,7 @@ Chain (4663) rows were read the same way on **2026-09-27** from `https://rpc.mai
 | `ShieldBotVerdictRegistry` | Robinhood Chain (4663) | [`0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`](https://robin.etherscan.io/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) | 2026-09-27 20:11:57 | 9 records at block 74,253,938 (2026-09-27 21:17 UTC); the guard watch adds one about every 350 s | the verdict drain, as recorder `0xc68a90dcdfE8FBf770a7f29904B928cA6D00F453` |
 | `ShieldBotVerdictGuard` | Robinhood Chain (4663) | [`0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e`](https://robin.etherscan.io/address/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e) | 2026-09-27 20:43:47 | none (reads the registry) | nothing: it has no state to write |
 | `ShieldBotGuardedTransfer` | Robinhood Chain (4663) | [`0x336254bA85406D9af39357101b688E2B757751b3`](https://robin.etherscan.io/address/0x336254bA85406D9af39357101b688E2B757751b3) | 2026-09-27 20:43:47 | none | callers of `transfer(amount, maxAge)` |
+| `ShieldBotVerdictRegistry` | BOT Chain (677) | [`0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`](https://scan.botchain.ai/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) | 2026-10-26 10:49:31 | 0 records at block 28,038,547 (2026-10-26 11:15 UTC) | the verdict drain, as recorder `0xF234F4c09845079235AD27C83c85B6e98Ea263F7` |
 
 Every owner below is an externally owned account (`eth_getCode` returns no code), not a multisig.
 
@@ -103,6 +105,24 @@ by `0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4`, following [DEPLOY_ROBINHOOD.md]
 - **Source:** full exact matches on Sourcify (creation and runtime code) for all three. Blockscout shows each contract through its Sourcify lookup; a first page load can show "Verify & publish" before that match appears.
   ([exact match](https://sourcify.dev/server/v2/contract/4663/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138), [exact match](https://sourcify.dev/server/v2/contract/4663/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e), [exact match](https://sourcify.dev/server/v2/contract/4663/0x336254bA85406D9af39357101b688E2B757751b3)).
 
+## BOT Chain (677)
+
+Deployed on 2026-10-26 from `build/677-int` at `6cfe1d9` ([sources](../contracts/base/src/), unchanged since `04203be`)
+by `0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4`, following [DEPLOY_BOTCHAIN.md](../contracts/base/DEPLOY_BOTCHAIN.md).
+The registry has the same address as the Robinhood Chain one because the same owner account deployed both at nonce 0.
+
+- **`ShieldBotVerdictRegistry`:** `0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`, deployed in the owner's first BOT Chain transaction (`0x24c1405b...5475`, listed on the
+  [owner's page](https://scan.botchain.ai/address/0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4?tab=txs)),
+  block 28,036,449, 2026-10-26 10:49:31 UTC, 632,130 gas. `owner()` is `0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4`; `recorder()` is `0xF234F4c09845079235AD27C83c85B6e98Ea263F7`, the verdict drain's
+  BOT Chain key (`services/verdict_publisher.py`), held only by the API unit ([DEPLOYMENT.md](DEPLOYMENT.md)). `totalRecords()` was 0 at block 28,038,547.
+- **Source:** the deployed runtime bytecode and the creation code in the deployment transaction equal a local build of
+  `src/ShieldBotVerdictRegistry.sol` with the settings in `contracts/base/foundry.toml` (solc 0.8.28, optimizer 200 runs, EVM cancun),
+  with the recorder address as the only constructor argument. Not verified on an explorer as of 2026-10-26: Sourcify does not support
+  chain 677 (`unsupported_chain`), and the standard JSON input, flattened source and `forge verify-contract --verifier blockscout`
+  submissions to scan.botchain.ai all left the address unverified while Blockscout's verifier service returned
+  `verifier service connection` (HTTP 500) for an already verified BOT Chain contract as well. Resubmit the standard JSON input
+  (runbook step 5) once that service answers again.
+
 ## Checking these values
 
 ```bash
@@ -118,4 +138,7 @@ cast call 0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138 "recorder()(address)" --rpc
 cast call 0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138 "totalRecords()(uint256)" --rpc-url https://rpc.mainnet.chain.robinhood.com
 cast call 0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e "registry()(address)" --rpc-url https://rpc.mainnet.chain.robinhood.com
 cast call 0x336254bA85406D9af39357101b688E2B757751b3 "subject()(address)" --rpc-url https://rpc.mainnet.chain.robinhood.com
+cast call 0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138 "owner()(address)" --rpc-url https://rpc.botchain.ai
+cast call 0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138 "recorder()(address)" --rpc-url https://rpc.botchain.ai
+cast call 0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138 "totalRecords()(uint256)" --rpc-url https://rpc.botchain.ai
 ```

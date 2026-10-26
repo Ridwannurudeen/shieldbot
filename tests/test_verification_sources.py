@@ -210,6 +210,26 @@ async def test_a_stalled_robinhood_chain_verification_is_unknown_in_bounded_time
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "chain_id, chain_name, reason",
+    [
+        (4663, "Robinhood Chain", "Sourcify and Blockscout timed out"),
+        # Sourcify does not support BOT Chain, so only Blockscout is asked there.
+        (677, "BOT Chain", "Blockscout timed out"),
+    ],
+)
+async def test_a_stalled_verification_logs_only_the_sources_asked(monkeypatch, caplog, chain_id, chain_name, reason):
+    import services.counterparty_service as counterparty_module
+
+    monkeypatch.setattr(counterparty_module, "PROVIDER_TIMEOUT", 0.05)
+    adapter = EvmAdapter(chain_id, chain_name, "https://rpc.invalid")
+    adapter._explorer_service = MagicMock(get_verification_status=AsyncMock(side_effect=_hang))
+    adapter.get_bytecode = AsyncMock(return_value="0x6080")
+    assert await asyncio.wait_for(adapter.is_verified_contract(ADDRESS), 1) == (None, None)
+    assert f"[{chain_name}] Verification unknown: {reason}" in caplog.text.splitlines()[-1]
+
+
+@pytest.mark.asyncio
 async def test_an_unreadable_code_leaves_the_clone_check_out():
     adapter = _adapter_with((False, None), AsyncMock(return_value=ExplorerResult("unverified")), code=None)
     assert await adapter.is_verified_contract(ADDRESS) == (False, None)

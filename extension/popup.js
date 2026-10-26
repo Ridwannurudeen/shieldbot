@@ -62,9 +62,9 @@ function fmtUsd(val) {
   return "$" + val.toFixed(2);
 }
 
-const CHAIN_NAMES = { 56: "BSC", 1: "ETH", 137: "Polygon", 42161: "Arbitrum", 8453: "Base", 10: "Optimism", 204: "opBNB", 4663: "Robinhood Chain" };
+const CHAIN_NAMES = { 56: "BSC", 1: "ETH", 137: "Polygon", 42161: "Arbitrum", 8453: "Base", 10: "Optimism", 204: "opBNB", 4663: "Robinhood Chain", 677: "BOT Chain" };
 
-const HEALTH_CHAIN_ORDER = [56, 1, 8453, 42161, 137, 204, 10, 4663];
+const HEALTH_CHAIN_ORDER = [56, 1, 8453, 42161, 137, 204, 10, 4663, 677];
 
 // Wallet Health scans one chain at a time. The selector beside the button chooses it, the hint
 // line names what the next scan covers, and the choice is the stored value the side panel reads,

@@ -193,9 +193,9 @@
     const REDUCED_MOTION   = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     // Mirrors utils/chain_info.py.
-    const CHAIN_NAMES  = { 56:'BNB', 1:'ETH', 8453:'Base', 42161:'ARB', 137:'Polygon', 10:'OP', 204:'opBNB', 4663:'Robinhood' };
-    const CHAIN_COLORS = { 56:'secondary', 1:'secondary', 8453:'secondary', 42161:'secondary', 137:'secondary', 10:'secondary', 204:'secondary', 4663:'secondary' };
-    const EXPLORERS    = { 56:'https://bscscan.com', 1:'https://etherscan.io', 8453:'https://basescan.org', 42161:'https://arbiscan.io', 137:'https://polygonscan.com', 10:'https://optimistic.etherscan.io', 204:'https://opbnbscan.com', 4663:'https://robinhoodchain.blockscout.com' };
+    const CHAIN_NAMES  = { 56:'BNB', 1:'ETH', 8453:'Base', 42161:'ARB', 137:'Polygon', 10:'OP', 204:'opBNB', 4663:'Robinhood', 677:'BOT Chain' };
+    const CHAIN_COLORS = { 56:'secondary', 1:'secondary', 8453:'secondary', 42161:'secondary', 137:'secondary', 10:'secondary', 204:'secondary', 4663:'secondary', 677:'secondary' };
+    const EXPLORERS    = { 56:'https://bscscan.com', 1:'https://etherscan.io', 8453:'https://basescan.org', 42161:'https://arbiscan.io', 137:'https://polygonscan.com', 10:'https://optimistic.etherscan.io', 204:'https://opbnbscan.com', 4663:'https://robinhoodchain.blockscout.com', 677:'https://scan.botchain.ai' };
 
     // Opaque badge backgrounds, so a hovered row cannot lower the text's contrast (each is at least 4.5:1).
     const SEV = {
@@ -519,6 +519,7 @@
       { label:'Optimism',   val:'10' },
       { label:'opBNB',      val:'204' },
       { label:'Robinhood',  val:'4663' },
+      { label:'BOT Chain',  val:'677' },
     ];
 
     function threatKey(t) {

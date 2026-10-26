@@ -36,6 +36,7 @@ from adapters.polygon import PolygonAdapter
 from adapters.opbnb import OpBNBAdapter
 from adapters.optimism import OptimismAdapter
 from adapters.robinhood import RobinhoodAdapter
+from adapters.botchain import BotChainAdapter
 from services.mempool_service import supports_pending_transactions
 from services.cache import CacheService
 from services.counterparty_service import CounterpartyService
@@ -114,6 +115,8 @@ class ServiceContainer:
             rpc_url=settings.robinhood_rpc_url, read_rpc_url=settings.robinhood_read_rpc_url or None,
         )
         self.web3_client.register_adapter(self.robinhood_adapter)
+        self.botchain_adapter = BotChainAdapter(settings.botchain_rpc_url)
+        self.web3_client.register_adapter(self.botchain_adapter)
 
         # Scanners (legacy fallback); /api/scan reads the same local blacklist as the analyzers
         self.tx_scanner = TransactionScanner(self.web3_client, self.ai_analyzer, self.scam_db)
@@ -155,11 +158,18 @@ class ServiceContainer:
         self.contract_service.db = self.db
         self.auth_manager = AuthManager(self.db)
         self.indexer = DeployerIndexer(self.web3_client, self.db, settings=settings)
-        # Verdict evidence storage, plus on-chain records in the Robinhood Chain registry when configured
-        self.verdict_publisher = VerdictPublisher(
-            self.db, rpc_url=settings.robinhood_rpc_url,
-            alert=lambda text: send_alert(self.settings, text),
-        )
+        # Verdict evidence storage, plus per-chain on-chain records when configured.
+        self.verdict_publishers = {
+            4663: VerdictPublisher(
+                self.db, rpc_url=settings.robinhood_rpc_url,
+                alert=lambda text: send_alert(self.settings, text),
+            ),
+            677: VerdictPublisher(
+                self.db, rpc_url=settings.botchain_rpc_url,
+                alert=lambda text: send_alert(self.settings, text), chain_id=677,
+            ),
+        }
+        self.verdict_publisher = self.verdict_publishers[4663]
 
         # Mempool monitor + Rescue mode + Campaign detection
         self.mempool_monitor = MempoolMonitor(

@@ -2,7 +2,7 @@
 
 Historical March 2026 planning record. Repository checklists below are not current deployment evidence. Current repository coverage and the extension's remaining wallet testing limits are in [README.md](README.md) and [docs/TECHNICAL.md](docs/TECHNICAL.md). Future targets below are proposals, not measured outcomes.
 
-ShieldBot is a transaction security service for eight EVM chains. The V2 plan below frames it as a **cross-chain security intelligence network**; shared observations can inform later scans, and missing observations remain unknown.
+ShieldBot is a transaction security service for nine EVM chains. The V2 plan below frames it as a **cross-chain security intelligence network**; shared observations can inform later scans, and missing observations remain unknown.
 
 ---
 

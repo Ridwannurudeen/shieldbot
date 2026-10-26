@@ -75,9 +75,32 @@ def test_chains_section_lists_every_scan_chain():
     assert "Robinhood Chain" in names
 
 
+def test_mechanism_and_try_it_chain_maps_match_the_registry():
+    # Mechanism names the chains /api/stats reports; TryIt offers the chains POST /api/scan accepts.
+    mechanism = re.search(r"const chainNames: Record<number, string> = \{(.*?)\};", read(COMPONENTS / "Mechanism.tsx"), re.S)
+    mechanism_ids = [int(chain_id) for chain_id in re.findall(r"^\s+(\d+): \"[^\"]+\",$", mechanism.group(1), re.M)]
+    try_it = re.search(r"const chainOptions = \[(.*?)\];", read(COMPONENTS / "TryIt.tsx"), re.S)
+    try_it_ids = [int(chain_id) for chain_id in re.findall(r"\{ id: (\d+), name: \"[^\"]+\" \}", try_it.group(1))]
+    for ids in (mechanism_ids, try_it_ids):
+        assert len(ids) == len(set(ids))
+        assert set(ids) == set(chain_info())
+
+
+def test_bot_chain_row_claims_only_its_own_bdex_simulation():
+    # GoPlus token security does not cover BOT Chain; sell simulation there is ShieldBot's own, on BDEX
+    # pools with WBOT, while address labels are checked separately.
+    row = re.search(r'\{\s*//[^\n]*\n\s*chainId: 677,(.*?)logo:', read(COMPONENTS / "Chains.tsx"), re.S)
+    assert row, "Chains.tsx should have a BOT Chain row"
+    assert 'simulation: "ShieldBot",' in row.group(1)
+    assert 'simulationScope: "BDEX V2 and V3 pools with WBOT",' in row.group(1)
+    assert "unavailableLabel" not in row.group(1)
+    assert 'label: chain.unavailableLabel ?? "GoPlus flags only"' in read(COMPONENTS / "Chains.tsx")
+
+
 def test_chains_section_coverage_matches_the_code():
     from adapters.arbitrum import ArbitrumAdapter
     from adapters.base_chain import BaseChainAdapter
+    from adapters.botchain import BotChainAdapter
     from adapters.bsc import BscAdapter
     from adapters.eth import EthAdapter
     from adapters.opbnb import OpBNBAdapter
@@ -94,6 +117,7 @@ def test_chains_section_coverage_matches_the_code():
             for cls in (
                 ArbitrumAdapter,
                 BaseChainAdapter,
+                BotChainAdapter,
                 BscAdapter,
                 EthAdapter,
                 OpBNBAdapter,
@@ -155,6 +179,33 @@ def test_arbitrum_simulation_scope_matches_the_code():
         assert scope in " ".join(read(path).split()), path.name
     assert re.search(r'name: "Arbitrum", [^}]*simulationScope: "Some WETH pools, see below",', chains)
 
+
+
+def test_botchain_simulation_scope_matches_the_code():
+    # services/botchain_simulation.py simulates only BDEX pools pairing the token with WBOT: the V3 pools
+    # through the original SwapRouter and the V2 pairs. A token with no such pool stays Unknown.
+    from adapters.botchain import WBOT as ADAPTER_WBOT
+    from services.botchain_simulation import V2_ROUTES, WBOT
+
+    assert set(V2_ROUTES) == {"BDEX"}, "the BOT Chain simulation routes changed: update the site"
+    assert WBOT == ADAPTER_WBOT
+    scope = "BDEX V2 and V3 pools pairing the token with WBOT"
+    for path in (COMPONENTS / "Chains.tsx", LANDING_SRC / "public" / "about.html", ROOT / "README.md"):
+        assert scope in " ".join(read(path).split()), path.name
+    unknown = {
+        LANDING_SRC / "public" / "about.html": (
+            "GoPlus token security does not cover BOT Chain. ShieldBot checks GoPlus address labels "
+            "for the token and, when Blockscout supplies its creator, the creator; a BOT Chain token "
+            "with no supported BDEX pool reads Unknown for sellability."
+        ),
+        ROOT / "README.md": (
+            "GoPlus token security does not cover BOT Chain. ShieldBot checks GoPlus address labels "
+            "for the token and, when Blockscout supplies its creator, the creator; a token with no "
+            "supported BDEX pool still reads Unknown for sellability."
+        ),
+    }
+    for path, sentence in unknown.items():
+        assert sentence in " ".join(read(path).split()), path.name
 
 def test_mcp_counts_match_the_code():
     from mcp_server.prompts import PROMPT_DEFINITIONS
@@ -664,7 +715,7 @@ HERO_SECTION_COPY = {
         "did not answer.",
     ),
     "Chains.tsx": (
-        "Contract scans run on all 8 chains. The other checks depend on the chain, and a check that cannot run is "
+        "Contract scans run on all 9 chains. The other checks depend on the chain, and a check that cannot run is "
         "reported as Unknown, never as Safe.",
         "It has been tested with Rabby; MetaMask testing is still outstanding.",
     ),

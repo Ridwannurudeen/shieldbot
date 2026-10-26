@@ -4,19 +4,19 @@ pragma solidity 0.8.28;
 import {Script, console2} from "forge-std/Script.sol";
 import {ShieldBotVerdictRegistry} from "../src/ShieldBotVerdictRegistry.sol";
 
-/// @notice Deploys ShieldBotVerdictRegistry on Robinhood Chain (4663).
+/// @notice Deploys ShieldBotVerdictRegistry on Robinhood Chain (4663) or BOT Chain (677).
 /// @dev Reads the recorder's public address from INITIAL_RECORDER. The broadcasting account becomes the owner.
 ///      No key is read here: the owner signs with a Foundry keystore (--account). See DEPLOY_ROBINHOOD.md.
 ///      Dry run (no transaction is sent):
 ///        INITIAL_RECORDER=0x... forge script script/DeployVerdictRegistry.s.sol:DeployVerdictRegistry \
 ///          --rpc-url https://rpc.mainnet.chain.robinhood.com --sender <owner address>
 contract DeployVerdictRegistry is Script {
-    /// @notice Deployment was attempted on a chain other than Robinhood Chain (4663).
+    /// @notice Deployment was attempted on a chain other than Robinhood Chain (4663) or BOT Chain (677).
     /// @param actualChainId The chain ID of the selected RPC.
     error WrongChain(uint256 actualChainId);
 
     function run() external returns (ShieldBotVerdictRegistry registry) {
-        if (block.chainid != 4663) revert WrongChain(block.chainid);
+        if (block.chainid != 4663 && block.chainid != 677) revert WrongChain(block.chainid);
         address initialRecorder = vm.envAddress("INITIAL_RECORDER");
 
         console2.log("Deploying ShieldBotVerdictRegistry");

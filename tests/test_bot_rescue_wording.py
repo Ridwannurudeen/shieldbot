@@ -60,7 +60,7 @@ async def test_complete_approval_scan_limits_negative_finding(rescue_bot):
     assert 'no action needed' not in text
     assert 'Safe:' not in text
     scan.assert_awaited_once_with(
-        context.args[0], chain_id=4663, etherscan_api_key='', botchain_approval_scan=False,
+        context.args[0], chain_id=4663, etherscan_api_key='',
     )
 
 

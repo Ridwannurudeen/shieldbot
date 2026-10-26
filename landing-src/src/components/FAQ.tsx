@@ -4,7 +4,7 @@ import Icon from "./Icon";
 const faqs = [
   {
     q: "What is ShieldBot?",
-    a: "A transaction security tool for EVM chains. The browser extension checks transactions before you sign; the Telegram bot, API and MCP server scan contracts on 8 chains, including Robinhood Chain.",
+    a: "A transaction security tool for EVM chains. The browser extension checks transactions before you sign; the Telegram bot, API and MCP server scan contracts on 9 chains, including Robinhood Chain and BOT Chain.",
   },
   {
     q: "How does ShieldBot detect rug pulls and scams?",
@@ -12,7 +12,7 @@ const faqs = [
   },
   {
     q: "Which blockchains does ShieldBot support?",
-    a: "Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism and Robinhood Chain. Contract scans run on all 8 chains. Mempool monitoring covers the 4 chains with a public mempool: Ethereum, BNB Chain, opBNB and Polygon. Missing data is reported as Unknown.",
+    a: "Ethereum, BNB Chain, opBNB, Base, Arbitrum, Polygon, Optimism, Robinhood Chain and BOT Chain. Contract scans run on all 9 chains. Mempool monitoring covers the 4 chains with a public mempool: Ethereum, BNB Chain, opBNB and Polygon. Missing data is reported as Unknown.",
   },
   {
     q: "What does ShieldBot do on Robinhood Chain?",

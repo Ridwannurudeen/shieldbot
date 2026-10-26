@@ -297,6 +297,7 @@ async def test_firewall_swap_answers_inside_the_deadline_with_structural_present
     # and canonical WETH, while Blockscout hangs. Deadlines are scaled down from 7.5 s to 1 s.
     api, services = consumer_api
     monkeypatch.setattr(api, "FIREWALL_REQUEST_DEADLINE_SECONDS", 1.0)
+    services.web3_client.supports_honeypot_simulation = lambda chain_id: chain_id in {42161, 4663}
     monkeypatch.setattr(api, "FIREWALL_RESPONSE_RESERVE_SECONDS", 0.1)
     monkeypatch.setattr("services.contract_service.EXPLORER_RESULT_RESERVE_SECONDS", 0.3)
     api.risk_engine = RiskEngine()
@@ -465,6 +466,7 @@ async def test_a_two_unknown_token_swap_answers_with_honeypot_unknown_while_the_
 ):
     api, services = consumer_api
     monkeypatch.setattr(api, "FIREWALL_REQUEST_DEADLINE_SECONDS", 1.0)
+    services.web3_client.supports_honeypot_simulation = lambda chain_id: chain_id in {42161, 4663}
     monkeypatch.setattr(api, "FIREWALL_RESPONSE_RESERVE_SECONDS", 0.1)
     monkeypatch.setattr("analyzers.honeypot.SIMULATION_RESULT_RESERVE_SECONDS", 0.3)
     api.risk_engine = RiskEngine()
@@ -518,6 +520,7 @@ async def test_a_two_unknown_token_swap_answers_with_honeypot_unknown_while_the_
 async def test_other_chains_keep_no_request_deadline(consumer_api, monkeypatch):  # noqa: F811
     api, services = consumer_api
     monkeypatch.setattr(api, "FIREWALL_REQUEST_DEADLINE_SECONDS", 0.05)
+    services.web3_client.supports_honeypot_simulation = lambda chain_id: chain_id in {42161, 4663}
     services.registry.get_all = lambda: [SimpleNamespace(name="structural")]
 
     async def slow_token_info(address, **kwargs):

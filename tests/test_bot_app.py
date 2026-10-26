@@ -21,7 +21,7 @@ from core.database import Database
 from utils.chain_info import CHAIN_PREFIXES
 
 
-LISTED_PREFIXES = "`eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`"
+LISTED_PREFIXES = "`eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`, `bot:0x...`"
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def bot_module(monkeypatch):
     mock_settings = MagicMock(return_value=settings)
     mock_container = MagicMock()
     mock_container.return_value.web3_client.get_supported_chain_ids.return_value = [
-        56, 1, 8453, 42161, 137, 204, 10, 4663,
+        56, 1, 8453, 42161, 137, 204, 10, 4663, 677,
     ]
     monkeypatch.setattr(core.config, "Settings", mock_settings)
     monkeypatch.setattr(core.container, "ServiceContainer", mock_container)
@@ -230,7 +230,8 @@ class TestHelpCommand:
 **/token <address>** - Check if a token is safe to trade
 **/chain** - Switch active chain
 **/rescue <wallet>** - Scan wallet for risky token approvals
-**/rescue bot:<wallet>** - Scan BOT Chain token approvals with BDEX names, dollar values and revoke links; BOT Chain has approval scanning only
+**/rescue bot:<wallet>** - Scan BOT Chain token approvals with BDEX names, dollar values and revoke links
+BOT Chain: contract checks, approvals and revoke links; BDEX buy and sell simulation for tokens with a supported WBOT pool.
 **/threats** - Live mempool threat alerts
 **/campaign <address>** - Check if address is part of a scam campaign
 **/report <address> <reason>** - Report a scam address
@@ -240,9 +241,9 @@ class TestHelpCommand:
 
 **Quick Tips:**
 • Send any address and I'll ask which chain it is on, then auto-detect what to scan; a chain prefix skips the question
-• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`
+• Use chain prefixes: `eth:0x...`, `base:0x...`, `bsc:0x...`, `opbnb:0x...`, `arb:0x...`, `poly:0x...`, `op:0x...`, `rh:0x...`, `robinhood:0x...`, `bot:0x...`
 • Use /chain to set the default chain for the advisor chat
-• Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain
+• Supported: BSC, Ethereum, Base, Arbitrum, Polygon, opBNB, Optimism, Robinhood Chain, BOT Chain
 
 Stay safe! 🛡️
 """
@@ -402,6 +403,33 @@ class TestScanResultNamesCommunityReports:
         text = bot_module.format_scan_result(self._scan([COMMUNITY_MATCH], ["Reported by 3 users"]), 56)
         assert "scam database match" not in text
         assert text.count("Reported by 3 users") == 1
+
+    @pytest.mark.parametrize("chain_id", [1, 10, 56, 137, 204, 8453, 42161, 4663])
+    def test_other_chains_keep_the_legacy_scam_check_label(self, bot_module, chain_id):
+        result = self._scan([], [])
+        result["checks"] = {"scam_database_clean": True}
+
+        text = bot_module.format_scan_result(result, chain_id)
+
+        assert "✅ Scam Database Clean" in text
+
+    def test_botchain_legacy_scam_check_names_its_scope(self, bot_module):
+        result = self._scan([], [])
+        result["checks"] = {"scam_database_clean": True}
+        result["check_labels"] = {
+            "scam_database_clean": (
+                "Scam Database: no GoPlus address labels "
+                "(GoPlus token security does not cover BOT Chain)"
+            ),
+        }
+
+        text = bot_module.format_scan_result(result, 677)
+
+        assert (
+            "✅ Scam Database: no GoPlus address labels "
+            "(GoPlus token security does not cover BOT Chain)"
+        ) in text
+        assert "✅ Scam Database Clean" not in text
 
     def test_database_matches_are_counted_apart_from_community_reports(self, bot_module):
         text = bot_module.format_scan_result(self._scan(

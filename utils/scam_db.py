@@ -22,6 +22,9 @@ _ETH_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 _GOPLUS_CACHE = TTLCache(maxsize=1024, ttl=30)
 _GOPLUS_INFLIGHT = {}
 _GOPLUS_NO_DATA = 'GoPlus has no data for this token on this chain'
+# GoPlus answered code 2022 for 677 on 25 Oct 2026.
+GOPLUS_UNSUPPORTED_CHAINS = {677}
+_GOPLUS_CHAIN_UNSUPPORTED = 'GoPlus does not cover BOT Chain'
 
 
 def _address_security_ttu(key, result, now):
@@ -37,6 +40,7 @@ _GOPLUS_ADDRESS_INFLIGHT = {}
 _GOPLUS_RETRY_CODES = (2, 4029)
 _GOPLUS_ATTEMPTS = 3
 _GOPLUS_BACKOFF = 0.5
+GOPLUS_ADDRESS_TIMEOUT_SECONDS = 8
 
 # Addresses that must never be blacklisted (routers, WBNB, stables, etc.)
 _PROTECTED_ADDRESSES: set[str] = set()
@@ -79,13 +83,18 @@ class ScamMatches(list):
     Matches with a non-empty ``failed_providers`` are incomplete, never clean.
     """
 
-    def __init__(self, matches=(), failed_providers=(), observed_at=0, goplus_record=None):
+    def __init__(
+        self, matches=(), failed_providers=(), observed_at=0, goplus_record=None,
+        address_record=None, address_notes=(),
+    ):
         super().__init__(matches)
         self.failed_providers = tuple(failed_providers)
         self.observed_at = observed_at
         # GoPlus's token record, empty when it gave none: the contract service reads facts from it
         # that are not scam findings.
         self.goplus_record = goplus_record or {}
+        self.address_record = address_record or {}
+        self.address_notes = tuple(address_notes)
 
 
 class ScamDatabase:
@@ -125,13 +134,96 @@ class ScamDatabase:
         if blacklist_match:
             matches.append(blacklist_match)
 
-        # Check GoPlus Security
-        goplus_results = await self._check_goplus(address, chain_id)
+        # Check GoPlus token security, or address security on BOT Chain.
+        if chain_id == 677:
+            goplus_results = await self._check_goplus_address(address)
+        else:
+            goplus_results = await self._check_goplus(address, chain_id)
         matches.extend(goplus_results)
         failed_providers.extend(goplus_results.failed_providers)
 
         return ScamMatches(
-            matches, failed_providers, min(observed_at, goplus_results.observed_at), goplus_results.goplus_record
+            matches,
+            failed_providers,
+            min(observed_at, goplus_results.observed_at),
+            goplus_results.goplus_record,
+            goplus_results.address_record,
+            goplus_results.address_notes,
+        )
+
+    async def _check_goplus_address(self, address: str) -> ScamMatches:
+        try:
+            response = await asyncio.wait_for(
+                self.fetch_address_security(address, ledger_chain=677),
+                timeout=GOPLUS_ADDRESS_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            response = {'status': 'unknown', 'reason': 'timed out', 'data': {}}
+        record = response.get('data')
+        valid_record = (
+            isinstance(record, dict)
+            and bool(record)
+            and all(
+                isinstance(label, str) and isinstance(value, (str, int, float, bool))
+                for label, value in record.items()
+            )
+        )
+        if response.get('status') != 'ok' or not valid_record:
+            reason = response.get('reason') or 'GoPlus returned no address record'
+            return ScamMatches(
+                failed_providers=(f'GoPlus address security: {reason}',),
+                observed_at=response.get('observed_at', 0),
+            )
+
+        block_labels = []
+        high_labels = []
+        note_labels = []
+        for label, value in record.items():
+            if label in {'address', 'data_source'}:
+                continue
+            flagged = (
+                int(value) > 0 if label == 'number_of_malicious_contracts_created'
+                and str(value).isdigit()
+                else str(value) == '1'
+            )
+            if not flagged:
+                continue
+            rendered = (
+                f'{label}: {value}' if label == 'number_of_malicious_contracts_created'
+                else label
+            )
+            if label in {'stealing_attack', 'phishing_activities', 'fake_token'}:
+                block_labels.append(rendered)
+            elif label in {
+                'honeypot_related_address', 'number_of_malicious_contracts_created',
+                'cybercrime', 'financial_crime', 'sanctioned',
+                'blackmail_activities',
+            }:
+                high_labels.append(rendered)
+            else:
+                note_labels.append(label)
+
+        if block_labels and not str(record.get('data_source') or '').strip():
+            high_labels.extend(block_labels)
+            block_labels = []
+
+        matches = []
+        for labels, severity in ((block_labels, 'block'), (high_labels, 'high')):
+            if labels:
+                matches.append({
+                    'type': 'GoPlus address security',
+                    'reason': 'GoPlus address labels on token: ' + ', '.join(labels),
+                    'source': 'gopluslabs.io',
+                    'severity': severity,
+                })
+        address_notes = tuple(
+            f'GoPlus address label on token: {label}' for label in note_labels
+        )
+        return ScamMatches(
+            matches,
+            observed_at=response.get('observed_at', 0),
+            address_record=record,
+            address_notes=address_notes,
         )
     
     @staticmethod
@@ -153,6 +245,15 @@ class ScamDatabase:
     async def _fetch_token_security(key: tuple, flight_key: tuple) -> dict:
         chain_id, address = key
         observed_at = time.time()
+        if chain_id in GOPLUS_UNSUPPORTED_CHAINS:
+            result = {
+                'status': 'unknown', 'reason': _GOPLUS_CHAIN_UNSUPPORTED, 'data': {},
+                'observed_at': observed_at,
+            }
+            _GOPLUS_INFLIGHT.pop(flight_key, None)
+            unknown_ledger.record('goplus_token', chain_id, 'unknown')
+            _GOPLUS_CACHE[key] = result
+            return result
         result = {'status': 'unknown', 'reason': 'GoPlus unavailable', 'data': {}}
         try:
             provider_breakers.check('goplus_token', chain_id)
@@ -194,13 +295,13 @@ class ScamDatabase:
         result['observed_at'] = observed_at
         unknown_ledger.record('goplus_token', chain_id, (
             'answered' if result['status'] == 'ok'
-            else 'unknown' if result['reason'] == _GOPLUS_NO_DATA else 'failed'
+            else 'unknown' if result['reason'] in {_GOPLUS_NO_DATA, _GOPLUS_CHAIN_UNSUPPORTED} else 'failed'
         ))
         _GOPLUS_CACHE[key] = result
         return result
 
     @staticmethod
-    async def fetch_address_security(address: str) -> dict:
+    async def fetch_address_security(address: str, ledger_chain: Optional[int] = None) -> dict:
         """GoPlus malicious-address labels, shared across concurrent scans.
 
         GoPlus accepts a chain but returns the same labels for every chain, so none is sent.
@@ -214,12 +315,15 @@ class ScamDatabase:
         flight_key = (asyncio.get_running_loop(), key)
         if flight_key not in _GOPLUS_ADDRESS_INFLIGHT:
             _GOPLUS_ADDRESS_INFLIGHT[flight_key] = asyncio.create_task(
-                ScamDatabase._fetch_address_security(key, flight_key)
+                ScamDatabase._fetch_address_security(key, flight_key, ledger_chain)
             )
+        # A coalesced request is attributed once, to the chain of the caller that started it.
         return await asyncio.shield(_GOPLUS_ADDRESS_INFLIGHT[flight_key])
 
     @staticmethod
-    async def _fetch_address_security(address: str, flight_key: tuple) -> dict:
+    async def _fetch_address_security(
+        address: str, flight_key: tuple, ledger_chain: Optional[int],
+    ) -> dict:
         observed_at = time.time()
         result = {'status': 'unknown', 'reason': 'GoPlus unavailable', 'data': {}}
         try:
@@ -258,7 +362,7 @@ class ScamDatabase:
         finally:
             _GOPLUS_ADDRESS_INFLIGHT.pop(flight_key, None)
         result['observed_at'] = observed_at
-        unknown_ledger.record('goplus_address', None, (
+        unknown_ledger.record('goplus_address', ledger_chain, (
             'answered' if result['status'] == 'ok'
             else 'unknown' if result['reason'] == 'GoPlus returned no address record' else 'failed'
         ))

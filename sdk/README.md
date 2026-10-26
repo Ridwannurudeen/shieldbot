@@ -159,6 +159,7 @@ if (!isSupportedChainId(chainId)) {
 | Optimism | 10 |
 | opBNB | 204 |
 | Robinhood Chain | 4663 |
+| BOT Chain | 677 |
 
 The SDK does not reject other chains itself. The API answers a chain it does not serve with HTTP 400, which the SDK throws as `ShieldBotError`; `check()` never turns it into a fail-mode verdict. `health()` returns the live list as `supported_chains`.
 

@@ -4,6 +4,7 @@ import ast
 import asyncio
 import json
 import subprocess
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -56,6 +57,46 @@ def test_container_exposes_the_verdict_publisher(monkeypatch):
     assert publisher._db is container.db
     assert publisher._rpc_url == "https://rpc.example/4663"
     assert not publisher.is_onchain_enabled()
+    assert container.verdict_publishers[677].chain_id == 677
+    assert sum(item.is_onchain_enabled() for item in container.verdict_publishers.values()) == 0
+
+
+def test_container_without_botchain_registry_enables_only_the_robinhood_publisher(monkeypatch):
+    monkeypatch.setenv("ROBINHOOD_VERDICT_REGISTRY", "0x" + "11" * 20)
+    monkeypatch.delenv("BOTCHAIN_VERDICT_REGISTRY", raising=False)
+    with (
+        patch("core.container.Web3Client"),
+        patch("core.container.AIAnalyzer"),
+        patch("core.container.GreenfieldService"),
+        patch("core.container.TenderlySimulator"),
+    ):
+        from core.container import ServiceContainer
+
+        container = ServiceContainer(Settings(_env_file=None))
+    assert [chain for chain, publisher in container.verdict_publishers.items() if publisher.is_onchain_enabled()] == [4663]
+
+
+def test_botchain_publisher_resolves_its_environment_prefix(monkeypatch):
+    monkeypatch.setenv("BOTCHAIN_RPC_URL", "https://rpc.example/677")
+    monkeypatch.setenv("BOTCHAIN_VERDICT_REGISTRY", "0x" + "22" * 20)
+    publisher = VerdictPublisher(None, chain_id=677)
+    assert publisher._rpc_url == "https://rpc.example/677"
+    assert publisher.is_onchain_enabled()
+
+
+def test_api_stats_preserve_robinhood_count_and_add_per_chain_counts(monkeypatch):
+    import api
+
+    database = MagicMock()
+    database.get_platform_stats = AsyncMock(return_value={"all_time": {}, "last_24h": {}})
+    database.get_launch_discovery_status = AsyncMock(return_value={})
+    database.get_launch_scan_share = AsyncMock(return_value={})
+    database.get_verdict_evidence_counts = AsyncMock(return_value={4663: {"documents": 4, "confirmed": 3}, 677: {"documents": 2, "confirmed": 1}})
+    monkeypatch.setattr(api, "container", SimpleNamespace(db=database, mempool_monitor=None))
+    monkeypatch.setattr(api, "_background_workers", "external")
+    result = asyncio.run(api.public_stats())
+    assert result["registry_records_confirmed"] == 3
+    assert result["registry_records_confirmed_by_chain"] == {4663: 3, 677: 1}
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +109,11 @@ async def verdict_api(monkeypatch):
     import api
 
     registry = Web3Client.__new__(Web3Client)
-    registry._adapters = {chain_id: MagicMock(chain_id=chain_id) for chain_id in (56, 4663)}
+    registry._adapters = {chain_id: MagicMock(chain_id=chain_id) for chain_id in (56, 4663, 677)}
     database = Database(":memory:")
     await database.initialize()
     services = MagicMock()
+    services.verdict_publishers = {4663: services.verdict_publisher, 677: MagicMock()}
     services.db = database
     services.web3_client = registry
     services.settings = SimpleNamespace(trusted_proxies=[], admin_secret="")
@@ -123,6 +165,20 @@ async def test_permalink_serves_the_latest_evidence_and_how_to_verify(verdict_ap
     assert "retried automatically" not in body["verify"]
     assert f"only until {MAX_SEND_ATTEMPTS} transactions have been signed" in body["verify"]
     assert "only looked up" in body["verify"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [4663, 677])
+async def test_permalink_links_the_record_transaction_to_its_chain_explorer(verdict_api, chain_id):
+    from utils.chain_info import CHAIN_INFO
+
+    _, client, database = verdict_api
+    publisher = VerdictPublisher(database, registry_address="", chain_id=chain_id)
+    result = await publisher.publish(chain_id, TOKEN, COMPLETE_HIGH)
+    tx_hash = "0x" + "ab" * 32
+    await database.update_verdict_onchain(result["evidence_id"], "submitted", tx_hash=tx_hash)
+    body = client.get(f"/api/verdict/{chain_id}/{TOKEN}").json()
+    assert body["explorer_tx_url"] == f"{CHAIN_INFO[chain_id]['explorer_url']}/tx/{tx_hash}"
 
 
 @pytest.mark.asyncio
@@ -335,12 +391,14 @@ def bot_scan_functions():
     client._adapters = {56: MagicMock(), 4663: MagicMock()}
     client.get_token_info = AsyncMock(return_value={})
     services = MagicMock()
+    services.verdict_publishers = {4663: services.verdict_publisher, 677: MagicMock()}
     services.registry.run_all = AsyncMock(
         return_value=[SimpleNamespace(name="honeypot", data=HONEYPOT_DATA)]
     )
     services.robinhood_assets.check_onchain = AsyncMock(return_value=NO_MATCH)
     namespace = {
         "asyncio": asyncio,
+        "time": time,
         "is_scan_incomplete": is_scan_incomplete,
         "with_impostor_check": with_impostor_check,
         "RUN_ALL_DEADLINE_SECONDS": RUN_ALL_DEADLINE_SECONDS,
@@ -379,7 +437,7 @@ def update():
 async def test_robinhood_scans_publish_the_composite_result(bot_scan_functions, handler):
     ns = bot_scan_functions
     await ns[handler](update(), TOKEN, chain_id=4663)
-    publish_call = ns["container"].verdict_publisher.publish_fire_and_forget
+    publish_call = ns["container"].verdict_publishers[4663].publish_fire_and_forget
     publish_call.assert_called_once_with(
         4663,
         TOKEN,
@@ -394,7 +452,7 @@ async def test_robinhood_legacy_fallback_publishes_the_fallback_result(bot_scan_
     ns = bot_scan_functions
     ns["container"].registry.run_all.side_effect = RuntimeError("provider down")
     await ns[handler](update(), TOKEN, chain_id=4663)
-    publish_call = ns["container"].verdict_publisher.publish_fire_and_forget
+    publish_call = ns["container"].verdict_publishers[4663].publish_fire_and_forget
     publish_call.assert_called_once()
     args, kwargs = publish_call.call_args
     assert args[:2] == (4663, TOKEN)
@@ -430,7 +488,7 @@ def test_api_lifespan_starts_the_drain_after_the_container_and_stops_it_before_s
 
     order = []
     mock_container.startup.side_effect = lambda: order.append("container startup")
-    mock_container.verdict_publisher.start.side_effect = lambda: order.append("drain start")
+    mock_container.verdict_publisher.start_publishers.side_effect = lambda publishers: order.append("drain start")
     mock_container.hunter.start.side_effect = lambda: order.append("hunter start")
     mock_container.hunter.stop.side_effect = lambda: order.append("hunter stop")
     mock_container.verdict_publisher.stop.side_effect = lambda: order.append("drain stop")
@@ -440,7 +498,9 @@ def test_api_lifespan_starts_the_drain_after_the_container_and_stops_it_before_s
     assert order == [
         "container startup", "drain start", "hunter start", "hunter stop", "drain stop", "container shutdown",
     ]
-    mock_container.verdict_publisher.start.assert_called_once_with()
+    mock_container.verdict_publisher.start_publishers.assert_called_once_with(
+        list(mock_container.verdict_publishers.values())
+    )
     mock_container.verdict_publisher.stop.assert_awaited_once_with()
 
 
@@ -462,9 +522,9 @@ def test_only_the_api_process_or_the_workers_start_the_drain_or_read_the_key():
         if relative.startswith(("tests/", "sdk/", "scripts/census_4663/")) or "node_modules" in relative:
             continue
         source = (root / relative).read_text(encoding="utf-8")
-        if "verdict_publisher.start(" in source:
+        if "verdict_publishers[4663].start_publishers(" in source:
             starters.append(relative)
-        if "ROBINHOOD_RECORDER_PRIVATE_KEY" in source:
+        if "_RECORDER_PRIVATE_KEY" in source:
             key_readers.append(relative)
     assert starters == ["api.py", "workers.py"]
     assert key_readers == ["services/verdict_publisher.py"]

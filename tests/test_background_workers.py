@@ -69,7 +69,7 @@ def test_external_starts_no_background_work_in_the_api(mock_container, monkeypat
         assert api._background_workers == "external"
         mock_container.startup.assert_awaited_once_with()
         mock_container.start_mempool_monitor.assert_not_awaited()
-        mock_container.verdict_publisher.start.assert_not_called()
+        mock_container.verdict_publisher.start_publishers.assert_not_called()
         mock_container.hunter.start.assert_not_awaited()
         mock_container.launch_watch.start.assert_not_awaited()
         # The routers still mount and the API still serves.
@@ -85,7 +85,9 @@ def test_api_setting_starts_the_background_work_as_before(mock_container, monkey
     with TestClient(api.app):
         assert api._background_workers == "api"
         mock_container.start_mempool_monitor.assert_awaited_once_with()
-        mock_container.verdict_publisher.start.assert_called_once_with()
+        mock_container.verdict_publisher.start_publishers.assert_called_once_with(
+            list(mock_container.verdict_publishers.values())
+        )
         mock_container.hunter.start.assert_awaited_once_with()
         mock_container.launch_watch.start.assert_awaited_once_with()
         # The hunter's sweep reloads the scam blacklist here, so the API runs no reload of its own.
@@ -274,6 +276,9 @@ def _worker_container():
         getattr(container, name).start = AsyncMock()
         getattr(container, name).stop = AsyncMock()
     container.verdict_publisher.stop = AsyncMock()
+    container.botchain_publisher = MagicMock()
+    container.verdict_publishers = {4663: container.verdict_publisher, 677: container.botchain_publisher}
+    container.verdict_publishers[4663].start_publishers = MagicMock()
     # The services' own task handles: none running unless a test starts one.
     for name in ("indexer", "mempool_monitor", "hunter", "launch_watch"):
         getattr(container, name)._task = None
@@ -281,17 +286,18 @@ def _worker_container():
     return container
 
 
-LIFESPAN_ORDER = [
-    call.startup(),
-    call.start_mempool_monitor(),
-    call.verdict_publisher.start(),
-    call.hunter.start(),
-    call.launch_watch.start(),
-    call.launch_watch.stop(),
-    call.hunter.stop(),
-    call.verdict_publisher.stop(),
-    call.shutdown(),
-]
+def lifespan_order(container):
+    return [
+        call.startup(),
+        call.start_mempool_monitor(),
+        call.verdict_publisher.start_publishers([container.verdict_publisher, container.botchain_publisher]),
+        call.hunter.start(),
+        call.launch_watch.start(),
+        call.launch_watch.stop(),
+        call.hunter.stop(),
+        call.verdict_publisher.stop(),
+        call.shutdown(),
+    ]
 
 
 @pytest.mark.asyncio
@@ -302,10 +308,10 @@ async def test_workers_run_the_api_lifespans_background_work_in_its_order():
     stop = asyncio.Event()
     running = asyncio.create_task(workers.run(container, stop))
     await asyncio.sleep(0)
-    assert container.mock_calls == LIFESPAN_ORDER[:5]
+    assert container.mock_calls == lifespan_order(container)[:5]
     stop.set()
     assert await running == 0
-    assert container.mock_calls == LIFESPAN_ORDER
+    assert container.mock_calls == lifespan_order(container)
 
 
 @pytest.mark.asyncio
@@ -331,7 +337,7 @@ async def test_workers_stop_and_exit_non_zero_when_background_work_ends_on_its_o
         # The stop event is never set: the task that ended is what stops the workers.
         status = await asyncio.wait_for(workers.run(container, asyncio.Event()), 5)
     assert status == 1
-    assert container.mock_calls == LIFESPAN_ORDER
+    assert container.mock_calls == lifespan_order(container)
     assert "RuntimeError" in caplog.text
     running_forever.set()
 

@@ -11,6 +11,7 @@ import pytest
 
 from adapters.base_chain import BaseChainAdapter
 from adapters.bsc import BscAdapter
+from adapters.botchain import BotChainAdapter
 from adapters.eth import EthAdapter
 from adapters.opbnb import OpBNBAdapter
 from adapters.optimism import OptimismAdapter
@@ -71,3 +72,22 @@ async def test_goplus_only_chains_take_sellability_from_goplus(adapter_class):
         field: "goplus" for field in TRADE_FIELDS
     }
     assert "GoPlus-reported, not simulated by ShieldBot" in data["reason"]
+
+
+@pytest.mark.asyncio
+async def test_botchain_simulates_its_own_sell_and_makes_no_goplus_claim():
+    from services.robinhood_simulation import aggregate_outcomes
+
+    reason = "No supported pool found (BDEX V3 or BDEX V2, paired with WBOT)"
+    adapter = BotChainAdapter(rpc_url="https://rpc.invalid")
+    adapter._simulator.simulate = AsyncMock(return_value=aggregate_outcomes([], [reason]))
+    with patch("adapters.evm_base.aiohttp.ClientSession") as session:
+        honeypot = await adapter.check_honeypot(ADDRESS)
+        taxes = await adapter.get_tax_info(ADDRESS)
+    session.assert_not_called()
+    assert adapter._honeypot_chain_id is None
+    assert adapter.supports_honeypot_simulation is True
+    assert honeypot["status"] == taxes["status"] == "unknown"
+    assert honeypot["reason"] == taxes["reason"] == reason
+    assert honeypot["field_providers"] == taxes["field_providers"] == {}
+    assert adapter.capabilities()["sell_simulation"] == "eth_simulateV1"

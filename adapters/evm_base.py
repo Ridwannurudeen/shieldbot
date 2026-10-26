@@ -283,11 +283,12 @@ class EvmAdapter(ChainAdapter):
         from services.counterparty_service import within_timeout
 
         if self._explorer_backend == 'sourcify_blockscout':
-            from services.explorer_service import ExplorerResult
+            from services.explorer_service import SOURCIFY_UNSUPPORTED_CHAINS, ExplorerResult
 
+            sources = 'Blockscout' if self._chain_id in SOURCIFY_UNSUPPORTED_CHAINS else 'Sourcify and Blockscout'
             result = await within_timeout(
                 self._explorer_service.get_verification_status(address, self._chain_id),
-                ExplorerResult('unknown', reason='Sourcify and Blockscout timed out'),
+                ExplorerResult('unknown', reason=f'{sources} timed out'),
             )
             if result.status == 'unknown':
                 logger.warning("[%s] Verification unknown: %s", self._chain_name, result.reason)

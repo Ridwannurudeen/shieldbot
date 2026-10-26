@@ -39,6 +39,9 @@ def mock_container(monkeypatch):
     container.launch_watch.start = AsyncMock()
     container.launch_watch.stop = AsyncMock()
     container.verdict_publisher.stop = AsyncMock()
+    container.botchain_publisher = MagicMock()
+    container.verdict_publishers = {4663: container.verdict_publisher, 677: container.botchain_publisher}
+    container.verdict_publishers[4663].start_publishers = MagicMock()
     container.phishing_service.stop = AsyncMock()
     container.robinhood_assets.listed = AsyncMock(return_value=None)
     container.auth_manager.validate_key = AsyncMock(
@@ -144,7 +147,9 @@ class TestLifespan:
         mock_container.shutdown.assert_awaited_once_with()
         # The drain starts first and stops last: the watch and the hunter publish verdicts into it.
         loops = [
-            call.verdict_publisher.start(),
+            call.verdict_publisher.start_publishers(
+                [mock_container.verdict_publisher, mock_container.botchain_publisher]
+            ),
             call.hunter.start(),
             call.launch_watch.start(),
             call.launch_watch.stop(),

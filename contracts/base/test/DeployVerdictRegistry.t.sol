@@ -23,6 +23,13 @@ contract DeployVerdictRegistryTest is Test {
         // The broadcasting account, not the script contract, owns the registry.
         assertEq(registry.owner(), tx.origin);
         assertEq(registry.totalRecords(), 0);
+
+        vm.chainId(677);
+        registry = script.run();
+
+        assertEq(registry.recorder(), recorder);
+        assertEq(registry.owner(), tx.origin);
+        assertEq(registry.totalRecords(), 0);
     }
 
     function test_Run_RejectsWrongChainBeforeReadingRecorder() public {

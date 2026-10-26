@@ -1,0 +1,376 @@
+{
+ "data": [
+  {
+   "chain_id": 677,
+   "pair": "0xdacfc2574b6110892351bd31afb36f95e7206162",
+   "poolType": "v3",
+   "token0": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c",
+   "token1": "0xcaab50f36252a57529afef651fa6b9f9281917ff"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xb4b220bbeea9f14c776d0c29cb8a1ab1068cb1d7",
+   "poolType": "v2",
+   "token0": "0x8ba8b124a62c7a738f3669b0776d86789e72d838",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xb9044d8df4c81ac577e5bf69edcb23555514cc82",
+   "poolType": "v2",
+   "token0": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c",
+   "token1": "0xdaaabbd103c95395197c79890858922549a7a5e2"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xdc7547f3cea82c6af7fd420656ce532c6da9b98d",
+   "poolType": "v2",
+   "token0": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xc9a6e70f42dd6f1f8151c47a21bc627c2bbb3f3d",
+   "poolType": "v3",
+   "token0": "0x4d4ad1c8de16e91c072d001feab7eb5a39d50240",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xb42805e48a91d612b0aad9362da4b4ff474d9615",
+   "poolType": "v3",
+   "token0": "0xd5452816194a3784dba983426cce7c122f4abd30",
+   "token1": "0xf939bd159dee99ce701bd94ff4cd507bd3362951"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x0355772589d0c3a2884462a592c233f1465814e3",
+   "poolType": "v3",
+   "token0": "0xa403b7febfbf2f15bf0e7151c3d5cb4828b4e129",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xad9b4ea55850181dc1d85b3b34dbf1951d64c9a9",
+   "poolType": "v2",
+   "token0": "0xc25b190eb62c4bb0b0891d029e35411a20baced9",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x24d27a096cbedcb71f4953ea0592e64108044b3d",
+   "poolType": "v2",
+   "token0": "0x4a287f66aba5f6219463312a79319ec2b7ff65c5",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x903e091cdcb6f19dcf9acc1e3fd3ae786f2a924f",
+   "poolType": "v3",
+   "token0": "0xd5452816194a3784dba983426cce7c122f4abd30",
+   "token1": "0xd7fe2adde9d19deece9071a8ab23d0802c269408"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x26804cc92804262302ad520f12972e6e4c2ac8ce",
+   "poolType": "v2",
+   "token0": "0x816c6c2fdd88a74cbb8cad959d398fcb22314ee0",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x8cdd0050c7ba9231c9ca65dac73f3375086acad2",
+   "poolType": "v2",
+   "token0": "0x5af9a0e7472134a6a5ad02a7d327e83ddd24b337",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x5cf483e886a83de87bd31acb24d3f346454e49eb",
+   "poolType": "v3",
+   "token0": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xa7a7796b5ec5ea2fdec1f94a3e71fa027f7cf45b",
+   "poolType": "v2",
+   "token0": "0x5c56582e1fbbb9bf6b03de9a4507d2ca28af6ce7",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xe7ccc59ab51b98177c86f62677f8104fd0e53db2",
+   "poolType": "v2",
+   "token0": "0xc53d92a3a99b9efb9d6c2b66e534f638601dc181",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x60752b66f61c29f087d75ac1ff323f4bd892b549",
+   "poolType": "v2",
+   "token0": "0x337a5749dc5acdee38a2493d6593df20dba4859c",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x56912a57cea1de11f69ec054192ea8eab2004937",
+   "poolType": "v2",
+   "token0": "0xd5452816194a3784dba983426cce7c122f4abd30",
+   "token1": "0xdcc362323e8b12c1475af0b7caedc295e596cdb9"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xe3ea6ca6374ac937c0ac27f0cc560ab27e248fec",
+   "poolType": "v2",
+   "token0": "0x41346bb2391669628b44d3b8cfc02b20f85c7d90",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x9e515b4c5a066a7f7e609dc9d25722df13854647",
+   "poolType": "v2",
+   "token0": "0x4a781889ce38c08b86b02e084a5a19609376b857",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x0d6c3032135c6885964e9c1d0811b935bc84a316",
+   "poolType": "v2",
+   "token0": "0x9841194c1f6f8359d0ff1a98fb2c3a6a17357ce0",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x5e8f6a768a19f5c1e50b1d51c5e9ce54c820047d",
+   "poolType": "v2",
+   "token0": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c",
+   "token1": "0xbe449366dec6ba7dc7d1b56540b918219a290a64"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xb2f674e4a729305fbd6eb3c12a9edfa079dd04ce",
+   "poolType": "v2",
+   "token0": "0x787e46eb2911cf6bccef221a71ae83b3602df123",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x8c6260676361b9f0e9b79c75791221287020fbfd",
+   "poolType": "v3",
+   "token0": "0x0e7541ef49ba75a5ac5d56a417eb4256b40b01dd",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x33efd033f55de88c22dd9295b0b89efe616dcb20",
+   "poolType": "v2",
+   "token0": "0x291ba00c275e01539f43bc4037516978d9e0a07c",
+   "token1": "0x977074b61ca525479ef63e5d7e34c722b2b9422b"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x27bfc83a0fc9352a03ac92096c3dde1fcf3f6542",
+   "poolType": "v2",
+   "token0": "0x5af9a0e7472134a6a5ad02a7d327e83ddd24b337",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xca8cfa943c38bb75e8e1cfbe7a7d60ce0272ecef",
+   "poolType": "v2",
+   "token0": "0x7627b8c7ca57110a8282065bc5193ed9b4442693",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x30dc23f45b6206a172733dfe6a53a7dada7d6e6c",
+   "poolType": "v2",
+   "token0": "0x432c154b4fe3f81a024ae1bc7835d15c0f073b5e",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xea9d4b3909ffbd9ceaed8f3bb223437e882aeed0",
+   "poolType": "v2",
+   "token0": "0x1b1c27acb5f60d5d65a0a716df49bcd25add1e43",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xecf9855597e9b46b8b9d4e602b73ecb9822459aa",
+   "poolType": "v2",
+   "token0": "0x4a781889ce38c08b86b02e084a5a19609376b857",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x04a3511051a45543cfb5175f2fa6774a54bf0029",
+   "poolType": "v3",
+   "token0": "0x546307af427902a75771434df831d88219784e19",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xd178fd09c898b8042d0423a5212796e5df7ef3cc",
+   "poolType": "v2",
+   "token0": "0xca7d638dd42936f90924a46dcacbd2ee08751111",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x031420bf765b8be9df69488e23767d1a6a2e19de",
+   "poolType": "v3",
+   "token0": "0x0cebaf61076fab460012fb9d81346fb76595ee26",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x0e5cda3a501010331774b3cdb66fa15425c5d251",
+   "poolType": "v3",
+   "token0": "0x137a5fc22a76ec42490f2421a81935d124bae714",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xc5b69792d9587a7753fa12f3a4298600dd84e50a",
+   "poolType": "v2",
+   "token0": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c",
+   "token1": "0xce6eec61ce9e72a436398eb97ec026fa800dc0d8"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x1d6fb46a52c927516eaff463f17d43ace0c0a313",
+   "poolType": "v2",
+   "token0": "0x772bb70ec435b21a501a4878de0fcecff3697c73",
+   "token1": "0xce6eec61ce9e72a436398eb97ec026fa800dc0d8"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x480d8fad4273fc651b3552a767eb6900eb1fb0eb",
+   "poolType": "v2",
+   "token0": "0xad033f263b929edf90b9744cfee8e4a432d01265",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xcb0b7de94533d773f3b828b3cbf3f2c65a4dc995",
+   "poolType": "v2",
+   "token0": "0x291ba00c275e01539f43bc4037516978d9e0a07c",
+   "token1": "0x736642653f15ecbd0caba1135b5194851c2acb7a"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x8785dcbdfa15b51b67f396d529f206605fca812c",
+   "poolType": "v2",
+   "token0": "0x8d315a37d3d0bda861cc113cf381231c09d42e4a",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xdac161c4a41aff8a206a80e563978214442bfd3b",
+   "poolType": "v2",
+   "token0": "0x866b8bedd545dec3e50e57b8ffa2ffdb71493f34",
+   "token1": "0x9841194c1f6f8359d0ff1a98fb2c3a6a17357ce0"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x1c5b14fad7a9613f37f212603436c3a5cf7f1be0",
+   "poolType": "v3",
+   "token0": "0x967c9b483d9a5aa409d7e53492a3238157c97b0b",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x050a7c2ec050a1d1402053a40a2eb0f6275ed70a",
+   "poolType": "v3",
+   "token0": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x58ee68cf5d51560edc5e1d955d7cbf0d00eb5897",
+   "poolType": "v3",
+   "token0": "0x8b559c7049ed44f2e3e5db54e2b72c33f23f6d43",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x1bc0077099a36f69ea98f04141f0d34dfe243819",
+   "poolType": "v3",
+   "token0": "0x87a9f79daf86baecb855789a02383e818f0b63f6",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x22f7e5e3144de85f350b54c757d584f963928cc0",
+   "poolType": "v3",
+   "token0": "0xb7d20aad98a96b71fb251612cf7e7bb399360c44",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x91239c56a38dc1c35eccdd823e3a748023d2540f",
+   "poolType": "v3",
+   "token0": "0x9841194c1f6f8359d0ff1a98fb2c3a6a17357ce0",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x822dc160cc971510cf87999004a28b4a7aefd082",
+   "poolType": "v3",
+   "token0": "0x546307af427902a75771434df831d88219784e19",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x64f418471a1a7932a190e10da5a8551db5abec05",
+   "poolType": "v3",
+   "token0": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x5b5ec30ed85da283fccaaa1559f41cb4dedfa760",
+   "poolType": "v3",
+   "token0": "0x118f7b25a0907577041f1c10d7e0cbd153986f66",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xddcf0d239c1b2aa2e2a7bba1e2ac8cecb28e5af1",
+   "poolType": "v3",
+   "token0": "0x118f7b25a0907577041f1c10d7e0cbd153986f66",
+   "token1": "0x8b559c7049ed44f2e3e5db54e2b72c33f23f6d43"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xc659f3174fdebcbcf2d358c332bc74197d34e870",
+   "poolType": "v3",
+   "token0": "0x733178aadf038a8044ebcbd36bb918fc99fdba87",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0xafb91c893102f50a56477170efe661ae2344a8a2",
+   "poolType": "v3",
+   "token0": "0x546307af427902a75771434df831d88219784e19",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x4367fdbe69f4f10f273b84aed2cb285dcd24bab4",
+   "poolType": "v3",
+   "token0": "0xb7632229567440b82e7163d58ee7cc246be915d1",
+   "token1": "0xd5452816194a3784dba983426cce7c122f4abd30"
+  },
+  {
+   "chain_id": 677,
+   "pair": "0x67ea0f133bd80ca535f11ae21c7966b8629229fd",
+   "poolType": "v2",
+   "token0": "0x7ed2a1550217f980cc217484b51e7b8a1fec2391",
+   "token1": "0xababc7ddc03e501d190c676bf3d92ef0e6e87a3c"
+  }
+ ],
+ "success": true
+}

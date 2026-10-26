@@ -99,6 +99,36 @@ def test_clean_token_discount_without_transaction_risk_is_unchanged():
     assert risk["rug_probability"] == 12
 
 
+@pytest.mark.parametrize("entrypoint", ["direct", "registry"])
+def test_unsupported_token_security_does_not_unlock_the_clean_token_discount(entrypoint):
+    contract = {**CLEAN_TOKEN, "token_security_unsupported": True}
+    if entrypoint == "direct":
+        risk = RiskEngine().compute_composite_risk(
+            {
+                **contract, "is_verified": False, "has_mint": True,
+                "has_proxy": True, "has_blacklist": True,
+            },
+            HONEYPOT, DEEP_MARKET, ETHOS,
+        )
+        assert risk["rug_probability"] == 26
+    else:
+        risk = RiskEngine().compute_from_results(
+            _results(100, contract=contract, market=DEEP_MARKET)
+        )
+        assert risk["rug_probability"] == 32
+
+
+def test_creator_only_structural_flag_has_no_scam_floor():
+    contract = {
+        **CONTRACT,
+        "creator_address_flag": "Creator address carries GoPlus address labels: phishing_activities",
+        "scam_matches": [],
+    }
+    risk = RiskEngine().compute_from_results(_results(15, contract=contract))
+    assert risk["transaction_floor"] is None
+    assert risk["rug_probability"] < 70
+
+
 RAISED = CalibrationConfig(high_threshold=90.0, medium_threshold=80.0)
 WALLET_FLAG = "Approval to a wallet address, not a contract (drainer pattern)"
 FRESH_UNVERIFIED = ["Contract not verified", "Contract age: 2 days", "Mint function detected"]
