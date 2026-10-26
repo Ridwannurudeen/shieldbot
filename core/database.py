@@ -252,6 +252,9 @@ class Database:
         # next read, and the drain would never see a verdict queued after it.
         self._drain_db: Optional[aiosqlite.Connection] = None
         self._drain_lock = asyncio.Lock()
+        # One write at a time on that connection: each chain's drain runs on its own task, and writes that overlap
+        # share its implicit transaction, so one chain's rollback would undo another's write.
+        self._outbox_calls = asyncio.Lock()
         # The sender lease's own connection: its commits and rollbacks run beside the drain's, never inside a
         # transaction the drain has open.
         self._lease_db: Optional[aiosqlite.Connection] = None
@@ -3181,24 +3184,25 @@ class Database:
         only when the row was queued for that registry.
         """
         outbox = await self._outbox()
-        try:
-            await outbox.execute("""
-                UPDATE verdict_evidence
-                SET onchain_status = ?, tx_hash = ?, onchain_error = ?, updated_at = ?
-                WHERE id = ?
-            """, (onchain_status, tx_hash, onchain_error, time.time(), evidence_id))
-            if onchain_status == "confirmed":
-                cursor = await outbox.execute("""
-                    SELECT chain_id, subject, canonical FROM verdict_evidence
-                    WHERE id = ? AND chain_id = 4663 AND lower(registry) = lower(?)
-                """, (evidence_id, registry))
-                row = await cursor.fetchone()
-                if row is not None:
-                    await self._admit_guard_subject(outbox, *row, reenable=False)
-            await outbox.commit()
-        except BaseException:
-            await outbox.rollback()
-            raise
+        async with self._outbox_calls:
+            try:
+                await outbox.execute("""
+                    UPDATE verdict_evidence
+                    SET onchain_status = ?, tx_hash = ?, onchain_error = ?, updated_at = ?
+                    WHERE id = ?
+                """, (onchain_status, tx_hash, onchain_error, time.time(), evidence_id))
+                if onchain_status == "confirmed":
+                    cursor = await outbox.execute("""
+                        SELECT chain_id, subject, canonical FROM verdict_evidence
+                        WHERE id = ? AND chain_id = 4663 AND lower(registry) = lower(?)
+                    """, (evidence_id, registry))
+                    row = await cursor.fetchone()
+                    if row is not None:
+                        await self._admit_guard_subject(outbox, *row, reenable=False)
+                await outbox.commit()
+            except BaseException:
+                await outbox.rollback()
+                raise
 
     async def _admit_guard_subject(
         self, connection, chain_id: int, subject: str, canonical: str, reenable: bool
@@ -3382,26 +3386,28 @@ class Database:
         """
         outbox = await self._outbox()
         while True:
-            cursor = await outbox.execute("""
-                SELECT id, subject, verdict, evidence_hash, observed_block, tx_hash, nonce, attempts
-                FROM verdict_evidence
-                WHERE chain_id = ? AND onchain_status = 'pending'
-                ORDER BY id
-                LIMIT 1
-            """, (chain_id,))
-            row = await cursor.fetchone()
-            if row is None:
-                return None
-            # The SELECT opens no transaction in the default mode; the UPDATE does, until it commits or rolls back.
-            try:
+            async with self._outbox_calls:
                 cursor = await outbox.execute("""
-                    UPDATE verdict_evidence SET onchain_status = 'sending', updated_at = ?
-                    WHERE id = ? AND onchain_status = 'pending'
-                """, (time.time(), row[0]))
-                await outbox.commit()
-            except BaseException:
-                await outbox.rollback()
-                raise
+                    SELECT id, subject, verdict, evidence_hash, observed_block, tx_hash, nonce, attempts
+                    FROM verdict_evidence
+                    WHERE chain_id = ? AND onchain_status = 'pending'
+                    ORDER BY id
+                    LIMIT 1
+                """, (chain_id,))
+                row = await cursor.fetchone()
+                if row is None:
+                    return None
+                # The SELECT opens no transaction in the default mode; the UPDATE does, until it commits or rolls
+                # back.
+                try:
+                    cursor = await outbox.execute("""
+                        UPDATE verdict_evidence SET onchain_status = 'sending', updated_at = ?
+                        WHERE id = ? AND onchain_status = 'pending'
+                    """, (time.time(), row[0]))
+                    await outbox.commit()
+                except BaseException:
+                    await outbox.rollback()
+                    raise
             if cursor.rowcount == 1:
                 return dict(zip(
                     ("id", "subject", "verdict", "evidence_hash", "observed_block", "tx_hash", "nonce", "attempts"),
@@ -3420,26 +3426,27 @@ class Database:
         outbox = await self._outbox()
         now = time.time()
         # One transaction: a failure must not leave the row update behind for a later commit to land alone.
-        try:
-            cursor = await outbox.execute("""
-                UPDATE verdict_evidence SET tx_hash = ?, nonce = ?, updated_at = ?
-                WHERE id = ? AND onchain_status = 'sending'
-            """, (tx_hash, nonce, now, evidence_id))
-            claimed = cursor.rowcount == 1
-            if claimed:
+        async with self._outbox_calls:
+            try:
                 cursor = await outbox.execute("""
-                    INSERT OR IGNORE INTO verdict_transactions
-                        (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, now))
-                if cursor.rowcount == 1:
-                    await outbox.execute(
-                        "UPDATE verdict_evidence SET attempts = attempts + 1 WHERE id = ?", (evidence_id,)
-                    )
-            await outbox.commit()
-        except BaseException:
-            await outbox.rollback()
-            raise
+                    UPDATE verdict_evidence SET tx_hash = ?, nonce = ?, updated_at = ?
+                    WHERE id = ? AND onchain_status = 'sending'
+                """, (tx_hash, nonce, now, evidence_id))
+                claimed = cursor.rowcount == 1
+                if claimed:
+                    cursor = await outbox.execute("""
+                        INSERT OR IGNORE INTO verdict_transactions
+                            (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (evidence_id, tx_hash, nonce, raw_tx, max_fee_per_gas, now))
+                    if cursor.rowcount == 1:
+                        await outbox.execute(
+                            "UPDATE verdict_evidence SET attempts = attempts + 1 WHERE id = ?", (evidence_id,)
+                        )
+                await outbox.commit()
+            except BaseException:
+                await outbox.rollback()
+                raise
         return claimed
 
     async def get_verdict_transactions(self, evidence_ids: List[int]) -> Dict[int, List[Dict]]:
@@ -3460,14 +3467,15 @@ class Database:
     async def touch_verdict(self, evidence_id: int):
         """Mark a row as just looked at, so reconciliation looks at it again only after its delay."""
         outbox = await self._outbox()
-        try:
-            await outbox.execute(
-                "UPDATE verdict_evidence SET updated_at = ? WHERE id = ?", (time.time(), evidence_id)
-            )
-            await outbox.commit()
-        except BaseException:
-            await outbox.rollback()
-            raise
+        async with self._outbox_calls:
+            try:
+                await outbox.execute(
+                    "UPDATE verdict_evidence SET updated_at = ? WHERE id = ?", (time.time(), evidence_id)
+                )
+                await outbox.commit()
+            except BaseException:
+                await outbox.rollback()
+                raise
 
     async def release_verdict_claim(self, evidence_id: int):
         """Return a claimed row to the pending queue.
@@ -3475,15 +3483,16 @@ class Database:
         An earlier transaction's hash and nonce are kept, so the next attempt can check whether it may still land.
         """
         outbox = await self._outbox()
-        try:
-            await outbox.execute("""
-                UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
-                WHERE id = ? AND onchain_status = 'sending'
-            """, (time.time(), evidence_id))
-            await outbox.commit()
-        except BaseException:
-            await outbox.rollback()
-            raise
+        async with self._outbox_calls:
+            try:
+                await outbox.execute("""
+                    UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
+                    WHERE id = ? AND onchain_status = 'sending'
+                """, (time.time(), evidence_id))
+                await outbox.commit()
+            except BaseException:
+                await outbox.rollback()
+                raise
 
     async def take_sender_lease(self, name: str, holder: str, seconds: float) -> Tuple[Optional[str], float]:
         """Take or renew the named lease for `holder` for `seconds`, unless another holder's lease is still live.
@@ -3524,15 +3533,16 @@ class Database:
     async def requeue_verdict(self, evidence_id: int):
         """Queue an unresolved record (submitted, unconfirmed or failed) for another attempt."""
         outbox = await self._outbox()
-        try:
-            await outbox.execute("""
-                UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
-                WHERE id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
-            """, (time.time(), evidence_id))
-            await outbox.commit()
-        except BaseException:
-            await outbox.rollback()
-            raise
+        async with self._outbox_calls:
+            try:
+                await outbox.execute("""
+                    UPDATE verdict_evidence SET onchain_status = 'pending', updated_at = ?
+                    WHERE id = ? AND onchain_status IN ('submitted', 'unconfirmed', 'failed')
+                """, (time.time(), evidence_id))
+                await outbox.commit()
+            except BaseException:
+                await outbox.rollback()
+                raise
 
     async def get_unresolved_verdicts(self, chain_id: int, updated_before: float, limit: int) -> List[Dict]:
         """Signed records awaiting receipts, including dropped records that must never be resent."""

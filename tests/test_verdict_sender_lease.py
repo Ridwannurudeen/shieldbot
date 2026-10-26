@@ -137,7 +137,8 @@ def test_publisher_lease_names_are_chain_specific():
 
 
 @pytest.mark.asyncio
-async def test_start_publishers_runs_one_drain_task_in_chain_order(monkeypatch):
+async def test_start_publishers_runs_one_drain_task_and_a_stalled_chain_never_holds_up_another(monkeypatch):
+    monkeypatch.setattr(vp, "DRAIN_POLL_SECONDS", 0.01)
     database = Database(":memory:")
     await database.initialize()
     monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
@@ -150,7 +151,12 @@ async def test_start_publishers_runs_one_drain_task_in_chain_order(monkeypatch):
     robinhood._reconcile = AsyncMock(return_value=0)
     botchain._reconcile = AsyncMock(return_value=0)
     robinhood.drain_once = AsyncMock(side_effect=lambda: order.append(4663) or "idle")
-    botchain.drain_once = AsyncMock(side_effect=lambda: order.append(677) or "idle")
+
+    async def stalled_botchain_drain():
+        order.append(677)
+        await asyncio.Event().wait()
+
+    botchain.drain_once = stalled_botchain_drain
     robinhood_lease_lost = asyncio.Event()
     robinhood._take_lease = AsyncMock(wraps=robinhood._take_lease)
     keeper_calls = 0
@@ -172,10 +178,11 @@ async def test_start_publishers_runs_one_drain_task_in_chain_order(monkeypatch):
     assert robinhood._drain_task is not None
     assert botchain._drain_task is None
     for _ in range(100):
-        if len(order) >= 2:
+        if 677 in order and order.count(4663) >= 3:
             break
         await asyncio.sleep(0.01)
-    assert len(order) >= 2
+    # BOT Chain's drain never returns, and Robinhood Chain drains on regardless.
+    assert 677 in order and order.count(4663) >= 3
     robinhood_lease_lost.set()
     for _ in range(100):
         if robinhood._take_lease.await_count >= 2:
@@ -184,7 +191,7 @@ async def test_start_publishers_runs_one_drain_task_in_chain_order(monkeypatch):
     assert robinhood._take_lease.await_count >= 2
     await robinhood.stop()
     await database.close()
-    assert order[:2] == [4663, 677]
+    assert order.count(677) == 1
 
 
 @pytest.mark.asyncio
@@ -512,6 +519,39 @@ async def test_lease_writes_never_commit_or_roll_back_the_drains_transaction(tmp
     finally:
         await db.close()
     assert db._lease_db is None
+
+
+@pytest.mark.asyncio
+async def test_two_chains_writing_at_once_never_share_an_outbox_transaction(tmp_path):
+    """Each chain drains on its own task, both on the one outbox connection: a write that rolls back must neither be
+    committed by the other chain's write nor undo it."""
+    db = Database(str(tmp_path / "shieldbot.db"))
+    await db.initialize()
+    try:
+        botchain_row = await insert(db, subject=TOKENS[0], chain_id=677, onchain_status="sending")
+        robinhood_row = await insert(db, subject=TOKENS[1], onchain_status="sending")
+        outbox = await db._outbox()
+        real_execute = outbox.execute
+
+        async def execute(sql, *args):
+            # Every statement yields first, so the two writes would interleave on the connection.
+            await asyncio.sleep(0.01)
+            if "SELECT chain_id, subject, canonical" in sql:
+                raise sqlite3.OperationalError("disk I/O error")
+            return await real_execute(sql, *args)
+
+        outbox.execute = execute
+        failed, released = await asyncio.gather(
+            db.update_verdict_onchain(botchain_row, "confirmed", tx_hash="0x" + "ab" * 32, registry=REGISTRY),
+            db.release_verdict_claim(robinhood_row),
+            return_exceptions=True,
+        )
+        assert isinstance(failed, sqlite3.OperationalError)
+        assert released is None
+        assert (await db.get_verdict_evidence(botchain_row))["onchain_status"] == "sending"
+        assert (await db.get_verdict_evidence(robinhood_row))["onchain_status"] == "pending"
+    finally:
+        await db.close()
 
 
 @pytest.mark.asyncio

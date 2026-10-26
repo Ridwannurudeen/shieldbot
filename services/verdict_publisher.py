@@ -359,15 +359,17 @@ class VerdictPublisher:
     def start_publishers(
         self, publishers: list["VerdictPublisher"], recorder_key: Optional[str] = None
     ) -> None:
-        """Start one sequential drain task for the configured chain publishers."""
+        """Start one drain task for the configured chain publishers, in which each chain drains on its own."""
         if self._drain_task is not None:
             return
         enabled = []
         for publisher in publishers:
             if not publisher.is_onchain_enabled():
                 continue
-            key = recorder_key if publisher is self and len(publishers) == 1 and recorder_key else os.getenv(
-                f"{publisher._env_prefix}_RECORDER_PRIVATE_KEY", ""
+            key = (
+                recorder_key
+                if publisher is self and len(publishers) == 1 and recorder_key is not None
+                else os.getenv(f"{publisher._env_prefix}_RECORDER_PRIVATE_KEY", "")
             )
             if not key:
                 logger.warning(
@@ -391,7 +393,7 @@ class VerdictPublisher:
             enabled.append(publisher)
         self._drain_publishers = enabled
         if enabled:
-            self._drain_task = asyncio.create_task(self._drain_publishers_loop())
+            self._drain_task = asyncio.create_task(self._drain_each(enabled))
 
     def stop(self) -> "asyncio.Future":
         """Stop the drain now; returns an awaitable that finishes when sends already under way have finished.
@@ -410,12 +412,12 @@ class VerdictPublisher:
         # The cancelled drain ends first, so nothing below runs beside its last database call.
         if drain_task is not None:
             await asyncio.gather(drain_task, return_exceptions=True)
-        await self._settle_sends()
-        publishers = self._drain_publishers
-        await asyncio.gather(*(publisher._settle_sends() for publisher in publishers))
-        if drain_task is None or any(publisher._tasks for publisher in publishers):
+        # Each publisher's sends are waited for once, together, so a stop waits at most STOP_TIMEOUT_SECONDS.
+        settling = list(dict.fromkeys([self, *self._drain_publishers]))
+        await asyncio.gather(*(publisher._settle_sends() for publisher in settling))
+        if drain_task is None or any(publisher._tasks for publisher in settling):
             return
-        for publisher in publishers:
+        for publisher in self._drain_publishers:
             try:
                 await publisher._db.release_sender_lease(publisher._lease_name, publisher._lease_holder)
             except Exception as e:
@@ -432,8 +434,20 @@ class VerdictPublisher:
                 len(unfinished),
             )
 
-    async def _drain_publishers_loop(self) -> None:
-        publishers = self._drain_publishers
+    async def _drain_each(self, publishers: list["VerdictPublisher"]) -> None:
+        """Drain each chain on its own task, so a slow chain never holds up another's sends. When one drain ends,
+        the others are stopped and its error, if any, is raised here."""
+        drains = [asyncio.create_task(self._drain_publishers_loop([publisher])) for publisher in publishers]
+        try:
+            ended, _ = await asyncio.wait(drains, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for drain in drains:
+                drain.cancel()
+            await asyncio.gather(*drains, return_exceptions=True)
+        for drain in ended:
+            drain.result()
+
+    async def _drain_publishers_loop(self, publishers: list["VerdictPublisher"]) -> None:
         retry_after = {publisher: 0.0 for publisher in publishers}
         backoffs = {publisher: 0.0 for publisher in publishers}
         lease_retry_after = {publisher: 0.0 for publisher in publishers}

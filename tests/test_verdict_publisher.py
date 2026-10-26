@@ -368,6 +368,16 @@ async def test_start_without_a_valid_key_does_not_send(monkeypatch, db, caplog, 
 
 
 @pytest.mark.asyncio
+async def test_an_empty_recorder_key_given_to_start_does_not_send(monkeypatch, db, caplog):
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setenv("ROBINHOOD_RECORDER_PRIVATE_KEY", KEY)
+    publisher = make_publisher(db)
+    publisher.start(recorder_key="")
+    assert publisher._drain_task is None and publisher._account is None
+    assert "not sending" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_start_without_a_registry_does_nothing(db):
     publisher = make_publisher(db, registry="")
     publisher.start(recorder_key=KEY)
@@ -1269,7 +1279,12 @@ async def test_the_production_coordinator_backs_off_exponentially_and_resets_aft
     async def drain_once():
         return next(outcomes)
 
+    real_wait = asyncio.wait
+
     async def advance_wait(tasks, timeout=None, return_when=None):
+        if timeout is None:
+            # The drain task waiting for its chain's drain to end, not one of the drain's own waits.
+            return await real_wait(tasks, return_when=return_when)
         waits.append(timeout)
         clock[0] += timeout or 0.0
         await asyncio.sleep(0)
@@ -2446,7 +2461,7 @@ async def test_stop_waits_at_most_its_bound(db, monkeypatch, caplog):
         await publisher.publish(4663, TOKEN, COMPLETE)
         await until(lambda: asyncio.sleep(0, bool(chain.sent)))
         await asyncio.wait_for(publisher.stop(), 5)
-        assert "1 send(s) still under way" in caplog.text
+        assert caplog.text.count("1 send(s) still under way") == 1
         gate.set()
         await sends_settled(publisher)
 
