@@ -31,10 +31,14 @@ function formatTime(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
+// Escapes quotes too, so the result is safe in an attribute value.
 function escapeHtml(str) {
-  const d = document.createElement("div");
-  d.textContent = str;
-  return d.innerHTML;
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function shortAddr(addr) {
@@ -324,9 +328,9 @@ function renderCompactHistory(history, listEl) {
     const incomplete = isIncompleteScan(item);
     const b = incomplete ? { cls: "badge-unknown", label: t("classUnknown") } :
       MAP[item.classification] || { cls: "badge-caution", label: item.classification };
-    const scoreDisplay = incomplete ? "Unknown" : `${100 - item.risk_score}/100`;
+    const scoreDisplay = incomplete ? t("statUnknown") : `${100 - Number(item.risk_score)}/100`;
     return `<div class="history-item">
-      <span class="history-badge ${b.cls}">${b.label}</span>
+      <span class="history-badge ${b.cls}">${escapeHtml(b.label)}</span>
       <div class="history-info">
         <div class="history-recipient">${escapeHtml(item.recipient || item.to || "Unknown")}</div>
         <div class="history-time">${formatTime(item.timestamp)}</div>
@@ -374,7 +378,7 @@ function renderHealthData(data, ctx) {
   const mediumRisk = data.medium_risk || 0;
   const totalUsd   = data.total_value_at_risk_usd;
   const incomplete = data.status === "unknown";
-  const usdText    = incomplete || totalUsd == null ? "Unknown" : fmtUsd(totalUsd) || "$0";
+  const usdText    = incomplete || totalUsd == null ? t("statUnknown") : fmtUsd(Number(totalUsd)) || "$0";
   const reasonText = Object.values(data.coverage_reasons || {}).join("; ") || "Approval data incomplete";
   const score      = Math.max(0, 100 - highRisk * 20 - mediumRisk * 5);
   const scoreColor = score < 50 ? "var(--block-text)" : score < 80 ? "var(--ink)" : "var(--safe-text)";
@@ -386,20 +390,20 @@ function renderHealthData(data, ctx) {
 
   if (ctx.compact) {
     ctx.statsEl.innerHTML = `
-      <div class="health-stat"><div class="health-stat-num" style="color:var(--block-text)">${highRisk}</div><div class="health-stat-label">${t("healthHighRisk")}</div></div>
-      <div class="health-stat"><div class="health-stat-num" style="color:var(--ink)">${mediumRisk}</div><div class="health-stat-label">${t("healthMedium")}</div></div>
-      <div class="health-stat"><div class="health-stat-num" style="color:${usdColor}">${usdText}</div><div class="health-stat-label">${t("healthAtRisk")}</div></div>`;
+      <div class="health-stat"><div class="health-stat-num" style="color:var(--block-text)">${Number(highRisk)}</div><div class="health-stat-label">${t("healthHighRisk")}</div></div>
+      <div class="health-stat"><div class="health-stat-num" style="color:var(--ink)">${Number(mediumRisk)}</div><div class="health-stat-label">${t("healthMedium")}</div></div>
+      <div class="health-stat"><div class="health-stat-num" style="color:${usdColor}">${escapeHtml(usdText)}</div><div class="health-stat-label">${t("healthAtRisk")}</div></div>`;
   } else {
     ctx.statsEl.innerHTML = `
-      <div class="wh-stat"><div class="wh-statnum" style="color:var(--block-text)">${highRisk}</div><div class="wh-statlbl">${t("healthHighRisk")}</div></div>
-      <div class="wh-stat"><div class="wh-statnum" style="color:var(--ink)">${mediumRisk}</div><div class="wh-statlbl">${t("healthMedium")}</div></div>
-      <div class="wh-stat"><div class="wh-statnum" style="color:${usdColor}">${usdText}</div><div class="wh-statlbl">${t("healthAtRisk")}</div></div>`;
+      <div class="wh-stat"><div class="wh-statnum" style="color:var(--block-text)">${Number(highRisk)}</div><div class="wh-statlbl">${t("healthHighRisk")}</div></div>
+      <div class="wh-stat"><div class="wh-statnum" style="color:var(--ink)">${Number(mediumRisk)}</div><div class="wh-statlbl">${t("healthMedium")}</div></div>
+      <div class="wh-stat"><div class="wh-statnum" style="color:${usdColor}">${escapeHtml(usdText)}</div><div class="wh-statlbl">${t("healthAtRisk")}</div></div>`;
   }
 
   const approvals  = data.approvals || [];
   const riskClass  = { HIGH: "risk-high", MEDIUM: "risk-medium", LOW: "risk-low" };
   const reasonHtml = incomplete
-    ? `<div class="${ctx.compact ? "health-empty" : "wh-empty"}">Unknown: ${escapeHtml(reasonText)}</div>`
+    ? `<div class="${ctx.compact ? "health-empty" : "wh-empty"}">${t("statUnknown")}: ${escapeHtml(reasonText)}</div>`
     : "";
 
   if (!approvals.length) {
@@ -410,7 +414,7 @@ function renderHealthData(data, ctx) {
     ctx.approvalsEl.innerHTML = reasonHtml + approvals.slice(0, 12).map((a) => {
       const spd = a.spender_label && a.spender_label !== "Unknown Contract" ? escapeHtml(a.spender_label) : escapeHtml(shortAddr(a.spender || ""));
       const right = a.value_at_risk_usd == null
-        ? `<div class="unknown-value health-usd-risk">Unknown</div>`
+        ? `<div class="unknown-value health-usd-risk">${t("statUnknown")}</div>`
         : a.value_at_risk_usd
           ? `<div class="health-usd-risk">${escapeHtml(fmtUsd(a.value_at_risk_usd))}</div>`
           : `<div class="health-allowance">${escapeHtml(a.allowance || "")}</div>`;
@@ -425,7 +429,7 @@ function renderHealthData(data, ctx) {
     ctx.approvalsEl.innerHTML = reasonHtml + approvals.slice(0, 20).map((a) => {
       const spd = a.spender_label && a.spender_label !== "Unknown Contract" ? escapeHtml(a.spender_label) : escapeHtml(shortAddr(a.spender || ""));
       const usdEl = a.value_at_risk_usd == null
-        ? `<div class="unknown-value wh-appr-usd">Unknown</div>`
+        ? `<div class="unknown-value wh-appr-usd">${t("statUnknown")}</div>`
         : a.value_at_risk_usd ? `<div class="wh-appr-usd">${escapeHtml(fmtUsd(a.value_at_risk_usd))}</div>` : "";
       return `<div class="wh-appr">
         <span class="wh-appr-badge ${riskClass[a.risk_level] || "risk-unknown"}">${escapeHtml(a.risk_level)}</span>
@@ -577,16 +581,16 @@ function renderDashFeed(history) {
     const incomplete = isIncompleteScan(item);
     const b = incomplete ? FEED_UNKNOWN : FEED_MAP[item.classification] || { cls: "badge-caution", color: "var(--ink)", border: "var(--edge)" };
     const lbl = incomplete ? t("classUnknown") : FEED_LABELS[item.classification] || item.classification;
-    const safety = incomplete ? "Unknown" : 100 - item.risk_score;
+    const safety = incomplete ? t("statUnknown") : 100 - Number(item.risk_score);
     const addr = escapeHtml(shortAddr(item.recipient || item.to || "Unknown"));
     return `<div class="feed-item" style="--fc:${b.border}">
-      <span class="feed-badge ${b.cls}">${lbl}</span>
+      <span class="feed-badge ${b.cls}">${escapeHtml(lbl)}</span>
       <div class="feed-info">
         <div class="feed-addr">${addr}</div>
         <div class="feed-time">${formatTime(item.timestamp)}</div>
         ${incomplete ? `<div class="feed-why">${escapeHtml(unknownReason(item))}</div>` : ""}
       </div>
-      <div class="feed-score" style="color:${b.color}">${safety}</div>
+      <div class="feed-score" style="color:${b.color}">${escapeHtml(safety)}</div>
     </div>`;
   }).join("");
 }

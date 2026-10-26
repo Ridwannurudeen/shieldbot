@@ -241,7 +241,6 @@
     .rm-info { flex: 1; min-width: 0; }
     .rm-name { color: var(--ink); font-size: 13px; font-weight: 500; }
     .rm-sub { margin-top: 2px; color: var(--secondary); font-size: 12px; }
-    .rm-tag { flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--safe); color: var(--safe-text); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; }
     .s-field { margin-bottom: 12px; }
     .s-footer { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline-strong); }
     .s-footer-link { color: var(--secondary); font-size: 12px; text-decoration: none; }
@@ -268,7 +267,7 @@
   </div>
   <div class="status-row">
     <div class="status-dot yellow" id="statusDot"></div>
-    <span class="status-text" id="statusText">Checking connection...</span>
+    <span class="status-text" id="statusText" data-i18n="statusChecking">Checking connection...</span>
   </div>
   <button class="btn" id="askBtn">
     <span data-i18n="askShieldBotAI">Ask ShieldBot AI</span><span class="ask-arrow" aria-hidden="true">&rarr;</span>
@@ -313,7 +312,7 @@
   </div>
 
   <div class="tab-content" id="tab-history" role="tabpanel" aria-labelledby="tab-history-button">
-    <div class="history-list" id="historyList"><div class="history-empty">No scans yet</div></div>
+    <div class="history-list" id="historyList"><div class="history-empty" data-i18n="historyEmpty">No scans yet. Transactions will appear here after analysis.</div></div>
   </div>
 
   <div class="tab-content" id="tab-health" role="tabpanel" aria-labelledby="tab-health-button">
@@ -325,9 +324,9 @@
     <button class="btn btn-save" id="healthScanBtn" data-i18n="btnScanApprovals">Scan Approvals</button>
     <div id="healthChainHint"></div>
     <div id="healthError"></div>
-    <div id="healthLoading">Scanning approval history...<br><span>This may take 20–40 seconds</span></div>
+    <div id="healthLoading"><span data-i18n="healthScanning">Scanning approval history...</span><br><span data-i18n="healthScanDuration">This may take 20–40 seconds</span></div>
     <div id="healthResult">
-      <div class="health-score-row"><div class="health-score-label">Wallet Health Score</div><div id="healthScoreNum" class="health-score-num">--</div></div>
+      <div class="health-score-row"><div class="health-score-label" data-i18n="healthScoreLabel">Wallet Health Score</div><div id="healthScoreNum" class="health-score-num">--</div></div>
       <div id="healthStats" class="health-stats"></div>
       <div id="healthApprovals" class="health-approvals"></div>
     </div>
@@ -354,7 +353,7 @@
       <span class="dh-chains"><span>9</span> Chains Supported</span>
       <div class="dh-conn">
         <div class="status-dot yellow" id="dash-statusDot"></div>
-        <span id="dash-statusText">Checking...</span>
+        <span id="dash-statusText" data-i18n="statusChecking">Checking connection...</span>
       </div>
       <span class="dh-version"></span>
       <button id="dash-askBtn"><span data-i18n="askShieldBotAI">Ask ShieldBot AI</span><span aria-hidden="true">&rarr;</span></button>
@@ -386,16 +385,16 @@
           <div class="dk-title" data-i18n="dashWalletHealth">Wallet Health</div>
           <input type="text" class="wh-input" id="dash-healthAddr" placeholder="0x... paste wallet address" aria-label="Wallet address">
           <select class="wh-input" id="dash-healthChain" aria-label="Chain"></select>
-          <button class="wh-btn" id="dash-healthScanBtn">Scan Approvals</button>
+          <button class="wh-btn" id="dash-healthScanBtn" data-i18n="btnScanApprovals">Scan Approvals</button>
           <div class="wh-hint" id="dash-healthChainHint"></div>
           <div class="wh-error" id="dash-healthError"></div>
-          <div class="wh-loading" id="dash-healthLoading">Scanning... (20–40s)</div>
+          <div class="wh-loading" id="dash-healthLoading" data-i18n="dashScanning">Scanning... (20–40s)</div>
           <div class="wh-result" id="dash-healthResult">
             <div class="wh-scorerow">
               <div class="wh-scorenum" id="dash-healthScoreNum">--</div>
               <div>
-                <div class="wh-scorelbl">Health</div>
-                <div class="wh-scorelbl">Score</div>
+                <div class="wh-scorelbl" data-i18n="dashHealthScore">Health</div>
+                <div class="wh-scorelbl" data-i18n="dashHealthScoreLbl2">Score</div>
               </div>
             </div>
             <div id="dash-healthStats" class="wh-stats"></div>
@@ -484,7 +483,6 @@
                 <div class="rm-name" data-i18n="dashTxFirewall">Transaction Firewall</div>
                 <div class="rm-sub" data-i18n="dashTxFirewallSub">Pre-sign risk analysis on each checked request</div>
               </div>
-              <span class="rm-tag rmt-live">LIVE</span>
             </div>
             <div class="rm-item">
               <div class="rm-dot rmd-live"></div>
@@ -492,7 +490,6 @@
                 <div class="rm-name" data-i18n="dashPhishingGuard">Phishing Guard</div>
                 <div class="rm-sub" data-i18n="dashPhishingGuardSub">URL reputation · GoPlus intelligence</div>
               </div>
-              <span class="rm-tag rmt-live">LIVE</span>
             </div>
             <div class="rm-item">
               <div class="rm-dot rmd-live"></div>
@@ -500,7 +497,6 @@
                 <div class="rm-name" data-i18n="dashDeployerBlock">Deployer Cluster Block</div>
                 <div class="rm-sub" data-i18n="dashDeployerBlockSub">Raises the risk score of contracts from deployers with high-risk contracts on record</div>
               </div>
-              <span class="rm-tag rmt-live">LIVE</span>
             </div>
             <div class="rm-item">
               <div class="rm-dot rmd-live"></div>
@@ -508,7 +504,6 @@
                 <div class="rm-name" data-i18n="dashThreatFeed">Deployer Alert Feed</div>
                 <div class="rm-sub" data-i18n="dashThreatFeedSub">Live deployer alerts</div>
               </div>
-              <span class="rm-tag rmt-live">LIVE</span>
             </div>
           </div>
         </div>

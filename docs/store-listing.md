@@ -44,7 +44,7 @@ Settings
 • When your wallet's network cannot be read or is not supported, the only option is Block.
 • Strict mode removes the option to continue when a check fails, the verdict is Unknown or Block Recommended, or the extension cannot read the request or its typed data.
 • Switching the extension off sends every request to your wallet as the page made it, with no warning, no analysis and no chain read. A frame or popup the page can script cannot be told the setting, so requests from one are still refused.
-• English, Tiếng Việt and 中文.
+• The warning overlay, the popup and the welcome page are in English, Tiếng Việt and 中文; the side panel is mostly in English.
 
 Privacy
 • Sent for analysis: the transaction's recipient, sender, value, call data and chain ID; for a signature request, the signing method and any EIP-712 typed data, never the text or hash you sign (and for those, not your address either); for an EIP-7702 transaction, each delegate's address; and the origin (scheme, host and port) of the sites you visit, for the phishing check.
