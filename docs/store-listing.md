@@ -85,7 +85,7 @@ smoke test in section 3 has passed with them.
 
 4. In a clean Chrome profile (Chrome 111 or later, which the manifest now requires) open
    `chrome://extensions`, turn on Developer mode, use Load unpacked
-   on the `extension` folder, and check: name "ShieldAI Transaction Firewall", version 3.4.0,
+   on the `extension` folder, and check: name "ShieldBot Transaction Firewall", version 3.4.0,
    no Errors button. Then run the smoke test below. Its manual release gate remains outstanding on
    both MetaMask and Rabby.
 5. Owner gate before the upload: in a clean Chrome profile with Rabby as the only wallet and 3.4.0
