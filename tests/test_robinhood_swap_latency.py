@@ -343,7 +343,7 @@ async def test_firewall_swap_answers_inside_the_deadline_with_structural_present
     # alone unknown (GoPlus gives its verification), named.
     assert response["coverage"][f"{weth}:structural"] == 1
     assert 0 < response["coverage"][f"{other}:structural"] < 1
-    assert response["coverage_reasons"][f"{other}:structural"] == f"contract_age_days: {STILL_RUNNING}"
+    assert response["coverage_reasons"][f"{other}:structural"] == f"contract age: {STILL_RUNNING}"
     assert not any("unavailable" in reason for reason in response["coverage_reasons"].values())
     assert response["coverage"][f"{other}:honeypot"] == 1
     assert response["status"] == "unknown"

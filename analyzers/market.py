@@ -1,10 +1,19 @@
 """Market analyzer — wraps DexService."""
 
+import asyncio
 import logging
+import time
+from adapters.botchain import canonical_token_reason
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
 from services.robinhood_assets import official_asset_reason
 
 logger = logging.getLogger(__name__)
+
+# An interactive scan uses the market data when it answers this long before the analyzers' deadline, so
+# the analyzer returns an Unknown with a named reason, not an error, before the registry cancels it. The
+# lookup runs on and fills the provider's caches for the next scan.
+MARKET_RESULT_RESERVE_SECONDS = 0.5
+STILL_RUNNING = 'Market lookup still running at the request deadline; it continues for the next scan'
 
 
 class MarketAnalyzer(Analyzer):
@@ -12,7 +21,8 @@ class MarketAnalyzer(Analyzer):
 
     An official Robinhood Chain token (services.robinhood_assets) is skipped: the canonical WETH and
     USDG are the quote side of every pair, so DexScreener prices no pair in them, and a tokenised
-    stock's pairs say nothing about the stock. The gap is named in a note, not scored.
+    stock's pairs say nothing about the stock. The gap is named in a note, not scored. BOT Chain's
+    canonical WBOT (adapters.botchain) is skipped the same way: every BDEX pool is priced in it.
     """
 
     def __init__(self, dex_service, robinhood_assets=None):
@@ -37,14 +47,22 @@ class MarketAnalyzer(Analyzer):
                 score=0, flags=[], data={'skipped': True, 'reason': 'non-token contract'},
             )
         official = await self._assets.official(ctx.address, ctx.chain_id) if self._assets else None
-        if official is not None:
-            reason = official_asset_reason(official, 'market-pair checks do not apply')
+        reason = (
+            official_asset_reason(official, 'market-pair checks do not apply') if official is not None
+            else canonical_token_reason(ctx.address, ctx.chain_id, 'market-pair checks do not apply')
+        )
+        if reason is not None:
             return AnalyzerResult(
                 name=self.name, weight=self.weight,
                 score=0, flags=[], data={'skipped': True, 'reason': reason, 'notes': [reason]},
             )
 
-        data = await self._service.fetch_token_market_data(ctx.address, chain_id=ctx.chain_id)
+        lookup = asyncio.ensure_future(self._service.fetch_token_market_data(ctx.address, chain_id=ctx.chain_id))
+        lookup.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
+        deadline = ctx.extra.get('deadline')
+        timeout = None if deadline is None else max(0.0, deadline - MARKET_RESULT_RESERVE_SECONDS - time.monotonic())
+        await asyncio.wait((lookup,), timeout=timeout)
+        data = {'status': 'unknown', 'reason': STILL_RUNNING} if not lookup.done() else lookup.result()
         score, flags = self._compute(data)
         # An ok market may lack only the 24h change. The volatility check only adds risk, so a check
         # that did not run is a note, not a danger signal.

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from eth_abi import encode
 
-from utils.calldata_decoder import CalldataDecoder
+from utils.calldata_decoder import CalldataDecoder, universal_router_summary
 
 DECODER = CalldataDecoder()
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -505,3 +505,49 @@ def test_calldata_in_capital_letters_reads_the_same():
     sweep = encode(["address", "address", "uint256"], [TOKEN_B, SENDER, 0])
     calldata = execute([V3_SWAP_EXACT_IN, SWEEP], [v3_input(TOKEN_A, TOKEN_B), sweep])
     assert decode("0x" + calldata[2:].upper()) == ([TOKEN_A, TOKEN_B], None, [])
+
+
+# --- the summary the overlay shows ----------------------------------------------------------------
+
+PERMIT2_PERMIT_BATCH = 0x03
+
+
+def wrap_input(amount=10**18):
+    return encode(["address", "uint256"], [ADDRESS_THIS, amount])
+
+
+def test_the_summary_names_the_commands_the_tokens_and_no_permit():
+    calldata = execute([WRAP_ETH, V3_SWAP_EXACT_IN], [wrap_input(), v3_input(TOKEN_A, TOKEN_B)])
+    assert universal_router_summary(calldata) == {
+        "commands": [WRAP_ETH, V3_SWAP_EXACT_IN],
+        "tokens": [TOKEN_A, TOKEN_B],
+        "permits": [],
+    }
+
+
+def test_the_summary_reads_a_permit2_permit():
+    calldata = execute([PERMIT2_PERMIT, V2_SWAP_EXACT_IN], [permit_input(ROUTER), v2_input(TOKEN_A, TOKEN_B)])
+    assert universal_router_summary(calldata) == {
+        "commands": [PERMIT2_PERMIT, V2_SWAP_EXACT_IN],
+        "tokens": [TOKEN_A, TOKEN_B],
+        "permits": [{"token": TOKEN_A, "amount": 2**160 - 1, "expiration": 2**40, "spender": ROUTER}],
+    }
+
+
+def test_the_summary_marks_a_batch_permit_it_does_not_decode():
+    calldata = execute([PERMIT2_PERMIT_BATCH, V2_SWAP_EXACT_IN], [b"\x00" * 32, v2_input(TOKEN_A, TOKEN_B)])
+    assert universal_router_summary(calldata)["permits"] == [{"batch": True}]
+
+
+def test_the_summary_leaves_the_path_unknown_when_a_swap_command_cannot_be_read():
+    calldata = execute([V4_SWAP], [v4_input([SWAP_EXACT_IN_SINGLE], [single(TOKEN_A, TOKEN_B, True)])])
+    assert universal_router_summary(calldata) == {"commands": [V4_SWAP], "tokens": None, "permits": []}
+
+
+@pytest.mark.parametrize(
+    "calldata",
+    ["0x3593564c" + "00" * 96, "0xdeadbeef" + "00" * 96, execute([], []), "0x3593564c", "0x"],
+    ids=["zero-words", "other-selector", "no-commands", "selector-only", "empty"],
+)
+def test_an_unreadable_call_has_no_summary(calldata):
+    assert universal_router_summary(calldata) is None

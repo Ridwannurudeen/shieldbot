@@ -456,3 +456,72 @@ def test_an_unknown_chain_never_prints_none_as_the_gas_token():
     assert api._format_decoded_action(DECODER.decode("0x"), 999999) == "Native Coin Transfer"
     assert api._build_asset_delta_fallback({}, 0.5, 999999) == ["-0.5 native coin"]
 
+
+
+# --- a Universal Router execute() ------------------------------------------------------------------
+
+
+def router_swap_calldata(*commands_and_inputs):
+    from tests.test_universal_router_path import execute
+
+    return execute([command for command, _ in commands_and_inputs], [data for _, data in commands_and_inputs])
+
+
+def test_a_router_call_without_a_permit_grants_nothing_and_names_its_path():
+    import api
+    from tests.test_universal_router_path import (
+        ADDRESS_THIS, TOKEN_A, TOKEN_B, V3_SWAP_EXACT_IN, WRAP_ETH, v3_input,
+    )
+
+    decoded = DECODER.decode(router_swap_calldata(
+        (WRAP_ETH, encode(["address", "uint256"], [ADDRESS_THIS, 10**18])),
+        (V3_SWAP_EXACT_IN, v3_input(TOKEN_A, TOKEN_B)),
+    ))
+
+    assert api._granting_access(decoded) == "None"
+    details = api._build_calldata_details(decoded)
+    assert details["category"] == "swap"
+    assert details["fields"] == [
+        {"label": "Function", "value": "execute"},
+        {"label": "Commands", "value": "WRAP_ETH → V3_SWAP_EXACT_IN"},
+        {"label": "Token Path", "value": "0xa1a1...a1a1 → 0xb2b2...b2b2"},
+    ]
+
+
+def test_a_router_call_with_a_permit2_permit_names_the_grant(labels_api):
+    api = labels_api
+    from tests.test_universal_router_path import (
+        ROUTER, TOKEN_A, TOKEN_B, PERMIT2_PERMIT, V2_SWAP_EXACT_IN, permit_input, v2_input,
+    )
+
+    decoded = DECODER.decode(router_swap_calldata(
+        (PERMIT2_PERMIT, permit_input(ROUTER)), (V2_SWAP_EXACT_IN, v2_input(TOKEN_A, TOKEN_B)),
+    ))
+    token, spender = Web3.to_checksum_address(TOKEN_A), Web3.to_checksum_address(ROUTER)
+
+    granted = f"UNLIMITED Permit2 permit for {token} to {spender}"
+    assert api._granting_access(decoded) == granted
+    assert api._build_calldata_details(decoded)["fields"] == [
+        {"label": "Function", "value": "execute"},
+        {"label": "Commands", "value": "PERMIT2_PERMIT → V2_SWAP_EXACT_IN"},
+        {"label": "Token Path", "value": "0xa1a1...a1a1 → 0xb2b2...b2b2"},
+        {"label": "Grants", "value": granted, "danger": True},
+    ]
+
+
+def test_a_router_call_whose_commands_cannot_be_read_keeps_the_permit_warning():
+    import api
+    from tests.test_universal_router_path import SWAP_EXACT_IN_SINGLE, TOKEN_A, TOKEN_B, V4_SWAP, single, v4_input
+
+    unreadable = DECODER.decode("0x3593564c" + "00" * 96)
+    assert api._granting_access(unreadable) == "Unknown (may include a Permit2 permit)"
+    assert api._build_calldata_details(unreadable)["fields"] == [{"label": "Function", "value": "execute"}]
+    # A V4 swap: the commands are read, its tokens are not, and no permit is among them.
+    v4 = DECODER.decode(router_swap_calldata(
+        (V4_SWAP, v4_input([SWAP_EXACT_IN_SINGLE], [single(TOKEN_A, TOKEN_B, True)])),
+    ))
+    assert api._granting_access(v4) == "None"
+    assert api._build_calldata_details(v4)["fields"] == [
+        {"label": "Function", "value": "execute"},
+        {"label": "Commands", "value": "0x10"},
+    ]

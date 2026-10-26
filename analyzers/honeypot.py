@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from adapters.botchain import canonical_token_reason
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
 from services.honeypot_service import SELL_TAX_EXTREME, SELL_TAX_HIGH
 from services.robinhood_assets import official_asset_reason
@@ -21,6 +22,7 @@ class HoneypotAnalyzer(Analyzer):
 
     Canonical WETH and USDG are the simulator's funding assets, not tokens to sell. Official stocks
     are simulated when a supported route resolves; unresolved routes retain the explicit skip note.
+    BOT Chain's canonical WBOT (adapters.botchain) is the BDEX simulator's funding asset the same way.
     """
 
     def __init__(self, honeypot_service, robinhood_assets=None):
@@ -45,8 +47,12 @@ class HoneypotAnalyzer(Analyzer):
                 score=0, flags=[], data={'skipped': True, 'reason': 'non-token contract'},
             )
         official = await self._assets.official(ctx.address, ctx.chain_id) if self._assets else None
-        if official is not None and official.get('canonical') is True:
-            reason = official_asset_reason(official, 'sell simulation does not apply')
+        reason = (
+            official_asset_reason(official, 'sell simulation does not apply')
+            if official is not None and official.get('canonical') is True
+            else canonical_token_reason(ctx.address, ctx.chain_id, 'sell simulation does not apply')
+        )
+        if reason is not None:
             return AnalyzerResult(
                 name=self.name, weight=self.weight,
                 score=0, flags=[], data={'skipped': True, 'reason': reason, 'notes': [reason]},

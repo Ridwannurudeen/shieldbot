@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from redis.exceptions import RedisError
 from typing import Optional, Dict, Any, List, Literal, Tuple
 
-from utils.calldata_decoder import UNLIMITED_THRESHOLD, resolve_selector
+from utils.calldata_decoder import UNLIMITED_THRESHOLD, UR_COMMAND_NAMES, resolve_selector, universal_router_summary
 from utils.chain_info import get_chain_name, get_native_symbol
 from utils.web3_client import UnsupportedChainError
 from utils.scam_db import BLACKLIST_RELOAD_SECONDS
@@ -3215,9 +3215,24 @@ def _build_calldata_details(decoded: Dict) -> Dict:
                 path = v
                 break
         fields = [{"label": "Function", "value": func}]
+        grants = None
+        if path is None and decoded.get("selector") == _UNIVERSAL_ROUTER_EXECUTE:
+            # A Universal Router call: its commands, the tokens its swaps name and any Permit2 permit.
+            summary = universal_router_summary(decoded.get("raw") or "")
+            if summary is not None:
+                fields.append({
+                    "label": "Commands",
+                    "value": " → ".join(UR_COMMAND_NAMES.get(cmd, f"0x{cmd:02x}") for cmd in summary["commands"]),
+                })
+                path = summary["tokens"]
+                if summary["permits"]:
+                    granted = _granting_access(decoded)
+                    grants = {"label": "Grants", "value": granted, "danger": granted.startswith("UNLIMITED")}
         if path:
             path_str = " → ".join(_short_addr(a) for a in path)
             fields.append({"label": "Token Path", "value": path_str})
+        if grants is not None:
+            fields.append(grants)
     elif category == "claim":
         fields = [
             {"label": "Function", "value": func},
@@ -3252,7 +3267,7 @@ _APPROVAL_FLAG_PARAM = {
 }
 
 
-# Universal Router execute(): its commands can include a Permit2 permit.
+# Universal Router execute(): its commands can include a Permit2 permit (universal_router_summary).
 _UNIVERSAL_ROUTER_EXECUTE = "3593564c"
 
 
@@ -3277,7 +3292,21 @@ def _sending(decoded: Dict, value_bnb: float, chain_id: int, tokens: str) -> str
 def _granting_access(decoded: Dict) -> str:
     """Say what spending rights a call grants. "None" only when it grants nothing."""
     if decoded.get("selector") == _UNIVERSAL_ROUTER_EXECUTE:
-        return "Unknown (may include a Permit2 permit)"
+        summary = universal_router_summary(decoded.get("raw") or "")
+        if summary is None:
+            return "Unknown (may include a Permit2 permit)"
+        grants = []
+        for permit in summary["permits"]:
+            if permit.get("batch"):
+                grants.append("Permit2 batch permit (not decoded)")
+                continue
+            token = _checksum_if_possible(permit["token"])
+            spender = _checksum_if_possible(permit["spender"])
+            if permit["amount"] >= UNLIMITED_THRESHOLD:
+                grants.append(f"UNLIMITED Permit2 permit for {token} to {spender}")
+            else:
+                grants.append(f"Permit2 permit for {permit['amount']} raw units of {token} to {spender}")
+        return "; ".join(grants) or "None"
     if decoded.get("category", "unknown") == "unknown":
         return "Unknown"
     if not decoded.get("is_approval"):
