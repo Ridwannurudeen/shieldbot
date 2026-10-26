@@ -144,31 +144,46 @@ document.addEventListener("DOMContentLoaded", async () => {
     const card = document.createElement("div");
     card.className = "risk-card";
 
-    const flags = (Array.isArray(scanData.flags) ? scanData.flags : []).map(f =>
-      `<span class="risk-flag">${escapeHtml(f)}</span>`
-    ).join("");
+    // A note that a check could not run is information the message carries, not a risk flag.
+    const flags = (Array.isArray(scanData.flags) ? scanData.flags : [])
+      .filter(f => !/^(Sellability|Honeypot coverage) unknown:/.test(String(f)))
+      .map(f => `<span class="risk-flag">${escapeHtml(f)}</span>`).join(" ");
 
     const archetype = scanData.archetype
       ? `<div class="risk-card-subtitle">${escapeHtml(scanData.archetype)}</div>` : "";
 
     let metaParts = [];
     const hp = (typeof scanData.honeypot === "object" && scanData.honeypot) || {};
-    const unresolved = hp.simulation_failed || hp.rpc_failed;
+    const unresolved = hp.simulation_failed || hp.rpc_failed || hp.undecided;
     const simulationProvedSell = hp.can_sell === true && hp.field_providers?.can_sell === "eth_simulateV1";
     const sellCovered = !unresolved && (simulationProvedSell || hp.coverage?.can_sell === true ||
       Number(hp.coverage?.can_sell) >= 1);
-    const provider = hp.field_providers?.is_honeypot;
-    const providerName = typeof provider === "string" && provider
-      ? provider.toLowerCase() === "goplus" ? "GoPlus" : provider[0].toUpperCase() + provider.slice(1)
-      : "a provider";
+    // A provider's name as the card shows it; ShieldBot's own simulation by what it is.
+    function providerLabel(provider) {
+      if (typeof provider !== "string" || !provider) return "a provider";
+      if (provider === "eth_simulateV1") return "ShieldBot simulation";
+      return provider.toLowerCase() === "goplus" ? "GoPlus" : provider[0].toUpperCase() + provider.slice(1);
+    }
     let honeypotStatus = "Unknown";
     if (hp.is_honeypot === true) honeypotStatus = "Yes";
     else if (hp.is_honeypot === false && sellCovered) honeypotStatus = "No";
     else if (hp.is_honeypot === false) {
-      honeypotStatus = `Not flagged by ${escapeHtml(providerName)} (sell not simulated)`;
+      honeypotStatus = `Not flagged by ${escapeHtml(providerLabel(hp.field_providers?.is_honeypot))} (sell not simulated)`;
     }
     metaParts.push(`Honeypot: <span>${honeypotStatus}</span>`);
-    metaParts.push(`Sell tax: <span>${hp.sell_tax == null || hp.sell_tax === "" ? "Unknown" : `${Number(hp.sell_tax)}%`}</span>`);
+    // A sell tax is measured only beside a sell ShieldBot confirmed. A positive tax a provider reported is
+    // evidence against the token and shows with its source; a clean one (0 or none) for a sell ShieldBot did
+    // not confirm is not shown as a measured figure.
+    const tax = Number(hp.sell_tax);
+    const taxKnown = hp.sell_tax != null && hp.sell_tax !== "" && Number.isFinite(tax);
+    let sellTax = "Unknown";
+    if (taxKnown && sellCovered) sellTax = `${tax}%`;
+    else if (taxKnown && tax > 0) {
+      const source = hp.field_providers?.sell_tax;
+      const simulated = source === "eth_simulateV1" || source === "honeypot.is";
+      sellTax = `${tax}% (${escapeHtml(providerLabel(source))}, ${simulated ? "sell not confirmed" : "not simulated"})`;
+    }
+    metaParts.push(`Sell tax: <span>${sellTax}</span>`);
     const mkt = (typeof scanData.market === "object" && scanData.market) || {};
     if (mkt.liquidity_usd !== undefined) {
       metaParts.push(`Liq: <span>$${Number(mkt.liquidity_usd).toLocaleString()}</span>`);
@@ -320,11 +335,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   // -------------------------------------------------------------------
   function appendMessage(role, text, opts = {}) {
     const { isError = false, originalMessage = null, scanData = null } = opts;
+    // The API's reply for a scan without a verdict (core.chat_coverage.UNKNOWN_LINE) is shown as sent when
+    // the API also sent the readable gaps: they are in plain words and nothing in the reply judges the
+    // token. Any other text beside such a scan is replaced, and an older API, which sends no gaps, gets a
+    // generic line, never a raw reason.
+    const unknownReplyLead = "ShieldBot could not finish checking this token, so it has no verdict.";
     if (scanData && (scanData.status !== "ok" || scanData.partial === true ||
       scanData.risk_level === "UNKNOWN" || !Number.isFinite(scanData.risk_score) ||
       Object.values(scanData.coverage || {}).some(value => Number(value) < 1))) {
-      text = "Unknown (incomplete provider coverage). " +
-        Object.values(scanData.coverage_reasons || {}).join("; ");
+      const gaps = Array.isArray(scanData.coverage_gaps) ? scanData.coverage_gaps : null;
+      if (!(gaps && String(text).startsWith(unknownReplyLead))) {
+        text = "Unknown (incomplete provider coverage). " +
+          (gaps && gaps.length ? gaps.join("; ") : t("unknownNoReason"));
+      }
     }
 
     if (role === "assistant") {

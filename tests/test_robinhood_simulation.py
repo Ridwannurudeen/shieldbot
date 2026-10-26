@@ -1713,6 +1713,23 @@ async def test_log_scan_is_bounded_and_no_pool_is_unknown():
 
 
 @pytest.mark.asyncio
+async def test_no_pool_note_names_the_routes_the_simulator_supports():
+    """The note says which pools a sell can be simulated on, as the Arbitrum and BOT Chain notes do, and the
+    chat translates it with that list kept."""
+    from core.chat_coverage import readable_coverage_gaps
+
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    simulator._request = FakeRpc(TOKEN, 10**27)
+    result = await simulator.simulate(TOKEN)
+    supported = "V4 hookless or Doppler pools with ETH, WETH or USDG, or V3 or V2 pools with WETH"
+    assert f"No supported pool found ({supported})" in result["reason"]
+    assert (
+        f"no pool ShieldBot can simulate a sale on ({supported}), so it could not test selling"
+        in readable_coverage_gaps({"honeypot": result["reason"]})
+    )
+
+
+@pytest.mark.asyncio
 async def test_log_scan_finds_hookless_native_pool_with_any_fee_tier():
     fixture = copy.deepcopy(load("v4_native_liquidity_launcher"))
     head = 65_540_000

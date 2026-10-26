@@ -2,6 +2,8 @@
 
 import re
 
+from core.risk_engine import database_matches
+
 
 FIELD_LABELS = {
     "buy_tax": "buy tax",
@@ -12,13 +14,7 @@ FIELD_LABELS = {
 }
 UNKNOWN_LINE = "ShieldBot could not finish checking this token, so it has no verdict."
 
-# On an Unknown scan the model may explain what is missing, never judge the token: a paragraph that
-# calls it safe or risky, gives a score or verdict, or rules out a honeypot or scam is dropped.
-_VERDICT_CLAIM = re.compile(
-    r"(?i)\b(?:safe|safety|unsafe|legit(?:imate)?|trustworthy|risk[- ](?:free|score|verdict|level|rating)"
-    r"|(?:low|medium|high|minimal|no)[- ]risk|verdict|score|rug(?:[- ]?pull)?|scam|honeypot[- ]free"
-    r"|not\s+a\s+honeypot|(?:block|caution|proceed)\s+recommended)\b|\b\d{1,3}\s*/\s*100\b"
-)
+OBSERVED_LINE = "What ShieldBot did observe:"
 
 
 def _clean_reason(reason: str) -> str:
@@ -33,8 +29,10 @@ def _clean_reason(reason: str) -> str:
 
 def _readable_reason(reason: str) -> str:
     clean = _clean_reason(reason)
-    if clean.lower() == "no supported pool found":
-        return "no pool ShieldBot can simulate a sale on, so it could not test selling"
+    pool_match = re.fullmatch(r"(?i)no supported pool found(?: \((.+)\))?", clean)
+    if pool_match:
+        supported = f" ({pool_match.group(1)})" if pool_match.group(1) else ""
+        return f"no pool ShieldBot can simulate a sale on{supported}, so it could not test selling"
 
     fields_match = re.fullmatch(r"(?i)unknown fields:\s*(.+)", clean)
     if fields_match:
@@ -65,27 +63,41 @@ def readable_coverage_gaps(reasons: dict) -> list[str]:
                 gaps.append(gap)
     return gaps
 
-# Internal scan detail the model may repeat from its tool data; never shown to the user.
-_BLOCK_RANGE = re.compile(
-    r"(?i)\s*\(?(?:initialize logs )?(?:scanned )?(?:over )?blocks?\s+\d+\s*-\s*\d+\)?"
-)
+def observed_facts(coverage: dict, market: dict = None, contract: dict = None) -> list[str]:
+    """What the scan measured, in the server's own fixed words and from structured values only, each only when
+    its check was covered: the contract's age, verification and scam database result (the structural analyzer's
+    data, read by its per-field coverage), and from a covered market read the pair's liquidity, 24h volume and
+    age, a new pair being one under 24 hours old. Never a flag, a reason, an address, a score or a level."""
+    facts = []
+    contract = contract or {}
+    fields = contract.get("coverage") or {}
+    if fields.get("contract_age_days") is True and contract.get("contract_age_days") is not None:
+        facts.append(f"Contract age {contract['contract_age_days']} days")
+    if fields.get("is_verified") is True and isinstance(contract.get("is_verified"), bool):
+        facts.append("Source code verified" if contract["is_verified"] else "Source code not verified")
+    if fields.get("scam_database") is True and isinstance(contract.get("scam_matches"), list):
+        matches = len(database_matches(contract["scam_matches"]))
+        facts.append(
+            f"Scam database: {matches} match{'es' if matches != 1 else ''}" if matches else "Scam database: no match"
+        )
+    market = market or {}
+    if (coverage or {}).get("market", 0) >= 1:
+        if market.get("liquidity_usd") is not None:
+            facts.append(f"Liquidity ${market['liquidity_usd']:,.2f}")
+        if market.get("volume_24h") is not None:
+            facts.append(f"24h volume ${market['volume_24h']:,.2f}")
+        if market.get("pair_age_hours") is not None:
+            facts.append(f"Pair age {market['pair_age_hours']:.1f} hours")
+            if market["pair_age_hours"] < 24:
+                facts.append("New pair (under 24 hours old)")
+    return facts
 
 
-def without_verdict_claims(text: str) -> str:
-    """The model's explanation with every paragraph that judges the token removed."""
-    paragraphs = re.split(r"\n\s*\n", text or "")
-    kept = [
-        _BLOCK_RANGE.sub("", p).strip()
-        for p in paragraphs
-        if p.strip() and not _VERDICT_CLAIM.search(p)
-    ]
-    return "\n\n".join(kept)
-
-
-def unknown_reply(reasons: dict, model_text: str = "") -> str:
-    """The Unknown reply: the plain first line, the readable gaps, then any explanation left."""
+def unknown_reply(reasons: dict, observed=()) -> str:
+    """The Unknown reply, in the server's own words only: the plain first line, the readable gaps, then what the
+    scan observed. No model text: a scan without a verdict has none to explain, and a model's sentence could
+    judge the token in any words or language."""
     parts = [UNKNOWN_LINE, *(f"- {gap}" for gap in readable_coverage_gaps(reasons))]
-    explanation = without_verdict_claims(model_text)
-    if explanation:
-        parts.extend(["", explanation])
+    if observed:
+        parts.extend(["", OBSERVED_LINE, *(f"- {fact}" for fact in observed)])
     return "\n".join(parts)

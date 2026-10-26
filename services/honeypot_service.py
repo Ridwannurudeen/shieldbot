@@ -9,9 +9,10 @@ logger = logging.getLogger(__name__)
 
 _TRADE_FIELDS = ('is_honeypot', 'buy_tax', 'sell_tax', 'can_buy', 'can_sell')
 # The honeypot analyzer (analyzers/honeypot.py) scores a sell tax (percent) above SELL_TAX_HIGH.
-# Beside a sell ShieldBot's own simulation made at a tax it could not measure, the gate below takes
-# a GoPlus sell tax only above that line, as evidence against the token: it is taken and scored,
-# but it does not complete the answer. So the gate never takes a tax the analyzer would not score.
+# Beside a sell ShieldBot's own simulation made at a tax it could not measure, or no sell it could make
+# at all, the gate below takes a GoPlus sell tax only above that line, as evidence against the token: it
+# is taken and scored, but it does not complete the answer. So the gate never takes a tax the analyzer
+# would not score.
 SELL_TAX_HIGH = 20
 # The analyzer flags a sell tax above SELL_TAX_EXTREME as extreme. On Arbitrum One, a deepest pool
 # that sells at or below it, or at a tax the simulation could not measure, keeps another pool's trap
@@ -77,6 +78,7 @@ class HoneypotService:
         }
         reasons = []
         simulation_success = None
+        own_simulation = False
         for fetch in (self.web3_client.check_honeypot, self.web3_client.get_tax_info):
             try:
                 response = await fetch(address, chain_id=chain_id)
@@ -89,7 +91,11 @@ class HoneypotService:
                     if response.get(field) is True:
                         data[field] = True
                         data['field_providers'][field] = providers.get(field, 'honeypot.is')
-                # Only ShieldBot's own simulations (Robinhood Chain, Arbitrum One) report one that could not run.
+                # Only ShieldBot's own simulations (Robinhood Chain, Arbitrum One, BOT Chain) answer with the
+                # block they simulated at: None when they made no sell.
+                if 'simulation_block' in response:
+                    own_simulation = True
+                # Only ShieldBot's own simulations report one that could not run.
                 if response.get('rpc_failed') is True:
                     data['rpc_failed'] = True
                     data['field_providers']['rpc_failed'] = 'eth_simulateV1'
@@ -137,13 +143,21 @@ class HoneypotService:
                 # scored, but it still does not complete the answer (coverage below).
                 unmeasured = (data['can_sell'] is True and data['sell_tax'] is None
                               and data['field_providers'].get('can_sell') == 'eth_simulateV1')
+                # ShieldBot's own simulation was consulted and made no sell (no supported or deep enough pool,
+                # nothing to size a buy): GoPlus's clean sell fields cannot stand in for the sell it did not
+                # make, so sellability stays unknown. Its adverse ones are evidence against the token, and taken.
+                unsimulated = (own_simulation and not data['simulation_failed'] and not data['rpc_failed']
+                               and data['field_providers'].get('can_sell') != 'eth_simulateV1')
                 for field, value in mapped.items():
-                    if data.get(field) is None and not (unmeasured and field == 'sell_tax'
-                                                        and (value is None or value <= SELL_TAX_HIGH)):
+                    refused = (
+                        (unmeasured or unsimulated) and field == 'sell_tax'
+                        and (value is None or value <= SELL_TAX_HIGH)
+                    ) or (unsimulated and field == 'can_sell' and value is True)
+                    if data.get(field) is None and not refused:
                         data[field] = value
                         if value is not None:
                             data['field_providers'][field] = 'goplus'
-                goplus_tax_for_unmeasured_sell = unmeasured and data['sell_tax'] is not None
+                goplus_tax_for_unmeasured_sell = (unmeasured or unsimulated) and data['sell_tax'] is not None
             except UnsupportedChainError:
                 raise
             except Exception as e:
@@ -172,7 +186,7 @@ class HoneypotService:
             reasons.append('Honeypot simulation could not run (unresolved)')
 
         undecided = (
-            'simulation_block' in data
+            own_simulation
             and not data['simulation_failed']
             and not data['rpc_failed']
             and data['field_providers'].get('can_sell') != 'eth_simulateV1'
@@ -183,7 +197,10 @@ class HoneypotService:
                 data['can_sell'] = None
                 data['field_providers'].pop('can_sell', None)
             data['undecided'] = True
-            reasons.append('Own simulation left sellability undecided (unresolved)')
+            reasons.append(
+                'Own simulation left sellability undecided (unresolved)' if 'simulation_block' in data
+                else 'Own simulation made no sell (unresolved)'
+            )
 
         data['coverage'] = {field: data[field] is not None for field in _TRADE_FIELDS}
         if data['simulation_failed'] or data['rpc_failed'] or data['undecided']:

@@ -41,7 +41,7 @@ from core.config import Settings
 from core.container import ServiceContainer
 from core.database import LAUNCH_OUTCOMES, SCAN_EVIDENCE_RETENTION_DAYS, reporter_hash
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
-from core.chat_coverage import unknown_reply
+from core.chat_coverage import observed_facts, readable_coverage_gaps, unknown_reply
 from core.first_verdict import IN_PROGRESS, FirstVerdictProgress, build_first_verdict
 from core.policy import PolicyMode
 from core.rate_limit import RateLimiter, connect as connect_rate_limit_redis
@@ -1128,6 +1128,7 @@ def _firewall_deadline_response(
         **{source: 0 for source in pending},
     }
     response["coverage_reasons"] = {source: reason for source in pending}
+    response["coverage_gaps"] = readable_coverage_gaps(response["coverage_reasons"])
     response["risk_display"] = "Unknown (provider deadline reached)"
     response["verdict"] = f"{response['classification']} — {response['risk_display']}"
     response["partial"] = True
@@ -2801,9 +2802,10 @@ async def agent_chat(req: ChatRequest, request: Request):
                 })
                 resp["scan_data"] = {**scan_data, **_coverage_fields(alert)}
                 if alert['status'] == 'unknown':
+                    # The server's own words only: no model text beside a scan without a verdict.
                     resp['response'] = unknown_reply(
                         alert['coverage_reasons'],
-                        result['text'] if result.get('model_response_available') else "",
+                        observed_facts(alert['coverage'], scan_data.get('market'), scan_data.get('contract')),
                     )
             return resp
         # Backward compat: plain string return
@@ -2829,6 +2831,7 @@ async def agent_explain(req: ExplainRequest, request: Request):
             alert = format_extension_alert({
                 **req.scan_result, 'rug_probability': req.scan_result.get('risk_score') or 0,
             })
+            # The request's own scan result is client data: nothing in it is stated as a ShieldBot observation.
             return {"explanation": unknown_reply(alert['coverage_reasons'])}
         explanation = await container.advisor.explain_scan(req.scan_result)
         return {"explanation": explanation}
@@ -3373,7 +3376,11 @@ def _build_asset_delta(
 
 
 def _coverage_fields(alert: Dict) -> Dict:
-    return {key: alert[key] for key in ('status', 'coverage', 'coverage_reasons', 'risk_display')}
+    # coverage_gaps: the reasons in plain words, for the extension's Unknown lines (core.chat_coverage).
+    return {
+        **{key: alert[key] for key in ('status', 'coverage', 'coverage_reasons', 'risk_display')},
+        'coverage_gaps': readable_coverage_gaps(alert['coverage_reasons']),
+    }
 
 
 def _revert_blocks(risk_output: Dict) -> bool:

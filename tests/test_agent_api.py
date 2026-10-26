@@ -238,7 +238,7 @@ UNKNOWN_REPLY = (
 )
 
 
-def test_chat_unknown_keeps_model_explanation_and_uses_readable_gaps(client):
+def test_chat_unknown_drops_the_model_text_and_uses_readable_gaps(client):
     import api as api_module
 
     api_module.container.advisor.chat = AsyncMock(return_value={
@@ -249,9 +249,7 @@ def test_chat_unknown_keeps_model_explanation_and_uses_readable_gaps(client):
     response = client.post("/api/agent/chat", json={"message": "Check token", "user_id": "u1"})
 
     assert response.status_code == 200
-    assert response.json()["response"] == (
-        UNKNOWN_REPLY + "\n\nSelling could not be tested because no supported pool was found."
-    )
+    assert response.json()["response"] == UNKNOWN_REPLY
     assert "Initialize logs scanned over blocks" not in response.json()["response"]
 
 
@@ -281,15 +279,151 @@ def test_chat_coverage_reason_translation_and_clean_fallback():
     ]
 
 
-def test_unknown_reply_strips_block_ranges_the_model_repeats():
-    from core.chat_coverage import unknown_reply
+def test_unknown_reply_carries_no_block_ranges_and_no_model_text():
+    from core.chat_coverage import UNKNOWN_LINE, unknown_reply
 
     reply = unknown_reply(
         {"honeypot": "Initialize logs scanned over blocks 87222191-87252190; No supported pool found"},
-        "ShieldBot found no pool it can simulate a sale on (initialize logs scanned over blocks "
-        "87222191-87252190), so selling is untested.",
     )
     assert "87222191" not in reply
     assert "blocks" not in reply
-    assert reply.endswith("ShieldBot found no pool it can simulate a sale on, so selling is untested.")
+    assert reply == UNKNOWN_LINE + "\n- no pool ShieldBot can simulate a sale on, so it could not test selling"
+
+
+@pytest.mark.parametrize("supported", [
+    "Uniswap V3, Uniswap V2 or SushiSwap, paired with WETH",
+    "BDEX V3 or BDEX V2, paired with WBOT",
+    "V4 hookless or Doppler pools with ETH, WETH or USDG, or V3 or V2 pools with WETH",
+])
+def test_chat_coverage_names_the_pools_a_simulator_supports(supported):
+    from core.chat_coverage import readable_coverage_gaps
+
+    reason = f"Initialize logs scanned over blocks 12-34; No supported pool found ({supported}); Unknown fields: can_sell"
+    assert readable_coverage_gaps({"honeypot": reason}) == [
+        f"no pool ShieldBot can simulate a sale on ({supported}), so it could not test selling",
+        "whether the token can be sold is unknown",
+    ]
+
+
+def test_chat_scan_data_carries_the_readable_coverage_gaps(client):
+    import api as api_module
+
+    api_module.container.advisor.chat = AsyncMock(return_value={
+        "text": "AI analysis is currently unavailable.",
+        "model_response_available": False,
+        "scan_data": UNKNOWN_SCAN,
+    })
+    response = client.post("/api/agent/chat", json={"message": "Check token", "user_id": "u1"})
+
+    assert response.json()["scan_data"]["coverage_gaps"] == [
+        "no pool ShieldBot can simulate a sale on, so it could not test selling",
+        "buy tax, sell tax and whether the token can be sold are unknown",
+    ]
+
+
+def test_chat_coverage_keeps_the_no_sell_reason_readable():
+    from core.chat_coverage import readable_coverage_gaps
+
+    reason = (
+        "No supported pool found (BDEX V3 or BDEX V2, paired with WBOT); "
+        "Own simulation made no sell (unresolved); "
+        "Unknown fields: sell_tax, can_sell"
+    )
+    assert readable_coverage_gaps({"honeypot": reason}) == [
+        "no pool ShieldBot can simulate a sale on (BDEX V3 or BDEX V2, paired with WBOT), so it could not test selling",
+        "Own simulation made no sell (unresolved)",
+        "sell tax and whether the token can be sold are unknown",
+    ]
+
+
+@pytest.mark.parametrize("text", [
+    "The token appears fine and has no issues.",
+    "can_sell is null; can_buy is true",
+    "It looks safe.",
+    "This one seems legit.",
+    "There is nothing suspicious here.",
+    "You should be fine buying a small amount.",
+    "Risk 12.",
+    "The risk is 0%.",
+    "El token es seguro.",
+    "Riesgo 0 de 100, sin problemas.",
+    "该代币是安全的。",
+    "Score 12 / 100, low.",
+    "Selling could not be tested because no supported pool was found.",
+])
+def test_chat_unknown_reply_never_carries_model_text(client, text):
+    """An incomplete scan's reply is the server's own: no model sentence, in any words or language, reaches it."""
+    import api as api_module
+
+    api_module.container.advisor.chat = AsyncMock(return_value={
+        "text": text, "model_response_available": True, "scan_data": UNKNOWN_SCAN,
+    })
+    response = client.post("/api/agent/chat", json={"message": "Check token", "user_id": "u1"})
+
+    assert response.json()["response"] == UNKNOWN_REPLY
+    assert text not in response.json()["response"]
+
+
+OBSERVED = (
+    "\n\nWhat ShieldBot did observe:\n- Contract age 0 days\n- Source code verified\n- Scam database: no match"
+    "\n- Liquidity $24,472.84\n- 24h volume $48,096.40\n- Pair age 4.1 hours\n- New pair (under 24 hours old)"
+)
+CREATOR = "0x" + "ab" * 20
+CONTRACT = {"contract_age_days": 0, "is_verified": True, "scam_matches": [], "creator_address": CREATOR,
+            "coverage": {"is_verified": True, "contract_age_days": True, "scam_database": True}}
+MARKET = {"price_usd": 0.0001, "liquidity_usd": 24472.84, "volume_24h": 48096.4, "pair_age_hours": 4.1}
+COVERAGE = {"structural": 1, "market": 1, "behavioral": 1, "honeypot": 0}
+FLAGS = ["Market data unknown: DexScreener unavailable",
+         f"Creator {CREATOR} carries GoPlus address labels: honeypot_related_address",
+         "Sellability unknown: No supported pool found; Unknown fields: can_sell"]
+
+
+def test_unknown_reply_lists_only_covered_structured_values_in_fixed_words():
+    from core.chat_coverage import observed_facts, unknown_reply
+
+    reasons = UNKNOWN_SCAN["coverage_reasons"]
+    assert unknown_reply(reasons, observed_facts(COVERAGE, MARKET, CONTRACT)) == UNKNOWN_REPLY + OBSERVED
+    # An uncovered field is never an observation: market the scan did not cover, an age it could not read.
+    assert observed_facts({**COVERAGE, "market": 0}, MARKET, CONTRACT) == [
+        "Contract age 0 days", "Source code verified", "Scam database: no match",
+    ]
+    unread_age = {**CONTRACT, "contract_age_days": None, "coverage": {**CONTRACT["coverage"], "contract_age_days": False}}
+    assert observed_facts(COVERAGE, {}, unread_age) == ["Source code verified", "Scam database: no match"]
+    assert observed_facts({}, None, None) == []
+    # A scam database match and an unverified source read in the same fixed words; a community report is no match.
+    flagged = {**CONTRACT, "is_verified": False,
+               "scam_matches": [{"source": "GoPlus", "severity": "block"}, {"source": "community", "severity": "medium"}]}
+    assert observed_facts({}, None, flagged) == ["Contract age 0 days", "Source code not verified", "Scam database: 1 match"]
+    assert unknown_reply(reasons, observed_facts({}, {}, {})) == UNKNOWN_REPLY
+
+
+def test_explain_states_nothing_from_the_requests_own_scan_result_as_observed(client):
+    """The explain request carries the client's scan result: an incomplete one gets the gaps, and no value in it
+    (a contract_verified flag it could set to anything) is echoed as something ShieldBot observed."""
+    response = client.post("/api/agent/explain", json={"scan_result": {
+        "status": "unknown", "risk_score": 0, "coverage": {"structural": 1, "honeypot": 0},
+        "coverage_reasons": {"honeypot": "No supported pool found"}, "contract_verified": False,
+        "flags": ["Market data unknown: DexScreener unavailable"],
+    }})
+
+    assert response.json()["explanation"] == (
+        "ShieldBot could not finish checking this token, so it has no verdict.\n"
+        "- no pool ShieldBot can simulate a sale on, so it could not test selling"
+    )
+
+
+def test_chat_unknown_reply_lists_what_the_scan_observed_and_never_a_flag(client):
+    """The observed list is built from covered values in the server's words: no flag, no reason, no address."""
+    import api as api_module
+
+    api_module.container.advisor.chat = AsyncMock(return_value={
+        "text": "It looks safe.", "model_response_available": True,
+        "scan_data": {**UNKNOWN_SCAN, "flags": FLAGS, "market": MARKET, "contract": CONTRACT, "coverage": COVERAGE},
+    })
+    response = client.post("/api/agent/chat", json={"message": "Check token", "user_id": "u1"})
+
+    assert response.json()["response"] == UNKNOWN_REPLY + OBSERVED
+    for flag in FLAGS:
+        assert flag not in response.json()["response"]
+    assert CREATOR not in response.json()["response"]
 
