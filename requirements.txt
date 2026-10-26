@@ -4,7 +4,7 @@ requests==2.33.0
 urllib3==2.8.0
 idna==3.19
 python-dotenv==1.2.2
-aiohttp==3.14.3
+aiohttp==3.14.4
 eth-utils==2.3.1
 anthropic==0.79.0
 fastapi==0.141.1
