@@ -144,16 +144,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     const card = document.createElement("div");
     card.className = "risk-card";
 
-    const flags = (Array.isArray(scanData.flags) ? scanData.flags : []).map(f =>
-      `<span class="risk-flag">${escapeHtml(f)}</span>`
-    ).join("");
+    // A note that a check could not run is information the message carries, not a risk flag.
+    const flags = (Array.isArray(scanData.flags) ? scanData.flags : [])
+      .filter(f => !/^(Sellability|Honeypot coverage) unknown:/.test(String(f)))
+      .map(f => `<span class="risk-flag">${escapeHtml(f)}</span>`).join(" ");
 
     const archetype = scanData.archetype
       ? `<div class="risk-card-subtitle">${escapeHtml(scanData.archetype)}</div>` : "";
 
     let metaParts = [];
     const hp = (typeof scanData.honeypot === "object" && scanData.honeypot) || {};
-    const unresolved = hp.simulation_failed || hp.rpc_failed;
+    const unresolved = hp.simulation_failed || hp.rpc_failed || hp.undecided;
     const simulationProvedSell = hp.can_sell === true && hp.field_providers?.can_sell === "eth_simulateV1";
     const sellCovered = !unresolved && (simulationProvedSell || hp.coverage?.can_sell === true ||
       Number(hp.coverage?.can_sell) >= 1);
@@ -168,7 +169,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       honeypotStatus = `Not flagged by ${escapeHtml(providerName)} (sell not simulated)`;
     }
     metaParts.push(`Honeypot: <span>${honeypotStatus}</span>`);
-    metaParts.push(`Sell tax: <span>${hp.sell_tax == null || hp.sell_tax === "" ? "Unknown" : `${Number(hp.sell_tax)}%`}</span>`);
+    // A sell tax is measured only beside a sell ShieldBot confirmed; a provider's figure for a sell it never
+    // ran is not shown as one.
+    const sellTax = sellCovered && hp.sell_tax != null && hp.sell_tax !== "" ? `${Number(hp.sell_tax)}%` : "Unknown";
+    metaParts.push(`Sell tax: <span>${sellTax}</span>`);
     const mkt = (typeof scanData.market === "object" && scanData.market) || {};
     if (mkt.liquidity_usd !== undefined) {
       metaParts.push(`Liq: <span>$${Number(mkt.liquidity_usd).toLocaleString()}</span>`);
@@ -320,11 +324,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   // -------------------------------------------------------------------
   function appendMessage(role, text, opts = {}) {
     const { isError = false, originalMessage = null, scanData = null } = opts;
+    // The API's reply for a scan without a verdict (core.chat_coverage.UNKNOWN_LINE) is shown as sent: its gaps
+    // are in plain words and nothing in it judges the token. Any other text beside such a scan is replaced.
+    const unknownReplyLead = "ShieldBot could not finish checking this token, so it has no verdict.";
     if (scanData && (scanData.status !== "ok" || scanData.partial === true ||
       scanData.risk_level === "UNKNOWN" || !Number.isFinite(scanData.risk_score) ||
-      Object.values(scanData.coverage || {}).some(value => Number(value) < 1))) {
-      text = "Unknown (incomplete provider coverage). " +
-        Object.values(scanData.coverage_reasons || {}).join("; ");
+      Object.values(scanData.coverage || {}).some(value => Number(value) < 1)) &&
+      !String(text).startsWith(unknownReplyLead)) {
+      const gaps = Array.isArray(scanData.coverage_gaps) && scanData.coverage_gaps.length
+        ? scanData.coverage_gaps : Object.values(scanData.coverage_reasons || {});
+      text = "Unknown (incomplete provider coverage). " + gaps.join("; ");
     }
 
     if (role === "assistant") {

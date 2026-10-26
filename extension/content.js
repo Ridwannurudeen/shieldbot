@@ -624,8 +624,10 @@
 
   // One line saying why a result is Unknown, from its coverage reasons.
   function unknownReason(result) {
-    return Object.values(result.coverage_reasons || {}).filter(Boolean).join("; ") ||
-      _t("unknownNoReason");
+    // The API's coverage_gaps say the reasons in plain words; a response without them gives the reasons as sent.
+    const gaps = Array.isArray(result.coverage_gaps) && result.coverage_gaps.length
+      ? result.coverage_gaps : Object.values(result.coverage_reasons || {}).filter(Boolean);
+    return gaps.join("; ") || _t("unknownNoReason");
   }
 
   // The class a result is shown as. One that is not complete is Unknown,
@@ -1366,8 +1368,7 @@
       if (incomplete) {
         loadingEl.style.display = "none";
         textEl.style.display = "block";
-        textEl.textContent = `${_t("overlayIncompleteCoverage")}. ` +
-          Object.values(result.coverage_reasons || {}).join("; ");
+        textEl.textContent = `${_t("overlayIncompleteCoverage")}. ${unknownReason(result)}`;
         return;
       }
 
