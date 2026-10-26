@@ -397,6 +397,21 @@ def test_unknown_reply_lists_only_covered_structured_values_in_fixed_words():
     assert unknown_reply(reasons, observed_facts({}, {}, {})) == UNKNOWN_REPLY
 
 
+def test_explain_states_nothing_from_the_requests_own_scan_result_as_observed(client):
+    """The explain request carries the client's scan result: an incomplete one gets the gaps, and no value in it
+    (a contract_verified flag it could set to anything) is echoed as something ShieldBot observed."""
+    response = client.post("/api/agent/explain", json={"scan_result": {
+        "status": "unknown", "risk_score": 0, "coverage": {"structural": 1, "honeypot": 0},
+        "coverage_reasons": {"honeypot": "No supported pool found"}, "contract_verified": False,
+        "flags": ["Market data unknown: DexScreener unavailable"],
+    }})
+
+    assert response.json()["explanation"] == (
+        "ShieldBot could not finish checking this token, so it has no verdict.\n"
+        "- no pool ShieldBot can simulate a sale on, so it could not test selling"
+    )
+
+
 def test_chat_unknown_reply_lists_what_the_scan_observed_and_never_a_flag(client):
     """The observed list is built from covered values in the server's words: no flag, no reason, no address."""
     import api as api_module

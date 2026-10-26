@@ -2831,9 +2831,8 @@ async def agent_explain(req: ExplainRequest, request: Request):
             alert = format_extension_alert({
                 **req.scan_result, 'rug_probability': req.scan_result.get('risk_score') or 0,
             })
-            verified = req.scan_result.get('contract_verified')
-            contract = {'is_verified': verified, 'coverage': {'is_verified': isinstance(verified, bool)}}
-            return {"explanation": unknown_reply(alert['coverage_reasons'], observed_facts(alert['coverage'], None, contract))}
+            # The request's own scan result is client data: nothing in it is stated as a ShieldBot observation.
+            return {"explanation": unknown_reply(alert['coverage_reasons'])}
         explanation = await container.advisor.explain_scan(req.scan_result)
         return {"explanation": explanation}
     except UnsupportedChainError:
