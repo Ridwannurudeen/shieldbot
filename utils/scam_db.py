@@ -60,23 +60,6 @@ COMMUNITY_BLACKLIST_TTL = 30 * 86400
 BLACKLIST_RELOAD_SECONDS = 1800
 
 
-def address_security_outcome(response: dict) -> str:
-    record = response.get('data')
-    valid_record = (
-        isinstance(record, dict)
-        and bool(record)
-        and all(
-            isinstance(label, str) and isinstance(value, (str, int, float, bool))
-            for label, value in record.items()
-        )
-    )
-    if response.get('status') == 'ok' and valid_record:
-        return 'answered'
-    if response.get('reason') == 'GoPlus returned no address record':
-        return 'unknown'
-    return 'failed'
-
-
 def load_protected_addresses():
     """Import whitelisted routers / known-good addresses at startup."""
     try:
@@ -172,12 +155,11 @@ class ScamDatabase:
         async def fetch_and_record():
             try:
                 response = await asyncio.wait_for(
-                    self.fetch_address_security(address),
+                    self.fetch_address_security(address, ledger_chain=677),
                     timeout=GOPLUS_ADDRESS_TIMEOUT_SECONDS,
                 )
             except asyncio.TimeoutError:
                 response = {'status': 'unknown', 'reason': 'timed out', 'data': {}}
-            unknown_ledger.record('goplus_address', 677, address_security_outcome(response))
             return response
 
         task = asyncio.create_task(fetch_and_record())
@@ -325,7 +307,7 @@ class ScamDatabase:
         return result
 
     @staticmethod
-    async def fetch_address_security(address: str) -> dict:
+    async def fetch_address_security(address: str, ledger_chain: Optional[int] = None) -> dict:
         """GoPlus malicious-address labels, shared across concurrent scans.
 
         GoPlus accepts a chain but returns the same labels for every chain, so none is sent.
@@ -339,12 +321,15 @@ class ScamDatabase:
         flight_key = (asyncio.get_running_loop(), key)
         if flight_key not in _GOPLUS_ADDRESS_INFLIGHT:
             _GOPLUS_ADDRESS_INFLIGHT[flight_key] = asyncio.create_task(
-                ScamDatabase._fetch_address_security(key, flight_key)
+                ScamDatabase._fetch_address_security(key, flight_key, ledger_chain)
             )
+        # A coalesced request is attributed once, to the chain of the caller that started it.
         return await asyncio.shield(_GOPLUS_ADDRESS_INFLIGHT[flight_key])
 
     @staticmethod
-    async def _fetch_address_security(address: str, flight_key: tuple) -> dict:
+    async def _fetch_address_security(
+        address: str, flight_key: tuple, ledger_chain: Optional[int],
+    ) -> dict:
         observed_at = time.time()
         result = {'status': 'unknown', 'reason': 'GoPlus unavailable', 'data': {}}
         try:
@@ -383,7 +368,7 @@ class ScamDatabase:
         finally:
             _GOPLUS_ADDRESS_INFLIGHT.pop(flight_key, None)
         result['observed_at'] = observed_at
-        unknown_ledger.record('goplus_address', None, (
+        unknown_ledger.record('goplus_address', ledger_chain, (
             'answered' if result['status'] == 'ok'
             else 'unknown' if result['reason'] == 'GoPlus returned no address record' else 'failed'
         ))
