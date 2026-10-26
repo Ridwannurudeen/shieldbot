@@ -517,7 +517,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const dangerousCount = health.dangerous_approvals || 0;
     const incomplete = health.status === "unknown";
     const valueAtRisk = health.total_value_at_risk_usd;
-    const valueText = incomplete || valueAtRisk == null ? "Unknown" : `$${valueAtRisk.toFixed(2)}`;
+    const valueText = incomplete || valueAtRisk == null ? t("statUnknown") : `$${Number(valueAtRisk).toFixed(2)}`;
     const labels = {
       dangerous_approvals: "Approvals",
       flagged_exposure: "Flagged tokens",
@@ -526,13 +526,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       deployer_risk: "Deployer risk",
     };
     let statsHtml = `<div class="health-stats">
-      <div class="health-stat"><span class="health-stat-val">${totalApprovals}</span><span class="health-stat-label">Approvals</span></div>
-      <div class="health-stat"><span class="health-stat-val" style="color:var(--block-text)">${dangerousCount}</span><span class="health-stat-label">High Risk</span></div>
-      <div class="health-stat"><span class="health-stat-val" style="color:var(--ink)">${valueText}</span><span class="health-stat-label">At Risk</span></div>
+      <div class="health-stat"><span class="health-stat-val">${Number(totalApprovals)}</span><span class="health-stat-label">Approvals</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:var(--block-text)">${Number(dangerousCount)}</span><span class="health-stat-label">${escapeHtml(t("healthHighRisk"))}</span></div>
+      <div class="health-stat"><span class="health-stat-val" style="color:var(--ink)">${escapeHtml(valueText)}</span><span class="health-stat-label">${escapeHtml(t("healthAtRisk"))}</span></div>
     </div>`;
     let compHtml = "";
     for (const [key, val] of Object.entries(components)) {
-      compHtml += `<div class="health-component"><span>${escapeHtml(labels[key] || key)}</span><span>${val}/100</span></div>`;
+      compHtml += `<div class="health-component"><span>${escapeHtml(labels[key] || key)}</span><span>${Number(val)}/100</span></div>`;
     }
     let warnHtml = "";
     if (warnings.length > 0) {
@@ -540,7 +540,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     guardianHealthEl.innerHTML = `<div class="health-card">
       <div class="health-header">
-        <span class="health-score" style="color:${incomplete ? 'var(--ink)' : score >= 70 ? 'var(--safe-text)' : score >= 40 ? 'var(--ink)' : 'var(--block-text)'}">${incomplete ? "?" : score}</span>
+        <span class="health-score" style="color:${incomplete ? 'var(--ink)' : score >= 70 ? 'var(--safe-text)' : score >= 40 ? 'var(--ink)' : 'var(--block-text)'}">${incomplete ? "?" : Number(score)}</span>
         <span class="health-level ${escapeHtml(level)}">${escapeHtml(level)}</span>
       </div>
       ${statsHtml}

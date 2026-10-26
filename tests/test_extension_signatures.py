@@ -829,6 +829,8 @@ def test_a_hold_counts_only_while_the_dialog_stays_visible(cover):
   assert(byId('shieldai-covered').textContent.includes('covering or altering'));
   // Pressed again while the dialog is visible, the hold counts.
   reportVisibility(true);
+  // Back in view, Proceed is disabled again for its half second (none here).
+  await flush();
   press(proceed, 'pointer');
   await heldVerdict();
   await assertVerdicts([['request', 'proceed']]);

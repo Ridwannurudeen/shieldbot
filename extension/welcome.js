@@ -10,12 +10,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   btn.addEventListener("click", async () => {
     btn.textContent = t("welcomeConnecting");
     btn.disabled = true;
-    statusMsg.textContent = t("welcomeRequestingPerms");
 
     try {
-      const granted = await chrome.permissions.request({
-        origins: ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
-      });
+      // Access to https pages is granted at install; it is asked for only when
+      // the user has since withheld it in Chrome's site access settings.
+      const origins = ["https://*/*"];
+      let granted = await chrome.permissions.contains({ origins });
+      if (!granted) {
+        statusMsg.textContent = t("welcomeRequestingPerms");
+        granted = await chrome.permissions.request({ origins });
+      }
       if (!granted) throw new Error(t("welcomePermDenied"));
 
       // Permissions granted — extension is now active (content scripts inject on all sites)

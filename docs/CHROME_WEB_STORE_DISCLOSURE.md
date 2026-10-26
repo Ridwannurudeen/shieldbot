@@ -1,8 +1,8 @@
 # Chrome Web Store Privacy Disclosure
 
-This document provides the exact wording to use when completing the Chrome Web Store Developer Dashboard privacy questionnaire for ShieldAI Transaction Firewall.
+This document provides the exact wording to use when completing the Chrome Web Store Developer Dashboard privacy questionnaire for ShieldBot Transaction Firewall.
 
-These disclosures describe version 3.1.0. It asks the wallet which chain it is on before analysing a request, so a dApp that omits `chainId` no longer defaults to BNB Chain. A request whose chain cannot be read, does not match the wallet's, or is not supported is not analysed, and the overlay offers only Block. Version 3.0.1 and earlier defaulted to BNB Chain in that case (see [TECHNICAL.md](TECHNICAL.md)).
+These disclosures describe version 3.4.0. Since 3.1.0, the version the store serves, the data sent, the API endpoints and the stored keys are unchanged; 3.4.0 drops the `tabs` permission (the active tab's address, read for the side panel's "Scan this page", comes with the https host permission), requires Chrome 116 or later (for the side panel it opens), renames the product ShieldBot in every string (the store title follows the package name, ShieldBot Transaction Firewall), adds BOT Chain (677) to the extension's own screens, restyles the overlay, popup, side panel and welcome page, and packages its fonts locally. As in 3.1.0, it asks the wallet which chain it is on before analysing a request, so a dApp that omits `chainId` no longer defaults to BNB Chain. A request whose chain cannot be read, does not match the wallet's, or is not supported is not analysed, and the overlay offers only Block. Version 3.0.1 and earlier defaulted to BNB Chain in that case (see [TECHNICAL.md](TECHNICAL.md)).
 
 ## Privacy Practices
 
@@ -21,10 +21,12 @@ These disclosures describe version 3.1.0. It asks the wallet which chain it is o
 **Answer:**
 - Financial and payment information (transaction metadata only)
 - Website content (limited to Web3 transaction data and site origin for phishing checks)
+- Web history (the origin of each https page opened in a tab, for the phishing check)
 
 **Justification:**
 The extension intercepts blockchain transaction data (recipient address, sender address, value, encoded function data, and chain ID) to perform security analysis and risk assessment before the user signs the transaction. For a signature request it sends the signing method and any EIP-712 typed data, never the text of a message or a hash to sign (nor, for those, the signer's address); for an EIP-7702 transaction, each delegate's address, never the signed authorization.
 When phishing protection is enabled, the extension also checks the current site origin (scheme, host, and port only) against phishing intelligence. Full paths, query strings, and page contents are not sent.
+Web history: while the firewall is switched on (the default; phishing protection has no separate switch), the origin (scheme, host, port) of each https page opened in a tab is sent to the configured API for the phishing check, unless a verdict for its host is already in the session cache (an hour for a flagged site, five minutes for one not flagged). It is not stored by the extension beyond that session cache, which keeps only the host and its verdict until the browser closes.
 
 ---
 
@@ -75,7 +77,7 @@ This is the URL the live store listing links. `PRIVACY_POLICY.md` in the reposit
 **Answer (copy this verbatim):**
 
 ```
-ShieldAI Transaction Firewall intercepts blockchain transaction requests from Web3 wallet extensions (such as MetaMask) to provide security analysis before users sign transactions.
+ShieldBot Transaction Firewall intercepts blockchain transaction requests from Web3 wallet extensions (such as MetaMask) to provide security analysis before users sign transactions.
 
 DATA COLLECTED:
 - Transaction recipient address (contract or wallet address)
@@ -155,10 +157,7 @@ SECURITY MEASURES:
 **Justification:** Required to store user settings (API endpoint URL, firewall enabled/disabled state), local scan history, the recipients the user chose to send to (for the look-alike address check), a generated chat identifier and recent chat messages using chrome.storage.local, and phishing results for the browser session using chrome.storage.session. API-side storage is separate, as described above.
 
 ### `sidePanel`
-**Justification:** Required to open the ShieldAI assistant, wallet health, guardian alerts, and prompt-injection scanner in Chrome's side panel.
-
-### `tabs`
-**Justification:** Required to open extension pages and to read the active tab URL/title only when a popup or side panel page starts the "Scan this page" workflow. Content scripts are blocked from requesting active tab details.
+**Justification:** Required to open the ShieldBot assistant, wallet health, guardian alerts, and prompt-injection scanner in Chrome's side panel.
 
 ---
 
@@ -169,7 +168,7 @@ SECURITY MEASURES:
 **Answer:**
 
 ```
-ShieldAI uses optional_host_permissions only for local development endpoints.
+ShieldBot uses optional_host_permissions only for local development endpoints.
 
 When a developer configures a localhost API URL in the extension settings:
 1. The extension requests permission for that local origin using chrome.permissions.request()
@@ -197,7 +196,7 @@ Optional permissions requested:
 **Answer:**
 
 ```
-ShieldAI must run on all HTTPS websites because Web3 applications (decentralized apps/dApps) can be hosted on any domain. The extension needs to intercept transaction requests regardless of which website the user is interacting with.
+ShieldBot must run on all HTTPS websites because Web3 applications (decentralized apps/dApps) can be hosted on any domain. The extension needs to intercept transaction requests regardless of which website the user is interacting with.
 
 Examples of Web3 application domains:
 - app.uniswap.org
@@ -219,7 +218,7 @@ Content scripts are injected at document_start to ensure transaction interceptio
 **Answer:**
 
 ```
-Provide pre-signature security analysis of blockchain transactions on nine EVM chains listed on the extension's welcome page, warning users about malicious contracts, phishing sites and scams before they sign.
+Provide pre-signature security analysis of blockchain transactions on nine EVM chains listed on the extension's welcome page, warning users about malicious contracts, phishing sites and scams before they sign. The side panel's prompt-injection scanner is part of the same protection: it checks text the user pastes (an agent prompt, message or tool input) for known injection patterns, so instructions planted to manipulate an AI agent that acts for the user can be caught before the agent acts on them.
 ```
 
 ---
@@ -229,7 +228,6 @@ Provide pre-signature security analysis of blockchain transactions on nine EVM c
 Before submitting to Chrome Web Store, ensure:
 
 - ✅ The privacy policy is published at https://shieldbotsecurity.online/privacy.html
-- ✅ Privacy policy URL is added to manifest.json (optional but recommended)
 - ✅ Extension does not use remote code execution (no `eval()`, `new Function()`, or external scripts)
 - ✅ All API communication uses HTTPS (except localhost for development)
 - ✅ No hardcoded HTTP endpoints or raw IP addresses in production code
@@ -258,4 +256,4 @@ Before submitting to Chrome Web Store, ensure:
 
 ---
 
-**Last Updated:** February 22, 2026
+**Last Updated:** October 26, 2026

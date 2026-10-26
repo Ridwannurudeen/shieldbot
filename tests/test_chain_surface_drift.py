@@ -93,7 +93,9 @@ def test_popup_health_chain_order_lists_every_chain_in_the_side_panel_order():
 def test_side_panel_chain_selector_labels_match_the_registry():
     options = sidepanel_options()
     assert len(options) == len(CHAIN_INFO)
-    assert dict(options) == labelled({1: "ETH", 42161: "Arb", 137: "Poly", 10: "OP", 4663: "Robinhood"})
+    # The side panel names each chain as the popup does, and the popup's names are pinned to the
+    # registry above.
+    assert dict(options) == js_table(read(POPUP), "CHAIN_NAMES")
 
 
 @pytest.mark.parametrize("page", DASHBOARDS, ids=lambda page: page.name)

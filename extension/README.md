@@ -1,6 +1,6 @@
 # ShieldBot browser extension
 
-A Chrome extension (Manifest V3, Chrome 111 or later) that shows a warning before a web page's
+A Chrome extension (Manifest V3, Chrome 116 or later) that shows a warning before a web page's
 wallet request reaches the wallet, and waits for the user to decide. It runs on https pages only.
 This file states what it does and what it does not do; `docs/store-listing.md` has the user-facing
 version.
@@ -256,8 +256,8 @@ A page can find out that the extension is installed, in these ways:
   its two typefaces are also in `document.fonts` as "ShieldBot Geist" and "ShieldBot Plex Mono" (a
   font declared inside a shadow root is not loaded, so they are registered on the document); they
   are taken out again when the last of them is gone.
-- The files `manifest.json` lists under `web_accessible_resources` (`overlay.css`, `welcome.html`,
-  `i18n.js`, `locales/en/messages.json`, `locales/zh/messages.json`, `locales/vi/messages.json`,
+- The files `manifest.json` lists under `web_accessible_resources` (`overlay.css`,
+  `locales/en/messages.json`, `locales/zh/messages.json`, `locales/vi/messages.json`,
   `fonts/geist-latin-400-normal.woff2`, `fonts/geist-latin-500-normal.woff2` and
   `fonts/ibm-plex-mono-latin-400-normal.woff2`) can be fetched by any https page from `chrome-extension://<extension id>/`. The ID of a Web Store
   install is the same for everyone, so a fetch that succeeds shows the extension is there. Chrome's

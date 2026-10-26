@@ -64,13 +64,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === "SHIELDAI_HEALTH") {
-    checkHealth()
-      .then((status) => sendResponse({ status }))
-      .catch((err) => sendResponse({ error: err.message }));
-    return true;
-  }
-
   if (message.type === "SHIELDAI_GET_HISTORY") {
     chrome.storage.local.get({ scanHistory: [] }, (data) => {
       sendResponse({ history: data.scanHistory });
@@ -96,62 +89,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ explanation: data.explanation || "No explanation available." });
       } catch (err) {
         sendResponse({ explanation: "Unable to generate explanation." });
-      }
-    })();
-    return true;
-  }
-
-  if (message.type === "SHIELDAI_OPEN_SIDEPANEL") {
-    const windowId = sender.tab?.windowId;
-    if (!windowId) {
-      sendResponse({ error: "No window context available" });
-      return true;
-    }
-    chrome.sidePanel.open({ windowId })
-      .then(() => sendResponse({ ok: true }))
-      .catch((err) => sendResponse({ error: err.message }));
-    return true;
-  }
-
-  if (message.type === "SHIELDAI_GET_GUARDIAN_ALERTS") {
-    (async () => {
-      try {
-        const apiUrl = await getApiUrl();
-        const response = await fetch(`${apiUrl}/api/guardian/alerts`, {
-          method: "GET",
-          signal: AbortSignal.timeout(15000),
-        });
-        if (!response.ok) {
-          sendResponse({ error: `HTTP ${response.status}` });
-          return;
-        }
-        const data = await response.json();
-        sendResponse({ alerts: data });
-      } catch (err) {
-        sendResponse({ error: err.message || "Failed to fetch alerts" });
-      }
-    })();
-    return true;
-  }
-
-  if (message.type === "SHIELDAI_SCAN_INJECTION") {
-    (async () => {
-      try {
-        const apiUrl = await getApiUrl();
-        const response = await fetch(`${apiUrl}/api/scan/injection`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(message.payload || {}),
-          signal: AbortSignal.timeout(30000),
-        });
-        if (!response.ok) {
-          sendResponse({ error: `HTTP ${response.status}` });
-          return;
-        }
-        const data = await response.json();
-        sendResponse({ result: data });
-      } catch (err) {
-        sendResponse({ error: err.message || "Injection scan failed" });
       }
     })();
     return true;
@@ -504,27 +441,6 @@ async function handleAnalyze(tx, sender) {
     };
   }
   return result;
-}
-
-async function checkHealth() {
-  const apiUrl = await getApiUrl();
-
-  // Ensure we have permission for this origin
-  const hasPermission = await ensureHostPermission(apiUrl);
-  if (!hasPermission) {
-    throw new Error("Permission required: Reconnect via extension popup to grant access.");
-  }
-
-  const response = await fetch(`${apiUrl}/api/health`, {
-    method: "GET",
-    signal: AbortSignal.timeout(5000),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Health check failed: ${response.status}`);
-  }
-
-  return response.json();
 }
 
 async function ensureHostPermission(url) {

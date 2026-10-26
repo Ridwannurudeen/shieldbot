@@ -211,6 +211,9 @@ const analyses = [];
 let analyze = async () => ({error: 'API error 503: unavailable'});
 let phishing = false, phishingChecks = 0;
 let clock = 1000000;
+// The system clock (Date.now) can be stepped apart from the monotonic one (performance.now), as a
+// time sync does; both otherwise follow clock.
+let wallClockStep = 0;
 let fetchDelays = [];
 const settingsListeners = [];
 const changed = value => settingsListeners.forEach(fn =>
@@ -231,7 +234,7 @@ const chrome = {
 };
 const context = vm.createContext({
   window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,
-  console, Date: {now: () => clock}, MutationObserver: FakeMutationObserver,
+  console, Date: {now: () => clock + wallClockStep}, performance: {now: () => clock}, MutationObserver: FakeMutationObserver,
   IntersectionObserver: FakeIntersectionObserver,
   fetch: async url => {
     const delay = fetchDelays.shift();
@@ -263,6 +266,9 @@ async function assertVerdicts(expected) {
 async function intercept(requestId, tx = {to: '0x' + 'a'.repeat(40), chainId: 56}, method = 'eth_sendTransaction') {
   deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId, method, tx, proof: await proofFor(token, `${requestId}:intercept`)});
   await flush();
+  // Under load the proof check, storage reads and language file can take longer than one flush: wait until a
+  // screen is up or a verdict was sent, within a bound, so a slow run is not read as a request that was dropped.
+  for (let i = 0; i < 30 && !overlay() && verdicts().length === 0; i++) await flush();
 }
 const scan = (fields) => ({
   status: 'ok', partial: false, classification: 'SAFE', risk_score: 0, coverage: {honeypot: 1},
@@ -743,6 +749,8 @@ def test_proceed_does_nothing_while_the_overlay_is_not_visible(kind):
   assert.match(byId('shieldai-covered').textContent,
     /covering or altering this warning, so the button to continue is disabled until the warning is fully visible/);
   reportVisibility(true);
+  // Back in view, Proceed is disabled again for its half second (none here).
+  await flush();
   userClick(byId('shieldai-proceed'));
   await flush();
   await assertVerdicts([['request', 'proceed']]);
@@ -784,15 +792,31 @@ REAL_DELAY_HARNESS = CONTENT_HARNESS.replace(
     "fs.readFileSync('extension/content.js', 'utf8')",
 )
 
+# REAL_DELAY_HARNESS, where content.js's half-second and hold timers (500 and 1500 ms) wait until the
+# test calls releaseTimers(); every other timer runs as usual.
+HELD_TIMERS_HARNESS = REAL_DELAY_HARNESS.replace(
+    "let clock = 1000000;",
+    "let clock = 1000000;\nconst heldTimers = new Map();\nlet heldId = 0;\n"
+    "function releaseTimers() { const due = [...heldTimers.values()]; heldTimers.clear(); due.forEach(fn => fn()); }",
+    1,
+).replace(
+    "  window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,",
+    "  window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent,\n"
+    "  setTimeout: (fn, delay) => [500, 1500].includes(delay) ? (heldTimers.set(--heldId, fn), heldId) : setTimeout(fn, delay),\n"
+    "  clearTimeout: id => id < 0 ? heldTimers.delete(id) : clearTimeout(id),",
+    1,
+)
+
 
 def test_proceed_needs_the_dialog_visible_without_a_break_for_half_a_second():
     run_node(
-        REAL_DELAY_HARNESS
+        HELD_TIMERS_HARNESS
         + r"""
 (async () => {
   analyze = async () => ({result: scan({})});
   await intercept('request');
   await new Promise(resolve => setTimeout(resolve, 550));
+  releaseTimers();
   const proceed = byId('shieldai-proceed');
   assert(!proceed.disabled);
   clock += 600;
@@ -808,6 +832,7 @@ def test_proceed_needs_the_dialog_visible_without_a_break_for_half_a_second():
   await flush();
   assert.deepEqual(verdicts(), [], 'a Proceed counted before the dialog was visible for half a second');
   clock += 1;
+  releaseTimers();
   userClick(proceed);
   await flush();
   await assertVerdicts([['request', 'proceed']]);
@@ -840,7 +865,7 @@ def test_a_dialog_kept_out_of_view_rejects_the_request():
 
 def test_the_half_second_counts_from_when_a_cover_ends():
     run_node(
-        REAL_DELAY_HARNESS
+        HELD_TIMERS_HARNESS
         + r"""
 (async () => {
   analyze = async () => ({result: scan({})});
@@ -856,10 +881,49 @@ def test_the_half_second_counts_from_when_a_cover_ends():
   await flush();
   assert.deepEqual(verdicts(), [], 'a click right after a long cover ended counted');
   clock += 500;
+  releaseTimers();
   userClick(proceed);
   await flush();
   await assertVerdicts([['request', 'proceed']]);
 """
+    )
+
+
+@pytest.mark.parametrize("how", ["click", "hold"])
+def test_proceed_is_disabled_again_while_the_dialog_regains_its_half_second(how):
+    assert "releaseTimers" in HELD_TIMERS_HARNESS and "heldTimers.set" in HELD_TIMERS_HARNESS
+    run_node(
+        HELD_TIMERS_HARNESS
+        + r"""
+(async () => {
+  const how = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: scan(how === 'hold' ? {classification: 'BLOCK_RECOMMENDED', risk_score: 95} : {})});
+  await intercept('request');
+  const proceed = byId('shieldai-proceed');
+  const press = () => how === 'click'
+    ? userClick(proceed)
+    : proceed.dispatch('pointerdown', {isTrusted: true, button: 0, isPrimary: true});
+  assert(proceed.disabled, 'Proceed was enabled as the dialog appeared');
+  clock += 500;
+  releaseTimers();
+  assert(!proceed.disabled, 'Proceed stayed disabled after its half second');
+  // The dialog leaves view and comes back: its half second starts again, and Proceed says so.
+  reportVisibility(false);
+  clock += 1000;
+  reportVisibility(true);
+  assert(proceed.disabled, 'Proceed looked enabled right after the dialog came back into view');
+  press();
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a press before the half second counted');
+  clock += 500;
+  releaseTimers();
+  assert(!proceed.disabled, 'Proceed stayed disabled after the dialog was back in view for half a second');
+  press();
+  releaseTimers();
+  for (let i = 0; i < 10 && verdicts().length === 0; i++) await flush();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        how,
     )
 
 
@@ -917,6 +981,33 @@ def test_a_new_dialog_starts_its_visibility_afresh():
   await flush();
   await assertVerdicts([['request', 'proceed']]);
 """
+    )
+
+
+@pytest.mark.parametrize("how", ["click", "hold"])
+def test_a_system_clock_set_back_does_not_swallow_the_users_proceed(how):
+    # A time sync can set the system clock back a second (WSL does under load). The half second
+    # before Proceed counts is measured on a clock that does not move with it.
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const how = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: scan(how === 'hold' ? {classification: 'BLOCK_RECOMMENDED', risk_score: 95} : {})});
+  await intercept('request');
+  const proceed = byId('shieldai-proceed');
+  await flush();
+  assert(!proceed.disabled);
+  wallClockStep = -1000;
+  if (how === 'click') {
+    userClick(proceed);
+  } else {
+    proceed.dispatch('pointerdown', {isTrusted: true, button: 0, isPrimary: true});
+  }
+  for (let i = 0; i < 10 && verdicts().length === 0; i++) await flush();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        how,
     )
 
 
@@ -1762,7 +1853,7 @@ const chrome = {
 };
 const contentWorld = vm.createContext({
   window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,
-  console, Date, MutationObserver: FakeMutationObserver, IntersectionObserver: FakeIntersectionObserver,
+  console, Date, performance, MutationObserver: FakeMutationObserver, IntersectionObserver: FakeIntersectionObserver,
   fetch: async url => ({json: async () => JSON.parse(fs.readFileSync(url.replace('chrome-extension://id/', 'extension/'), 'utf8'))}),
 });
 const pageWorld = vm.createContext({
@@ -1873,6 +1964,359 @@ def test_legacy_typed_data_is_shown_field_by_field_end_to_end(method):
   assert.deepEqual(plain(sent[0].params), plain([legacy, '0x' + 'b'.repeat(40)]));
 """,
         method,
+    )
+
+
+def held_fetch_harness():
+    """CONTENT_HARNESS where a fetch given the delay 'held' waits until the test calls releaseHeld();
+    reachedHeld resolves once such a fetch has started."""
+    harness = CONTENT_HARNESS.replace(
+        "    if (delay) await new Promise(resolve => setTimeout(resolve, delay));",
+        "    if (delay === 'held') { heldStarted(); await held; }\n"
+        "    else if (delay) await new Promise(resolve => setTimeout(resolve, delay));",
+        1,
+    ).replace(
+        "let fetchDelays = [];",
+        "let fetchDelays = [];\nlet releaseHeld, heldStarted;\n"
+        "const held = new Promise(resolve => { releaseHeld = resolve; });\n"
+        "const reachedHeld = new Promise(resolve => { heldStarted = resolve; });",
+        1,
+    )
+    assert "await held;" in harness and "const reachedHeld" in harness
+    return harness
+
+
+@pytest.mark.parametrize("kind", ["analysis", "error", "signature", "timed-out"])
+def test_escape_while_the_result_screen_loads_its_language_shows_no_result(kind):
+    run_node(
+        held_fetch_harness()
+        + r"""
+(async () => {
+  const kind = JSON.parse(process.argv[1]);
+  analyze = async () => {
+    if (kind === 'timed-out') clock += 51000;
+    return kind === 'error' ? {error: 'API error 503: unavailable'} : {result: scan({})};
+  };
+  // The loading screen's language file comes at once; the result screen's is held, so the user
+  // presses Escape while the result screen is waiting for it.
+  fetchDelays = [0, 'held'];
+  if (kind === 'signature') {
+    await intercept('request', {signMethod: 'personal_sign', data: '0x68656c6c6f', chainId: 56}, 'personal_sign');
+  } else {
+    await intercept('request');
+  }
+  await reachedHeld;
+  assert(overlay() && overlay().innerHTML.includes('shieldai-loading'), 'the loading screen was not on screen');
+  userKey('Escape');
+  releaseHeld();
+  for (let i = 0; i < 3; i++) await flush();
+  assert.equal(overlay(), null, 'a result screen was mounted for a request the user already rejected');
+  await assertVerdicts([['request', 'block']]);
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length, 0);
+""",
+        kind,
+    )
+
+
+def test_a_rejected_request_stays_rejected_while_more_than_a_hundred_others_settle():
+    run_node(
+        held_fetch_harness()
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  fetchDelays = [0, 'held'];
+  await intercept('request');
+  await reachedHeld;
+  userKey('Escape');
+  // With the firewall switched off, each of these is settled at once, with a proceed, while the
+  // rejected request's result screen still waits for its language file.
+  storage.enabled = false;
+  for (let i = 0; i < 101; i++) {
+    const requestId = `other-${i}`;
+    deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId, method: 'eth_sendTransaction',
+      tx: {to: '0x' + 'a'.repeat(40), chainId: 56}, proof: await proofFor(token, `${requestId}:intercept`)});
+  }
+  for (let i = 0; i < 3; i++) await flush();
+  assert.equal(verdicts().filter(({requestId}) => requestId !== 'request').length, 101);
+  releaseHeld();
+  for (let i = 0; i < 3; i++) await flush();
+  assert.equal(overlay(), null, 'a result screen was mounted for a request the user already rejected');
+  assert.deepEqual(verdicts().filter(({requestId}) => requestId === 'request').map(({action}) => action), ['block']);
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length, 0);
+"""
+    )
+
+
+@pytest.mark.parametrize(
+    "kind", ["loading-never-loads", "analysis-never-returns", "unknown-structure-never-loads", "shown"]
+)
+def test_a_request_left_open_past_the_fail_closed_timer_is_dropped(kind):
+    # inject.js fails closed 60 seconds after an intercept unless the overlay is shown, and does not
+    # tell content.js. content.js drops such a request after its own limit, which outlasts that timer;
+    # the test runs it with a 100 ms limit.
+    content = (ROOT / "extension" / "content.js").read_text(encoding="utf-8")
+    inject = (ROOT / "extension" / "inject.js").read_text(encoding="utf-8")
+    limit = int(re.search(r"const OPEN_REQUEST_LIMIT_MS = (\d+);", content).group(1))
+    ceiling = int(re.search(r'finish\("block"\), (\d+)\)', inject).group(1))
+    assert ceiling < limit <= ceiling + 10000, (ceiling, limit)
+    source = "withShortDelays(fs.readFileSync('extension/content.js', 'utf8'))"
+    harness = held_fetch_harness().replace(
+        source,
+        f"(source => {{ assert(source.includes('const OPEN_REQUEST_LIMIT_MS = {limit};')); return source.replace("
+        f"'const OPEN_REQUEST_LIMIT_MS = {limit};', 'const OPEN_REQUEST_LIMIT_MS = 100;'); }})({source})",
+        1,
+    )
+    assert "const OPEN_REQUEST_LIMIT_MS = 100;" in harness
+    run_node(
+        harness
+        + r"""
+(async () => {
+  const kind = JSON.parse(process.argv[1]);
+  const past = () => new Promise(resolve => setTimeout(resolve, 250));
+  const shown = () => posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length;
+  analyze = async () => ({result: scan({})});
+  if (kind === 'shown') {
+    // A request whose overlay is on screen waits for the user however long they take.
+    await intercept('request');
+    await past();
+    userClick(byId('shieldai-proceed'));
+    await flush();
+    await assertVerdicts([['request', 'proceed']]);
+    return;
+  }
+  if (kind === 'analysis-never-returns') {
+    analyze = () => new Promise(() => {});
+    await intercept('request');
+    assert(overlay() && overlay().innerHTML.includes('shieldai-loading'), 'the loading screen was not on screen');
+    await past();
+  } else {
+    // The language file of the first screen never comes until the limit has passed.
+    fetchDelays = ['held'];
+    await intercept('request', kind === 'unknown-structure-never-loads'
+      ? {unknownStructure: true} : {to: '0x' + 'a'.repeat(40), chainId: 56});
+    await reachedHeld;
+    await past();
+    releaseHeld();
+    for (let i = 0; i < 3; i++) await flush();
+    assert.equal(analyses.length, 0, 'a dropped request was sent for analysis');
+  }
+  assert.equal(overlay(), null, 'a screen stayed or was mounted for a dropped request');
+  assert.deepEqual(verdicts(), [], 'a verdict was sent for a request inject.js already failed closed');
+  assert.equal(shown(), 0);
+""",
+        kind,
+    )
+
+
+def test_a_settled_request_replayed_after_a_hundred_others_is_ignored():
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  analyze = async () => ({result: scan({})});
+  await intercept('first');
+  userClick(byId('shieldai-block'));
+  await flush();
+  // With the firewall switched off, each of these is settled at once, with a proceed.
+  storage.enabled = false;
+  for (let i = 0; i < 101; i++) {
+    const requestId = `other-${i}`;
+    deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId, method: 'eth_sendTransaction',
+      tx: {to: '0x' + 'a'.repeat(40), chainId: 56}, proof: await proofFor(token, `${requestId}:intercept`)});
+  }
+  for (let i = 0; i < 3; i++) await flush();
+  assert.equal(verdicts().length, 102);
+  storage.enabled = true;
+  // The page replays the first request's intercept, proof and all.
+  deliver({type: 'SHIELDAI_TX_INTERCEPT', requestId: 'first', method: 'eth_sendTransaction',
+    tx: {to: '0x' + 'a'.repeat(40), chainId: 56}, proof: await proofFor(token, 'first:intercept')});
+  for (let i = 0; i < 3; i++) await flush();
+  assert.equal(analyses.length, 1, 'a replayed request was analysed again');
+  assert.equal(overlay(), null, 'a replayed request was shown again');
+  assert.equal(verdicts().length, 102);
+"""
+    )
+
+
+def capped_harness(harness, replacements, source="withShortDelays(fs.readFileSync('extension/content.js', 'utf8'))", match=None):
+    """harness with content.js loaded after the given replacements of its source, each asserted.
+    source is the expression the harness loads content.js's source with, found in the text match."""
+    match = match or source
+    steps = "".join(
+        f".replace({json.dumps(old)}, {json.dumps(new)})" for old, new in replacements
+    )
+    checks = " && ".join(f"source.includes({json.dumps(old)})" for old, _ in replacements)
+    patched = harness.replace(
+        match, match.replace(source, f"(source => {{ assert({checks}); return source{steps}; }})({source})"), 1
+    )
+    assert patched != harness
+    return patched
+
+
+def test_open_requests_are_capped_and_a_request_over_the_cap_is_not_taken():
+    run_node(
+        capped_harness(CONTENT_HARNESS, [
+            ("const OPEN_REQUESTS_MAX = 100;", "const OPEN_REQUESTS_MAX = 3;"),
+            ("const OPEN_REQUEST_LIMIT_MS = 65000;", "const OPEN_REQUEST_LIMIT_MS = 3000;"),
+        ])
+        + r"""
+(async () => {
+  // Three analyses that never come back hold three requests open.
+  analyze = () => new Promise(() => {});
+  for (const id of ['a', 'b', 'c']) await intercept(id);
+  assert.equal(analyses.length, 3);
+  await intercept('d', {to: '0x' + 'd'.repeat(40), chainId: 56});
+  assert.equal(analyses.length, 3, 'a request over the cap was analysed');
+  assert(!overlay().innerHTML.includes('d'.repeat(40)), 'a request over the cap was shown');
+  assert.deepEqual(verdicts(), [], 'content.js sent a verdict for a request over the cap');
+  // The user rejects the request on screen; with one settled, a new one is taken again.
+  userKey('Escape');
+  await flush();
+  await assertVerdicts([['c', 'block']]);
+  await intercept('e');
+  assert.equal(analyses.length, 4);
+"""
+    )
+
+
+def test_seen_requests_are_capped_until_their_window_has_passed():
+    run_node(
+        capped_harness(CONTENT_HARNESS, [
+            ("const SEEN_REQUESTS_LIMIT = 100;", "const SEEN_REQUESTS_LIMIT = 2;"),
+            ("const SEEN_REQUESTS_MAX = 200;", "const SEEN_REQUESTS_MAX = 5;"),
+        ])
+        + r"""
+(async () => {
+  // With the firewall switched off, each request is settled at once, with a proceed.
+  storage.enabled = false;
+  for (let i = 0; i < 5; i++) await intercept(`old-${i}`);
+  assert.equal(verdicts().length, 5);
+  await intercept('over');
+  assert.equal(verdicts().length, 5, 'a request over the cap was taken');
+  // Once the window has passed, the oldest ids are let go and a new request is taken.
+  clock += 65001;
+  await intercept('later');
+  await assertVerdicts([...[0, 1, 2, 3, 4].map(i => [`old-${i}`, 'proceed']), ['later', 'proceed']]);
+"""
+    )
+
+
+def test_a_request_over_the_open_cap_is_rejected_by_inject_timer():
+    harness = capped_harness(
+        FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
+        .replace(
+            "const sent = [];",
+            "const sent = [];\nlet analyses = 0;\nconst analysisGate = new Promise(() => {});",
+            1,
+        )
+        .replace(
+            "    async sendMessage(message) {\n",
+            "    async sendMessage(message) {\n"
+            "      if (message.type === 'SHIELDAI_ANALYZE') { analyses++; await analysisGate; }\n",
+            1,
+        ),
+        [
+            ("const OPEN_REQUESTS_MAX = 100;", "const OPEN_REQUESTS_MAX = 1;"),
+            ("const OPEN_REQUEST_LIMIT_MS = 65000;", "const OPEN_REQUEST_LIMIT_MS = 2000;"),
+        ],
+        source="withShortDelays(source)",
+        match="script === 'content' ? withShortDelays(source) : source",
+    )
+    # inject.js fails closed after 300 ms here instead of 60 s.
+    inject_source = "fs.readFileSync(`extension/${script}.js`, 'utf8')"
+    shortened = harness.replace(
+        inject_source,
+        inject_source + ".replace('finish(\"block\"), 60000)', 'finish(\"block\"), 300)')",
+        1,
+    )
+    assert shortened != harness
+    run_node(
+        shortened
+        + r"""
+(async () => {
+  const outcome = () => {
+    const pending = provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]});
+    const result = {value: null};
+    pending.then(() => { result.value = 'sent'; }, error => { result.value = error.code; });
+    return result;
+  };
+  outcome();
+  for (let i = 0; i < 20 && analyses < 1; i++) await flush();
+  assert.equal(analyses, 1);
+  const second = outcome();
+  for (let i = 0; i < 20 && second.value === null; i++) await flush();
+  assert.equal(second.value, 4001, 'the request over the cap was not rejected');
+  assert.equal(analyses, 1, 'the request over the cap was analysed');
+  assert.equal(sent.length, 0);
+"""
+    )
+
+
+def test_a_proceed_after_a_block_for_the_same_request_is_not_forwarded():
+    # Verdict proofs are made asynchronously, so a block's check can finish after a later
+    # proceed's: here the block's takes longer. The verdict that arrived first decides.
+    run_node(
+        INJECT_HARNESS.replace(
+            "context.crypto = vm.runInContext(`(host, signed) => ({",
+            "const slowBlock = (data, mac) => new TextDecoder().decode(data).endsWith(':block')\n"
+            "  ? new Promise(resolve => setTimeout(() => resolve(mac), 100)) : mac;\n"
+            "context.crypto = vm.runInContext(`(host, signed, slow) => ({",
+            1,
+        )
+        .replace("      return Promise.resolve(mac);", "      return Promise.resolve(slow(args[2], mac));", 1)
+        .replace("})`, context)(webcrypto, signatureMade);", "})`, context)(webcrypto, signatureMade, slowBlock);", 1)
+        + r"""
+(async () => {
+  const {pending, requestId} = await startRequest();
+  let outcome = null;
+  pending.then(() => { outcome = 'sent'; }, error => { outcome = error.code; });
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: await proof(requestId, 'proceed')});
+  for (let i = 0; i < 5; i++) await flush();
+  assert.equal(sent.length, 0, 'a proceed after a block reached the wallet');
+  assert.equal(outcome, 4001);
+"""
+    )
+
+
+def test_escape_on_the_loading_screen_rejects_the_request_while_the_analysis_runs():
+    run_node(
+        FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)
+        .replace(
+            "const sent = [];",
+            "const sent = [];\nlet releaseAnalysis;\nconst analysisGate = new Promise(resolve => { releaseAnalysis = resolve; });",
+            1,
+        )
+        .replace(
+            "    async sendMessage(message) {\n",
+            "    async sendMessage(message) {\n      if (message.type === 'SHIELDAI_ANALYZE') await analysisGate;\n",
+            1,
+        )
+        + r"""
+(async () => {
+  const overlay = () => overlayRoot()?.getElementById('shieldai-overlay') || null;
+  let rejected = null;
+  const pending = provider.request({method: 'eth_sendTransaction', params: [{to: '0x' + 'a'.repeat(40)}]});
+  pending.catch(error => { rejected = error; });
+  for (let i = 0; i < 20 && !(overlay() && overlay().innerHTML.includes('shieldai-loading')); i++) await flush();
+  assert(overlay() && overlay().innerHTML.includes('shieldai-loading'), 'the loading screen did not appear');
+  // A page's synthetic Escape decides nothing.
+  overlay().dispatch('keydown', {key: 'Escape', isTrusted: false});
+  await flush();
+  assert(overlay(), 'a synthetic Escape removed the loading screen');
+  assert.equal(rejected, null);
+  // The user's Escape rejects the request at once, while the analysis is still running.
+  overlay().dispatch('keydown', {key: 'Escape', isTrusted: true});
+  for (let i = 0; i < 20 && rejected === null; i++) await flush();
+  assert(rejected, 'Escape on the loading screen did not reject the request');
+  assert.equal(rejected.code, 4001);
+  assert.equal(overlay(), null);
+  // The analysis that comes back afterwards shows nothing and sends nothing to the wallet.
+  releaseAnalysis();
+  for (let i = 0; i < 3; i++) await flush();
+  assert.equal(overlay(), null, 'a result was shown for a request the user already rejected');
+  assert.equal(sent.length, 0);
+"""
     )
 
 

@@ -1,6 +1,6 @@
-# Privacy Policy for ShieldAI Transaction Firewall
+# Privacy Policy for ShieldBot Transaction Firewall
 
-The privacy policy for ShieldBot, including the ShieldAI Transaction Firewall browser extension, the Telegram bot and the API, is published at:
+The privacy policy for ShieldBot, including the ShieldBot Transaction Firewall browser extension, the Telegram bot and the API, is published at:
 
 https://shieldbotsecurity.online/privacy.html
 

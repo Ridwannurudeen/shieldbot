@@ -4,12 +4,11 @@
   "version": "3.4.0",
   "description": "__MSG_extDescription__",
   "default_locale": "en",
-  "minimum_chrome_version": "111",
+  "minimum_chrome_version": "116",
   "permissions": [
     "storage",
     "permissions",
-    "sidePanel",
-    "tabs"
+    "sidePanel"
   ],
   "side_panel": {
     "default_path": "sidepanel.html"
@@ -57,8 +56,6 @@
     {
       "resources": [
         "overlay.css",
-        "welcome.html",
-        "i18n.js",
         "locales/en/messages.json",
         "locales/zh/messages.json",
         "locales/vi/messages.json",

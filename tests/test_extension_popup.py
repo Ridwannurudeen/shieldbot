@@ -380,6 +380,53 @@ ready().then(() => {
     assert result.returncode == 0 and "completed" in result.stdout, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("granted", [True, False], ids=["granted", "withheld"])
+def test_welcome_asks_only_for_https_access_and_only_when_it_is_missing(granted):
+    # https://*/* is a required host permission, granted at install; localhost is optional and the
+    # popup asks for it only when the user configures a localhost API.
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for extension JavaScript regression tests")
+    script = r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const elements = {};
+const element = id => elements[id] ||= {textContent: '', style: {}, disabled: false, listeners: {},
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }};
+let ready;
+const granted = JSON.parse(process.argv[1]);
+const asked = [], checked = [];
+const context = vm.createContext({
+  window: {addEventListener(type, fn) { if (type === 'DOMContentLoaded') ready = fn; }},
+  document: {getElementById: element, querySelector: selector => selector === '.version' ? element('version') : null},
+  initI18n: async () => {}, applyTranslations() {}, t: key => key, AbortSignal,
+  chrome: {
+    runtime: {getManifest: () => JSON.parse(fs.readFileSync('extension/manifest.json', 'utf8'))},
+    permissions: {
+      contains: async request => { checked.push(JSON.stringify(request)); return granted; },
+      request: async request => { asked.push(JSON.stringify(request)); return true; },
+    },
+    storage: {local: {get: async defaults => defaults}},
+  },
+  fetch: async () => ({ok: true}),
+});
+vm.runInContext(fs.readFileSync('extension/welcome.js', 'utf8'), context);
+(async () => {
+  await ready();
+  for (const fn of element('connectBtn').listeners.click) await fn();
+  assert.deepEqual(checked, ['{"origins":["https://*/*"]}']);
+  assert.deepEqual(asked, granted ? [] : ['{"origins":["https://*/*"]}']);
+  assert.equal(element('connectBtn').textContent, 'welcomeProtected');
+  assert.equal(element('statusMsg').textContent, 'welcomeFullyConnected');
+  console.log('completed');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run(
+        [node, "-e", script, "--", json.dumps(granted)],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert result.returncode == 0 and "completed" in result.stdout, result.stdout + result.stderr
+
+
 def test_extension_states_the_scan_chain_count_and_no_mempool_count():
     count = len(CHAIN_INFO)
     html = (EXTENSION / "popup.html").read_text(encoding="utf-8")
@@ -493,3 +540,95 @@ assert(cards[4].innerHTML.includes('Not flagged by a provider (sell not simulate
         cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_popup_escapes_api_values_in_text_and_attributes():
+    run_popup(r"""
+  const complete = {...unknownScan, status: 'ok', coverage: {structural: 1}, coverage_reasons: {}};
+  const hostile = {...complete, classification: '<img src=x>'};
+  const list = element('list');
+  context.renderCompactHistory([hostile], list);
+  assert(!list.innerHTML.includes('<img'), list.innerHTML);
+  context.renderDashFeed([hostile]);
+  assert(!byId('dash-feed').innerHTML.includes('<img'), byId('dash-feed').innerHTML);
+  context.renderDeployerAlerts([{chain_id: 56, deployer_address: '0x" onmouseover="alert(1)',
+    new_contract_address: "0x' onfocus='alert(1)", watch_reason: 'reason', created_at: 1}], list);
+  assert(!list.innerHTML.includes('" onmouseover'), list.innerHTML);
+  assert(!list.innerHTML.includes("' onfocus"), list.innerHTML);
+  for (const compact of [true, false]) {
+    const ctx = {resultEl: element('r'), loadingEl: element('l'), errorEl: element('e'), scoreNumEl: element('s'),
+      statsEl: element('st'), approvalsEl: element('a'), compact};
+    context.renderHealthData({high_risk: '<img src=x>', medium_risk: '<b>m</b>', total_value_at_risk_usd: 0, approvals: []}, ctx);
+    assert(!ctx.statsEl.innerHTML.includes('<img') && !ctx.statsEl.innerHTML.includes('<b>'), ctx.statsEl.innerHTML);
+  }
+""")
+
+
+def test_side_panel_guardian_health_puts_only_numbers_and_escaped_text_in_its_markup():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for extension JavaScript regression tests")
+    script = r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const source = fs.readFileSync('extension/sidepanel.js', 'utf8');
+const start = source.indexOf('  function renderGuardianHealth(health) {');
+const end = source.indexOf('  function renderGuardianAlerts(alerts) {', start);
+assert(start >= 0 && end > start);
+const guardianHealthEl = {innerHTML: ''};
+const context = vm.createContext({
+  guardianHealthEl, t: key => key,
+  escapeHtml: value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'),
+});
+vm.runInContext(source.slice(start, end) + '\nthis.renderGuardianHealth = renderGuardianHealth;', context);
+context.renderGuardianHealth({
+  status: 'ok', health_score: '<svg onload=1>', level: 'low', total_approvals: '<img src=x>',
+  dangerous_approvals: '<b>2</b>', total_value_at_risk_usd: '<i>3</i>',
+  components: {dangerous_approvals: '<script>1</script>'}, warnings: [],
+});
+for (const tag of ['<svg', '<img', '<b>', '<i>', '<script']) {
+  assert(!guardianHealthEl.innerHTML.includes(tag), guardianHealthEl.innerHTML);
+}
+console.log('completed');
+"""
+    result = subprocess.run([node, "-e", script], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert result.returncode == 0 and "completed" in result.stdout, result.stdout + result.stderr
+
+
+def test_side_panel_names_each_chain_as_the_popup_does():
+    names = dict(
+        (int(key), value)
+        for key, value in re.findall(r'(\d+): "([^"]+)"', re.search(r"const CHAIN_NAMES = \{([^}]*)\}", (EXTENSION / "popup.js").read_text(encoding="utf-8")).group(1))
+    )
+    select = re.search(r'<select id="chainSelect"[^>]*>(.*?)</select>', (EXTENSION / "sidepanel.html").read_text(encoding="utf-8"), re.S)
+    offered = {int(value): label for value, label in re.findall(r'<option value="(\d+)">([^<]+)</option>', select.group(1))}
+    assert offered == names
+
+
+def test_side_panel_announces_new_messages():
+    messages = next(element for element in parse("sidepanel.html") if element.get("id") == "messages")
+    assert messages.get("aria-live") == "polite"
+
+
+def test_dashboard_tags_no_layer_live():
+    # The tags were fixed text, shown whether or not anything had loaded.
+    assert ">LIVE<" not in (EXTENSION / "popup.html").read_text(encoding="utf-8")
+
+
+def test_popup_labels_use_their_translations():
+    english = json.loads((EXTENSION / "locales" / "en" / "messages.json").read_text(encoding="utf-8"))
+    elements = parse("popup.html")
+    for key in ("healthScoreLabel", "healthScanning", "healthScanDuration", "dashScanning", "dashHealthScore",
+                "dashHealthScoreLbl2", "historyEmpty"):
+        shown = [element for element in elements if element.get("data-i18n") == key]
+        assert shown and all(element.get("text", "").strip() == english[key] for element in shown), key
+    by_id = {element["id"]: element for element in elements if element.get("id")}
+    for element_id, key in (("statusText", "statusChecking"), ("dash-statusText", "statusChecking"),
+                            ("dash-healthScanBtn", "btnScanApprovals")):
+        assert by_id[element_id].get("data-i18n") == key, element_id
+
+
+def test_store_listing_claims_translations_only_where_they_are():
+    listing = (ROOT / "docs" / "store-listing.md").read_text(encoding="utf-8")
+    line = next(line for line in listing.splitlines() if "Tiếng Việt" in line and line.startswith("•"))
+    assert "popup" in line and "welcome page" in line and "side panel" in line, line

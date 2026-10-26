@@ -415,7 +415,7 @@
 
     <div class="hero">
       <h1>Privacy Policy</h1>
-      <div class="hero-meta">Last updated: September 2026 &nbsp;&middot;&nbsp; ShieldBot Security</div>
+      <div class="hero-meta">Last updated: October 2026 &nbsp;&middot;&nbsp; ShieldBot Security</div>
     </div>
 
     <h2>1. Who We Are</h2>
@@ -444,13 +444,15 @@
     <h2>3. What Data Is Stored Locally</h2>
     <p>The extension stores the following data in your browser's local storage (<code>chrome.storage.local</code>), which never leaves your device unless described otherwise:</p>
     <ul>
-      <li>Your API endpoint setting (default: api.shieldbotsecurity.online)</li>
-      <li>Firewall enabled/disabled state</li>
-      <li>Policy mode (Balanced or Strict)</li>
+      <li>Your settings: the API endpoint (default: api.shieldbotsecurity.online), whether the firewall is on, the policy mode (Balanced or Strict), the language, and the chain chosen for Wallet Health and the side panel</li>
       <li>The last 50 transaction scan results for the history view</li>
       <li>The last 100 addresses you chose to send to through a web page, to warn you when a later recipient only looks like one of them</li>
-      <li>The wallet address you enter in the Wallet Health scanner</li>
+      <li>The wallet address you enter in the Wallet Health scanner, which is sent to our API when you run a scan</li>
+      <li>A random chat identifier, made the first time you open the side panel; it is sent with each side panel chat message, in the <code>X-Install-Id</code> header and as <code>user_id</code></li>
+      <li>Up to 20 recent side panel chat messages</li>
     </ul>
+    <p>The side panel also keeps which of its tabs was open last, in its own local storage. Phishing check results are kept by site host in the browser's session storage (<code>chrome.storage.session</code>), which web pages cannot read and which is cleared when the browser closes.</p>
+    <p>When you press "Why is this risky?" on a warning, the extension sends the result of that check, as our API returned it, to the API's explanation endpoint (<code>/api/agent/explain</code>).</p>
 
     <h2>4. How We Use Transaction Data</h2>
     <p>Transaction data sent to our API is used exclusively to:</p>

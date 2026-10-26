@@ -9,10 +9,10 @@ below replaces it. Everything in it is true of the 3.4.0 code in this repository
 
 ## 1. Text to paste
 
-**Name** (unchanged; the manifest reads it from `_locales`):
+**Name** (changes with the package; the manifest reads it from `_locales`):
 
 ```
-ShieldAI Transaction Firewall
+ShieldBot Transaction Firewall
 ```
 
 **Summary** (the manifest description, 116 of 132 characters; Vietnamese and Chinese versions ship
@@ -25,7 +25,7 @@ Warns before you sign on 9 EVM chains, reports Unknown when a check cannot compl
 **Description** (Store listing tab, English):
 
 ```
-ShieldAI Transaction Firewall checks a transaction before your wallet asks you to sign it, and tells you plainly what it found.
+ShieldBot Transaction Firewall checks a transaction before your wallet asks you to sign it, and tells you plainly what it found.
 
 When a website asks your wallet to send a transaction, the extension shows an overlay first. It decodes common calls such as approvals, transfers and swaps, shows how much of your chain's own coin you are sending, what spending rights the call grants, and the full recipient address, and gives a verdict: Safe, Caution, High Risk or Block Recommended. You choose whether to continue or cancel. The extension warns you; it does not stop you.
 
@@ -44,7 +44,7 @@ Settings
 • When your wallet's network cannot be read or is not supported, the only option is Block.
 • Strict mode removes the option to continue when a check fails, the verdict is Unknown or Block Recommended, or the extension cannot read the request or its typed data.
 • Switching the extension off sends every request to your wallet as the page made it, with no warning, no analysis and no chain read. A frame or popup the page can script cannot be told the setting, so requests from one are still refused.
-• English, Tiếng Việt and 中文.
+• The warning overlay, the popup and the welcome page are in English, Tiếng Việt and 中文; the side panel is mostly in English.
 
 Privacy
 • Sent for analysis: the transaction's recipient, sender, value, call data and chain ID; for a signature request, the signing method and any EIP-712 typed data, never the text or hash you sign (and for those, not your address either); for an EIP-7702 transaction, each delegate's address; and the origin (scheme, host and port) of the sites you visit, for the phishing check.
@@ -60,7 +60,7 @@ Limits
 • A page can still hide or cover the warning, or lay something over it to trick you into clicking (clickjacking). The extension makes this harder (continue and sign buttons wait half a second after the warning appears, and work only once the warning has been fully visible for half a second since it last became visible) but cannot fully prevent it. If the page covers or alters the warning, those buttons do nothing and the warning says why. A page that makes the warning invisible without moving it away leaves the request waiting; nothing is sent. A page-wide filter from another extension (for example a dark-mode filter) can keep the continue button unavailable on that site.
 • A batch of calls (wallet_sendCalls) is checked one call at a time, each with its own warning. How the calls work together is not analysed.
 • A delegation (EIP-7702) your wallet signs in its own screens, and a send you make from the wallet itself, are not seen. The look-alike check only knows addresses you sent to through a page in this browser.
-• It runs on https pages only, in Chrome 111 or later.
+• It runs on https pages only, in Chrome 116 or later.
 ```
 
 Do not add claims the 3.4.0 extension does not make good on: no "blocks", no simulation or asset
@@ -83,9 +83,9 @@ smoke test in section 3 has passed with them.
    python -c "import pathlib, zipfile; root = pathlib.Path('extension'); z = zipfile.ZipFile('shieldbot-extension-v3.4.0.zip', 'w', zipfile.ZIP_DEFLATED); [z.write(p, p.relative_to(root).as_posix()) for p in sorted(root.rglob('*')) if p.is_file() and p.relative_to(root).as_posix() != 'README.md']; z.close()"
    ```
 
-4. In a clean Chrome profile (Chrome 111 or later, which the manifest now requires) open
+4. In a clean Chrome profile (Chrome 116 or later, which the manifest now requires) open
    `chrome://extensions`, turn on Developer mode, use Load unpacked
-   on the `extension` folder, and check: name "ShieldAI Transaction Firewall", version 3.4.0,
+   on the `extension` folder, and check: name "ShieldBot Transaction Firewall", version 3.4.0,
    no Errors button. Then run the smoke test below. Its manual release gate remains outstanding on
    both MetaMask and Rabby.
 5. Owner gate before the upload: in a clean Chrome profile with Rabby as the only wallet and 3.4.0
@@ -145,7 +145,7 @@ Run every step on MetaMask and on Rabby before treating this manual release gate
 a step asks for a request that should be refused, press Block or Reject on the warning and never sign.
 
 8. **Everyday calls** (2 minutes). On a dApp, connect the wallet, see the balance, and switch the
-   network from the dApp. All work as without the extension, with no ShieldAI warning.
+   network from the dApp. All work as without the extension, with no ShieldBot warning.
 9. **Chain** (3 minutes). Start a transaction and Proceed: the wallet shows it on the network the
    warning named. Start another, switch the network in the wallet while the warning is open, then
    Proceed: the dApp gets a rejection saying the wallet chain changed, and the wallet shows nothing.
@@ -227,7 +227,7 @@ a step asks for a request that should be refused, press Block or Reject on the w
    send to the same address with a few characters in its middle changed (keep the first six and
    last four): the warning shows both addresses in full with their middles marked, and at least
    HIGH RISK. Press Block. A send to the original address again shows no such warning.
-27. **Unknown network** (2 minutes). Switch the wallet to a network ShieldAI does not support (for
+27. **Unknown network** (2 minutes). Switch the wallet to a network ShieldBot does not support (for
    example Linea or zkSync Era) and start a transaction and a Personal Sign: each warning offers only
    Block (or Reject), in Balanced and Strict mode, and says why.
 28. **Explain button** (1 minute). A SAFE verdict has no "Why is this risky?" button; a CAUTION or
