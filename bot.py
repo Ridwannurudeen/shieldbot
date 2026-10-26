@@ -1702,7 +1702,7 @@ def format_scan_result(result: dict, chain_id: int) -> str:
 
     for check, status in result.get('checks', {}).items():
         status_icon = 'Unknown' if status is None else ('✅' if status else '❌')
-        check_name = check.replace('_', ' ').title()
+        check_name = result.get('check_labels', {}).get(check, check.replace('_', ' ').title())
         response += f"{status_icon} {check_name}\n"
 
     scam_matches = database_matches(result.get('scam_matches'))

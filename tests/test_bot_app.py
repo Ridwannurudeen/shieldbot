@@ -404,6 +404,33 @@ class TestScanResultNamesCommunityReports:
         assert "scam database match" not in text
         assert text.count("Reported by 3 users") == 1
 
+    @pytest.mark.parametrize("chain_id", [1, 10, 56, 137, 204, 8453, 42161, 4663])
+    def test_other_chains_keep_the_legacy_scam_check_label(self, bot_module, chain_id):
+        result = self._scan([], [])
+        result["checks"] = {"scam_database_clean": True}
+
+        text = bot_module.format_scan_result(result, chain_id)
+
+        assert "✅ Scam Database Clean" in text
+
+    def test_botchain_legacy_scam_check_names_its_scope(self, bot_module):
+        result = self._scan([], [])
+        result["checks"] = {"scam_database_clean": True}
+        result["check_labels"] = {
+            "scam_database_clean": (
+                "Scam Database: no GoPlus address labels "
+                "(GoPlus token security does not cover BOT Chain)"
+            ),
+        }
+
+        text = bot_module.format_scan_result(result, 677)
+
+        assert (
+            "✅ Scam Database: no GoPlus address labels "
+            "(GoPlus token security does not cover BOT Chain)"
+        ) in text
+        assert "✅ Scam Database Clean" not in text
+
     def test_database_matches_are_counted_apart_from_community_reports(self, bot_module):
         text = bot_module.format_scan_result(self._scan(
             [ADMIN_MATCH, COMMUNITY_MATCH], ["Found 1 scam database match(es)", "Reported by 3 users"],

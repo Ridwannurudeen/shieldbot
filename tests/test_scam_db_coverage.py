@@ -246,6 +246,24 @@ async def test_botchain_address_labels_answer_coverage_without_token_security(mo
     assert risk["risk_level"] in {"LOW", "MEDIUM", "HIGH"}
 
 
+@pytest.mark.asyncio
+async def test_botchain_legacy_scan_carries_the_address_label_scope(mock_web3_client):
+    payload = {"code": 1, "result": BOTCHAIN_ADDRESS_RECORD}
+    http, session = _goplus_http(payload)
+    with http as factory:
+        factory.return_value.__aenter__ = AsyncMock(return_value=session)
+        factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        result = await TransactionScanner(mock_web3_client).scan_address(ADDRESS, chain_id=677)
+
+    assert result["checks"]["scam_database_clean"] is True
+    assert result["check_labels"] == {
+        "scam_database_clean": (
+            "Scam Database: no GoPlus address labels "
+            "(GoPlus token security does not cover BOT Chain)"
+        ),
+    }
+
+
 def _complete_honeypot():
     return {"is_honeypot": False, "can_buy": True, "can_sell": True, "buy_tax": 0, "sell_tax": 0}
 
