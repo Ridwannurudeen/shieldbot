@@ -98,6 +98,10 @@ RPC_TIMEOUT_SECONDS = 30
 # seconds before it falls back to the official RPC rather than the whole scan's deadline.
 SIM_RPC_TIMEOUT_SECONDS = 5
 CACHE_TTL_SECONDS = 60
+# Simulations admitted and not finished: the one holding the lane and those waiting for it. One run takes
+# seconds, so a token waiting behind more would miss the firewall's 7.5 s and the bot's 25 s deadlines
+# anyway; a new token at the cap is left unknown without a simulation.
+MAX_SIMULATIONS = 4
 
 MAX_UINT256 = 2**256 - 1
 MAX_UINT160 = 2**160 - 1
@@ -907,6 +911,16 @@ class RobinhoodSimulator:
             return cached
         flight_key = (asyncio.get_running_loop(), token)
         if flight_key not in self._inflight:
+            if len(self._inflight) >= MAX_SIMULATIONS:
+                # Not cached, so the token is simulated once a simulation in progress finishes.
+                result = aggregate_outcomes(
+                    [], [f"Simulation not run: {MAX_SIMULATIONS} simulations already in progress"]
+                )
+                # The simulation could not run, so it cannot say the token sells; nor can GoPlus.
+                result["rpc_failed"] = True
+                result["observed_at"] = time.time()
+                unknown_ledger.record(SIMULATION_PROVIDER, 4663, "failed")
+                return result
             self._inflight[flight_key] = asyncio.create_task(self._simulate(token, flight_key))
         elif not BACKGROUND.get():
             self._promoted.add(token)

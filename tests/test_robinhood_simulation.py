@@ -27,6 +27,7 @@ from services.robinhood_simulation import (
     LOG_WINDOW_BLOCKS,
     MAX_LOG_WINDOWS,
     MAX_POOLS,
+    MAX_SIMULATIONS,
     MIN_TRAP_COST_WEI,
     ROUTES,
     TOKEN_REFUSED,
@@ -2308,6 +2309,135 @@ async def test_distinct_token_simulations_are_serialized():
     await asyncio.gather(first, second)
     assert second_started.is_set()
     assert maximum_active == 1
+
+
+# --- the admission cap ----------------------------------------------------------------------------
+
+
+def distinct_tokens(count):
+    return ["0x" + f"{i:040x}" for i in range(1, count + 1)]
+
+
+def held_simulator(tokens):
+    """A simulator whose run for each token waits until that token's event is set."""
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+    releases = {token: asyncio.Event() for token in tokens}
+    started = []
+
+    async def run(token):
+        started.append(token)
+        await releases[token].wait()
+        return aggregate_outcomes([], ["No supported pool found"])
+
+    simulator._run = run
+    return simulator, releases, started
+
+
+@pytest.mark.asyncio
+async def test_a_new_token_at_the_cap_is_unknown_without_a_task_or_an_rpc_call():
+    *admitted, refused = distinct_tokens(MAX_SIMULATIONS + 1)
+    simulator, releases, started = held_simulator(admitted)
+    callers = [asyncio.create_task(simulator.simulate(token)) for token in admitted]
+    await asyncio.sleep(0)
+    with (
+        patch.object(
+            robinhood_simulation.asyncio, "create_task", wraps=asyncio.create_task
+        ) as create_task,
+        patch.object(robinhood_simulation.aiohttp, "ClientSession") as session,
+    ):
+        result = await simulator.simulate(refused)
+    create_task.assert_not_called()
+    session.assert_not_called()
+    assert refused not in started
+    assert len(simulator._inflight) == MAX_SIMULATIONS
+    assert all(result[field] is None for field in FIELDS)
+    assert result["rpc_failed"] is True
+    assert result["reason"] == (
+        f"Simulation not run: {MAX_SIMULATIONS} simulations already in progress"
+    )
+    assert refused not in simulator._cache
+    for release in releases.values():
+        release.set()
+    await asyncio.gather(*callers)
+
+
+@pytest.mark.asyncio
+async def test_the_same_token_at_the_cap_joins_its_simulation():
+    tokens = distinct_tokens(MAX_SIMULATIONS)
+    simulator, releases, started = held_simulator(tokens)
+    callers = [asyncio.create_task(simulator.simulate(token)) for token in tokens]
+    await asyncio.sleep(0)
+    joined = asyncio.create_task(simulator.simulate(tokens[0]))
+    await asyncio.sleep(0)
+    assert len(simulator._inflight) == MAX_SIMULATIONS
+    for release in releases.values():
+        release.set()
+    results = await asyncio.gather(*callers)
+    assert await joined is results[0]
+    assert "not run" not in results[0]["reason"]
+    assert started.count(tokens[0]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_new_token_is_admitted_again_once_a_simulation_finishes():
+    *tokens, later = distinct_tokens(MAX_SIMULATIONS + 1)
+    simulator, releases, started = held_simulator([*tokens, later])
+    callers = [asyncio.create_task(simulator.simulate(token)) for token in tokens]
+    await asyncio.sleep(0)
+    assert (await simulator.simulate(later))["rpc_failed"] is True
+    releases[tokens[0]].set()
+    await callers[0]
+    assert len(simulator._inflight) == MAX_SIMULATIONS - 1
+    admitted = asyncio.create_task(simulator.simulate(later))
+    await asyncio.sleep(0)
+    assert len(simulator._inflight) == MAX_SIMULATIONS
+    for release in releases.values():
+        release.set()
+    await asyncio.gather(*callers)
+    result = await admitted
+    assert later in started
+    assert result["reason"] == "No supported pool found"
+    assert "rpc_failed" not in result
+    assert simulator._inflight == {}
+
+
+@pytest.mark.asyncio
+async def test_the_count_returns_to_zero_after_simulations_raise():
+    simulator = RobinhoodSimulator("https://rpc.invalid")
+
+    async def run(token):
+        raise RuntimeError("boom")
+
+    simulator._run = run
+    tokens = distinct_tokens(MAX_SIMULATIONS + 1)
+    results = await asyncio.gather(
+        *(simulator.simulate(token) for token in tokens[:-1])
+    )
+    assert all(result["rpc_failed"] is True for result in results)
+    assert simulator._inflight == {}
+    result = await simulator.simulate(tokens[-1])
+    assert result["reason"] == "Simulation RPC request failed (RuntimeError)"
+
+
+@pytest.mark.asyncio
+async def test_the_count_returns_to_zero_after_simulations_are_cancelled():
+    *tokens, later = distinct_tokens(MAX_SIMULATIONS + 1)
+    simulator, releases, started = held_simulator([*tokens, later])
+    callers = [asyncio.create_task(simulator.simulate(token)) for token in tokens]
+    # Let every simulation start: one cancelled before its first step never runs its finally.
+    while not started:
+        await asyncio.sleep(0)
+    for task in list(simulator._inflight.values()):
+        task.cancel()
+    outcomes = await asyncio.gather(*callers, return_exceptions=True)
+    assert all(isinstance(outcome, asyncio.CancelledError) for outcome in outcomes)
+    assert simulator._inflight == {}
+    admitted = asyncio.create_task(simulator.simulate(later))
+    await asyncio.sleep(0)
+    assert len(simulator._inflight) == 1
+    releases[later].set()
+    assert (await admitted)["reason"] == "No supported pool found"
+    assert simulator._inflight == {}
 
 
 # --- adapter shapes and integration -------------------------------------------------------------

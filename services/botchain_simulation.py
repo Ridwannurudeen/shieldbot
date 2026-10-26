@@ -92,6 +92,10 @@ V2_ROUTES = {
 # run and a confirmation, fit the interactive deadline; one request gives up after 12 s.
 MAX_POOLS = 2
 RPC_TIMEOUT_SECONDS = 12
+# Simulations admitted and not finished: the one holding the lane and those waiting for it. A run takes
+# several seconds at about 2 s a call, so a token waiting behind more would miss the firewall's 7.5 s and
+# the bot's 25 s deadlines anyway; a new token at the cap is left unknown without a simulation.
+MAX_SIMULATIONS = 4
 BUY_CAP_WEI = 5 * 10**17
 DEPTH_DIVISOR = 50
 # 0.05 BOT. A shallower pool would size a buy under 0.001 BOT, where swap rounding can pass for a tax;
@@ -601,6 +605,19 @@ class BotChainSimulator:
             return cached
         flight_key = (asyncio.get_running_loop(), token)
         if flight_key not in self._inflight:
+            if len(self._inflight) >= MAX_SIMULATIONS:
+                # Not cached, so the token is simulated once a simulation in progress finishes.
+                result = aggregate_outcomes(
+                    [],
+                    [
+                        f"Simulation not run: {MAX_SIMULATIONS} simulations already in progress"
+                    ],
+                )
+                # The simulation could not run, so it cannot say the token sells.
+                result["rpc_failed"] = True
+                result["observed_at"] = time.time()
+                unknown_ledger.record(SIMULATION_PROVIDER, self.chain_id, "failed")
+                return result
             self._inflight[flight_key] = asyncio.create_task(
                 self._simulate(token, flight_key)
             )
