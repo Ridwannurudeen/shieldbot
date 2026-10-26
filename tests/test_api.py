@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     """Create a TestClient with mocked dependencies."""
     # Patch heavy dependencies before importing api module
     mock_web3 = MagicMock()
@@ -84,6 +84,11 @@ def client():
     api_module.dex_service = mock_dex_service
     api_module.ethos_service = mock_ethos_service
     api_module.risk_engine = mock_risk_engine
+
+    # Every TestClient request comes from one address, so the global limiter (30 a minute, burst 10) would count
+    # requests from earlier tests and answer 429 depending on test order and timing. Each test gets its own, restored
+    # afterwards.
+    monkeypatch.setattr(api_module, "rate_limiter", api_module.RateLimiter(1000, 1000))
 
     from fastapi.testclient import TestClient
     return TestClient(api_module.app, raise_server_exceptions=False)
