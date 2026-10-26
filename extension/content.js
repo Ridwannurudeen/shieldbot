@@ -550,13 +550,20 @@
     });
     (document.body || document.documentElement).appendChild(host);
     _overlayHost = host;
+    // Proceed (or the hold) stays disabled for PROCEED_DELAY_MS after the
+    // dialog appears, and again each time it comes back into view, so it
+    // never looks ready while a press would not count.
     const proceed = root.getElementById("shieldai-proceed");
-    if (proceed) {
+    let proceedTimer = null;
+    const holdOffProceed = () => {
+      if (!proceed) return;
       proceed.disabled = true;
-      setTimeout(() => {
+      clearTimeout(proceedTimer);
+      proceedTimer = setTimeout(() => {
         proceed.disabled = false;
       }, PROCEED_DELAY_MS);
-    }
+    };
+    holdOffProceed();
     _dialogVisible = false;
     _visibleSince = Infinity;
     _visibilityObserver = new IntersectionObserver((entries) => {
@@ -567,7 +574,10 @@
       // end.
       const visible = entry.isVisible === true;
       if (!visible) _visibleSince = Infinity;
-      else if (!_dialogVisible) _visibleSince = performance.now();
+      else if (!_dialogVisible) {
+        _visibleSince = performance.now();
+        holdOffProceed();
+      }
       _dialogVisible = visible;
       if (entry.isIntersecting !== false) {
         clearTimeout(_outOfViewTimer);

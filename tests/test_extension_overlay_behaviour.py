@@ -749,6 +749,8 @@ def test_proceed_does_nothing_while_the_overlay_is_not_visible(kind):
   assert.match(byId('shieldai-covered').textContent,
     /covering or altering this warning, so the button to continue is disabled until the warning is fully visible/);
   reportVisibility(true);
+  // Back in view, Proceed is disabled again for its half second (none here).
+  await flush();
   userClick(byId('shieldai-proceed'));
   await flush();
   await assertVerdicts([['request', 'proceed']]);
@@ -790,15 +792,31 @@ REAL_DELAY_HARNESS = CONTENT_HARNESS.replace(
     "fs.readFileSync('extension/content.js', 'utf8')",
 )
 
+# REAL_DELAY_HARNESS, where content.js's half-second and hold timers (500 and 1500 ms) wait until the
+# test calls releaseTimers(); every other timer runs as usual.
+HELD_TIMERS_HARNESS = REAL_DELAY_HARNESS.replace(
+    "let clock = 1000000;",
+    "let clock = 1000000;\nconst heldTimers = new Map();\nlet heldId = 0;\n"
+    "function releaseTimers() { const due = [...heldTimers.values()]; heldTimers.clear(); due.forEach(fn => fn()); }",
+    1,
+).replace(
+    "  window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent, setTimeout, clearTimeout,",
+    "  window, document, chrome, crypto: webcrypto, TextEncoder, TextDecoder, CustomEvent,\n"
+    "  setTimeout: (fn, delay) => [500, 1500].includes(delay) ? (heldTimers.set(--heldId, fn), heldId) : setTimeout(fn, delay),\n"
+    "  clearTimeout: id => id < 0 ? heldTimers.delete(id) : clearTimeout(id),",
+    1,
+)
+
 
 def test_proceed_needs_the_dialog_visible_without_a_break_for_half_a_second():
     run_node(
-        REAL_DELAY_HARNESS
+        HELD_TIMERS_HARNESS
         + r"""
 (async () => {
   analyze = async () => ({result: scan({})});
   await intercept('request');
   await new Promise(resolve => setTimeout(resolve, 550));
+  releaseTimers();
   const proceed = byId('shieldai-proceed');
   assert(!proceed.disabled);
   clock += 600;
@@ -814,6 +832,7 @@ def test_proceed_needs_the_dialog_visible_without_a_break_for_half_a_second():
   await flush();
   assert.deepEqual(verdicts(), [], 'a Proceed counted before the dialog was visible for half a second');
   clock += 1;
+  releaseTimers();
   userClick(proceed);
   await flush();
   await assertVerdicts([['request', 'proceed']]);
@@ -846,7 +865,7 @@ def test_a_dialog_kept_out_of_view_rejects_the_request():
 
 def test_the_half_second_counts_from_when_a_cover_ends():
     run_node(
-        REAL_DELAY_HARNESS
+        HELD_TIMERS_HARNESS
         + r"""
 (async () => {
   analyze = async () => ({result: scan({})});
@@ -862,10 +881,49 @@ def test_the_half_second_counts_from_when_a_cover_ends():
   await flush();
   assert.deepEqual(verdicts(), [], 'a click right after a long cover ended counted');
   clock += 500;
+  releaseTimers();
   userClick(proceed);
   await flush();
   await assertVerdicts([['request', 'proceed']]);
 """
+    )
+
+
+@pytest.mark.parametrize("how", ["click", "hold"])
+def test_proceed_is_disabled_again_while_the_dialog_regains_its_half_second(how):
+    assert "releaseTimers" in HELD_TIMERS_HARNESS and "heldTimers.set" in HELD_TIMERS_HARNESS
+    run_node(
+        HELD_TIMERS_HARNESS
+        + r"""
+(async () => {
+  const how = JSON.parse(process.argv[1]);
+  analyze = async () => ({result: scan(how === 'hold' ? {classification: 'BLOCK_RECOMMENDED', risk_score: 95} : {})});
+  await intercept('request');
+  const proceed = byId('shieldai-proceed');
+  const press = () => how === 'click'
+    ? userClick(proceed)
+    : proceed.dispatch('pointerdown', {isTrusted: true, button: 0, isPrimary: true});
+  assert(proceed.disabled, 'Proceed was enabled as the dialog appeared');
+  clock += 500;
+  releaseTimers();
+  assert(!proceed.disabled, 'Proceed stayed disabled after its half second');
+  // The dialog leaves view and comes back: its half second starts again, and Proceed says so.
+  reportVisibility(false);
+  clock += 1000;
+  reportVisibility(true);
+  assert(proceed.disabled, 'Proceed looked enabled right after the dialog came back into view');
+  press();
+  await flush();
+  assert.deepEqual(verdicts(), [], 'a press before the half second counted');
+  clock += 500;
+  releaseTimers();
+  assert(!proceed.disabled, 'Proceed stayed disabled after the dialog was back in view for half a second');
+  press();
+  releaseTimers();
+  for (let i = 0; i < 10 && verdicts().length === 0; i++) await flush();
+  await assertVerdicts([['request', 'proceed']]);
+""",
+        how,
     )
 
 
