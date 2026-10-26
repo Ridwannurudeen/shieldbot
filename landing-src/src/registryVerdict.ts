@@ -1,6 +1,6 @@
 import type { Verdict } from "./components/Badge";
 
-// A registry record's verdict (ShieldBotVerdictRegistry on Robinhood Chain: LOW, MEDIUM, HIGH, HONEYPOT,
+// A registry record's verdict (ShieldBotVerdictRegistry on Robinhood Chain and BOT Chain: LOW, MEDIUM, HIGH, HONEYPOT,
 // UNKNOWN) as a chip. It is not a firewall verdict: a registry LOW or MEDIUM is a token's risk level as published
 // at one moment, and the guard allows the two alike, only while the record is fresh. So both take the neutral
 // registry shape, never SAFE's green or CAUTION's "!". HIGH, HONEYPOT and UNKNOWN take the firewall's HIGH RISK,

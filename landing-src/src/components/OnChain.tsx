@@ -65,6 +65,13 @@ const contracts = [
   },
 ];
 
+// The BOT Chain registry, as docs/DEPLOYMENTS.md records it. The same owner deployed both registries at nonce 0, so
+// the address equals the Robinhood Chain one: the chain is always named beside it. No records feed reads it yet.
+const botRegistry = {
+  address: "0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138",
+  href: "https://scan.botchain.ai/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138",
+};
+
 const reasonCodes = [
   [
     "0 ALLOWED",
@@ -285,6 +292,34 @@ export default function OnChain() {
           {contracts.map((contract) => (
             <ContractCard key={contract.address} {...contract} />
           ))}
+        </div>
+
+        <div className="mt-6 rounded-lg border border-hairline bg-ground-alt p-5 sm:p-6">
+          <h3 className="font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-secondary">
+            Also on BOT Chain (677)
+          </h3>
+          <div className="mt-3 grid grid-cols-1 gap-x-10 gap-y-3 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+            <div className="min-w-0">
+              <p className="font-mono text-sm font-medium text-ink">ShieldBotVerdictRegistry</p>
+              <a
+                href={botRegistry.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 inline-flex min-h-[44px] items-center gap-1.5 font-mono text-[13px] text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink"
+              >
+                <span className="lg:hidden">{short(botRegistry.address)}</span>
+                <span className="hidden lg:inline">{botRegistry.address}</span>
+                <Icon name="external" size={16} />
+              </a>
+              <p className="text-[13px] text-secondary">Deployed on BOT Chain on 26 October 2026</p>
+            </div>
+            <p className="min-w-0 text-sm leading-relaxed text-secondary">
+              Telegram /scan and /token results on BOT Chain can be recorded here, each with the hash of its
+              evidence. Any contract can read it with a BOT Chain RPC such as https://rpc.botchain.ai. No guard or
+              guarded transfer on BOT Chain. Source not yet verified on the explorer; the bytecode matches a local
+              build.
+            </p>
+          </div>
         </div>
 
         <div className="mt-12 grid grid-cols-1 gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">

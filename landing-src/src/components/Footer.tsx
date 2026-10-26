@@ -7,12 +7,17 @@ const linkClass = "inline-flex items-center min-h-[44px] md:min-h-[32px] text-[1
 const headingClass = "text-xs font-medium uppercase tracking-[0.08em] text-secondary";
 const docHeadingClass = "font-mono text-xs uppercase tracking-[0.08em] text-secondary";
 
-// The three Robinhood Chain contracts, as docs/DEPLOYMENTS.md records them (OnChain.tsx lists them in full).
+// The three Robinhood Chain contracts and the BOT Chain registry, as docs/DEPLOYMENTS.md records them (OnChain.tsx
+// lists them in full). The BOT Chain registry has the same address as the Robinhood Chain one, on its own explorer.
 const contracts = [
   { name: "Registry", address: "0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138" },
   { name: "Guard", address: "0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e" },
   { name: "Guarded transfer", address: "0x336254bA85406D9af39357101b688E2B757751b3" },
 ];
+const botRegistry = {
+  address: "0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138",
+  href: "https://scan.botchain.ai/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138",
+};
 
 interface Health {
   status: string;
@@ -189,6 +194,22 @@ export default function Footer() {
               ))}
             </dl>
             <p className="mt-3 text-[13px] leading-5 text-secondary">Deployed on Robinhood Chain on 27 September 2026.</p>
+            <h2 className={`mt-6 ${docHeadingClass}`}>Contracts · BOT Chain (677)</h2>
+            <dl className="mt-2 grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-x-5 font-mono text-[13px] leading-5">
+              {/* As wide as "Guarded transfer" above, so both address columns line up. */}
+              <dt className="min-w-[16ch] text-secondary">Registry</dt>
+              <dd className="min-w-0">
+                <a
+                  href={botRegistry.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-[44px] items-center text-ink underline decoration-hairline-strong md:min-h-8 underline-offset-4 transition-colors duration-150 ease-out hover:text-accent"
+                >
+                  {short(botRegistry.address)}
+                </a>
+              </dd>
+            </dl>
+            <p className="mt-3 text-[13px] leading-5 text-secondary">Deployed on BOT Chain on 26 October 2026.</p>
           </div>
           <div className="min-w-0">
             <h2 className={docHeadingClass}>Verdicts</h2>

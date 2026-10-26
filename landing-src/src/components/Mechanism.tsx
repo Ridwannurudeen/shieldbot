@@ -2,9 +2,9 @@ import { CHECK_ORDER, type CheckKey } from "./CheckRow";
 import { useStats } from "../liveStats";
 
 // A band under Why Unknown (same section to the eye: no top padding, no top rule): the check-cell legend, the six
-// check keys in a closed <details>, and three figures from GET /api/stats (api.py public_stats, src/liveStats.ts),
+// check keys in a closed <details>, and four figures from GET /api/stats (api.py public_stats, src/liveStats.ts),
 // fetched when the page loads. A source that is not running reports null there, and each figure then reads
-// Unavailable; nothing is filled in.
+// Unavailable; nothing is filled in. A reply without a chain's registry count (an older API) reads Unavailable for it.
 const chainNames: Record<number, string> = {
   1: "Ethereum",
   56: "BNB Chain",
@@ -125,7 +125,7 @@ export default function Mechanism() {
           </figure>
 
           <div>
-            <div className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
               <Figure
                 loading={loading}
                 value={count(stats?.transactions_monitored)}
@@ -142,8 +142,16 @@ export default function Mechanism() {
               />
               <Figure
                 loading={loading}
-                value={count(stats?.registry_records_confirmed)}
+                value={count(
+                  stats?.registry_records_confirmed_by_chain?.["4663"] ??
+                    stats?.registry_records_confirmed,
+                )}
                 label="Verdict records confirmed in the Robinhood Chain registry, all time"
+              />
+              <Figure
+                loading={loading}
+                value={count(stats?.registry_records_confirmed_by_chain?.["677"])}
+                label="Verdict records confirmed in the BOT Chain registry, all time"
               />
             </div>
             <p className="mt-6 text-xs leading-[18px] text-secondary">

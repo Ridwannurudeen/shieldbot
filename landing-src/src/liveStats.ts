@@ -12,6 +12,8 @@ export interface Stats {
     scanned_share: { window_hours: number; launches: number; scanned: number };
   } | null;
   registry_records_confirmed: number | null;
+  // Per registry chain; JSON object keys are strings ("4663", "677").
+  registry_records_confirmed_by_chain: Record<string, number> | null;
 }
 
 export interface LiveStats {
