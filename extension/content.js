@@ -242,7 +242,7 @@
     const lookalike = recipient === null ? null : await pastLookalike(recipient);
     // The user rejected it on the loading screen: it is settled, so its
     // result is not shown.
-    if (_rejectedWhileLoading.delete(requestId)) return;
+    if (_settledRequests.has(requestId)) return;
 
     if (Date.now() - received > DECISION_WINDOW_MS) {
       showTimedOutOverlay(requestId);
@@ -356,13 +356,20 @@
   // whose overlay goes away without a decision is rejected here.
   let _awaitingRequestId = null;
 
-  // Requests the user rejected with Escape on the loading screen, before
-  // their analysis came back.
-  const _rejectedWhileLoading = new Set();
+  // Requests a verdict has been sent for. The first verdict for a request is
+  // final: no later one is sent for it, whatever the order its proof would
+  // be made in, and a result that comes back for it (the user rejected it on
+  // the loading screen) is not shown. The oldest are dropped past the limit.
+  const _settledRequests = new Set();
 
   // Verdicts carry a proof for their own action, never the token, so the page
   // learns nothing it could use to forge or relabel a verdict.
   function postVerdict(requestId, action) {
+    if (_settledRequests.has(requestId)) return;
+    _settledRequests.add(requestId);
+    if (_settledRequests.size > SEEN_REQUESTS_LIMIT) {
+      _settledRequests.delete(_settledRequests.values().next().value);
+    }
     channelProof(requestId, action).then((proof) => {
       window.postMessage({ type: "SHIELDAI_TX_VERDICT", requestId, action, proof }, "*");
     });
@@ -747,7 +754,6 @@
     overlay.addEventListener("keydown", (event) => {
       if (!event.isTrusted || event.key !== "Escape" || _overlayHost !== host) return;
       event.preventDefault();
-      _rejectedWhileLoading.add(requestId);
       removeOverlay();
       postVerdict(requestId, "block");
     });
@@ -901,6 +907,8 @@
 
   async function showSignatureOverlay(requestId, tx, strict, response) {
     await _loadContentLang();
+    // Rejected on the loading screen while the language file loaded.
+    if (_settledRequests.has(requestId)) return;
     removeOverlay();
 
     const signMethod = tx.signMethod || "personal_sign";
@@ -1084,6 +1092,8 @@
 
   async function showAnalysisOverlay(requestId, result, strict, tx, recipient, lookalike) {
     await _loadContentLang();
+    // Rejected on the loading screen while the language file loaded.
+    if (_settledRequests.has(requestId)) return;
     removeOverlay();
 
     const { incomplete, classification: verdict } = verdictOf(result);
@@ -1323,6 +1333,8 @@
   // through on one click.
   async function showErrorOverlay(requestId, errorMsg, strict, tx, recipient, lookalike) {
     await _loadContentLang();
+    // Rejected on the loading screen while the language file loaded.
+    if (_settledRequests.has(requestId)) return;
     removeOverlay();
     // An EIP-7702 delegation is Block Recommended without the API too.
     const delegation = Array.isArray(tx.authorizationList);
@@ -1418,6 +1430,8 @@
   // is rejected now, and the user is asked to try again.
   async function showTimedOutOverlay(requestId) {
     await _loadContentLang();
+    // Rejected on the loading screen while the language file loaded.
+    if (_settledRequests.has(requestId)) return;
     removeOverlay();
     postVerdict(requestId, "block");
 

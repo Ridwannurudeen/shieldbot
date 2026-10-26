@@ -1876,6 +1876,64 @@ def test_legacy_typed_data_is_shown_field_by_field_end_to_end(method):
     )
 
 
+@pytest.mark.parametrize("kind", ["analysis", "error", "signature", "timed-out"])
+def test_escape_while_the_result_screen_loads_its_language_shows_no_result(kind):
+    run_node(
+        CONTENT_HARNESS
+        + r"""
+(async () => {
+  const kind = JSON.parse(process.argv[1]);
+  analyze = async () => {
+    if (kind === 'timed-out') clock += 51000;
+    return kind === 'error' ? {error: 'API error 503: unavailable'} : {result: scan({})};
+  };
+  // The loading screen's language file comes at once; the result screen's is held, so the user
+  // presses Escape while the result screen is waiting for it.
+  fetchDelays = [0, 200];
+  if (kind === 'signature') {
+    await intercept('request', {signMethod: 'personal_sign', data: '0x68656c6c6f', chainId: 56}, 'personal_sign');
+  } else {
+    await intercept('request');
+  }
+  assert(overlay() && overlay().innerHTML.includes('shieldai-loading'), 'the loading screen was not on screen');
+  userKey('Escape');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  await flush();
+  assert.equal(overlay(), null, 'a result screen was mounted for a request the user already rejected');
+  await assertVerdicts([['request', 'block']]);
+  assert.equal(posted.filter(message => message.type === 'SHIELDAI_TX_SHOWN').length, 0);
+""",
+        kind,
+    )
+
+
+def test_a_proceed_after_a_block_for_the_same_request_is_not_forwarded():
+    # Verdict proofs are made asynchronously, so a block's check can finish after a later
+    # proceed's: here the block's takes longer. The verdict that arrived first decides.
+    run_node(
+        INJECT_HARNESS.replace(
+            "context.crypto = vm.runInContext(`(host, signed) => ({",
+            "const slowBlock = (data, mac) => new TextDecoder().decode(data).endsWith(':block')\n"
+            "  ? new Promise(resolve => setTimeout(() => resolve(mac), 100)) : mac;\n"
+            "context.crypto = vm.runInContext(`(host, signed, slow) => ({",
+            1,
+        )
+        .replace("      return Promise.resolve(mac);", "      return Promise.resolve(slow(args[2], mac));", 1)
+        .replace("})`, context)(webcrypto, signatureMade);", "})`, context)(webcrypto, signatureMade, slowBlock);", 1)
+        + r"""
+(async () => {
+  const {pending, requestId} = await startRequest();
+  let outcome = null;
+  pending.then(() => { outcome = 'sent'; }, error => { outcome = error.code; });
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'block', proof: await proof(requestId, 'block')});
+  deliver({type: 'SHIELDAI_TX_VERDICT', requestId, action: 'proceed', proof: await proof(requestId, 'proceed')});
+  for (let i = 0; i < 5; i++) await flush();
+  assert.equal(sent.length, 0, 'a proceed after a block reached the wallet');
+  assert.equal(outcome, 4001);
+"""
+    )
+
+
 def test_escape_on_the_loading_screen_rejects_the_request_while_the_analysis_runs():
     run_node(
         FRAME_HARNESS.replace("JSON.parse(process.argv[1]);", "['top', 'content-first', false];", 1)

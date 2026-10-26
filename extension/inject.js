@@ -735,6 +735,13 @@
 
     const requestId = randomUUID();
     let decided = false;
+    // Verdicts are taken in the order they arrive, each once its proof is
+    // checked: the first proven one decides, so a block cannot be overtaken by
+    // a later proceed whose proof was checked sooner. checks holds each
+    // arrival's outcome (its action if proven, null if not) until its turn.
+    const checks = { __proto__: null };
+    let arrived = 0;
+    let taken = 0;
     const finish = (action) => {
       if (decided) return;
       decided = true;
@@ -771,8 +778,15 @@
       if (type !== "SHIELDAI_TX_VERDICT" || (action !== "block" && action !== "proceed")) {
         return;
       }
+      const turn = arrived++;
       withProof(requestId, action, (expected) => {
-        if (sameProof(expected, proof)) finish(action);
+        checks[turn] = sameProof(expected, proof) ? action : null;
+        while (taken in checks) {
+          const proven = checks[taken];
+          delete checks[taken];
+          taken++;
+          if (proven !== null) finish(proven);
+        }
       });
     }
 
