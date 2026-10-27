@@ -10,8 +10,8 @@ Reads the registry's runtime code on BOT Chain (677) and on Robinhood Chain (466
 adapter's RPC, compares both with the deployedBytecode Foundry built from
 contracts/base/src/ShieldBotVerdictRegistry.sol, and reads Sourcify's match for the Robinhood Chain
 copy. The contract has no immutables, so the comparison is byte for byte, metadata hash included.
-Prints the result as JSON and exits 1 unless both chains run the built code and Sourcify reports an
-exact match for creation and runtime code.
+Prints the result as JSON and exits 1 unless each RPC answers for its own chain, both chains run the
+built code and Sourcify reports an exact match for creation and runtime code.
 """
 
 import json
@@ -43,6 +43,7 @@ def main():
         chains.append(
             {
                 "chain_id": adapter.chain_id,
+                "rpc_chain_id": adapter.w3.eth.chain_id,
                 "code_size": len(code),
                 "code_keccak": Web3.keccak(code).hex(),
                 "matches_build": code == built_code,
@@ -67,7 +68,15 @@ def main():
         indent=2,
     )
     print()
-    return 0 if exact and all(chain["matches_build"] for chain in chains) else 1
+    return (
+        0
+        if exact
+        and all(
+            chain["matches_build"] and chain["rpc_chain_id"] == chain["chain_id"]
+            for chain in chains
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

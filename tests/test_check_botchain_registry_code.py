@@ -22,12 +22,13 @@ def run(monkeypatch, tmp_path, capsys):
     )
     monkeypatch.setattr(check, "ARTIFACT", artifact)
 
-    def run(codes, sourcify):
-        for adapter_class, code in zip(
-            (check.BotChainAdapter, check.RobinhoodAdapter), codes
+    def run(codes, sourcify, rpc_chain_ids=(677, 4663)):
+        for adapter_class, code, rpc_chain_id in zip(
+            (check.BotChainAdapter, check.RobinhoodAdapter), codes, rpc_chain_ids
         ):
             adapter = MagicMock(chain_id=adapter_class().chain_id)
             adapter.w3.eth.get_code.return_value = bytes.fromhex(code)
+            adapter.w3.eth.chain_id = rpc_chain_id
             monkeypatch.setattr(
                 check, adapter_class.__name__, lambda adapter=adapter: adapter
             )
@@ -64,6 +65,10 @@ def test_both_chains_running_the_build_and_an_exact_sourcify_match_pass(run):
 )
 def test_any_difference_fails(run, codes, sourcify):
     assert run(codes, sourcify)[0] == 1
+
+
+def test_an_rpc_answering_for_another_chain_fails(run):
+    assert run((BUILT, BUILT), EXACT, rpc_chain_ids=(4663, 4663))[0] == 1
 
 
 def test_the_site_and_the_deployment_record_name_the_check():
