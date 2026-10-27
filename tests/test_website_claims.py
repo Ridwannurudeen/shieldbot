@@ -474,6 +474,37 @@ HERO_CAPTURES = [
 ]
 
 
+def readable_reason(reason):
+    """content.js's readableReason: one coverage reason part as the overlay reads it to a user."""
+    from core.chat_coverage import FIELD_LABELS  # the labels content.js carries, by design the same
+
+    clean = re.sub(r"(?:initialize logs scanned over )?blocks?\s+\d+\s*-\s*\d+;?", "", reason, flags=re.I)
+    clean = re.sub(r"\b0x[0-9a-fA-F]{8,}\b", "a contract address", clean)
+    clean = re.sub(r"^[\s;]+|[\s;]+$", "", clean)
+    fields = re.match(r"^unknown fields:\s*(.+)$", clean, re.I)
+    if not fields:
+        return clean
+    labels = [FIELD_LABELS[field.strip().lower()] for field in fields.group(1).split(",")
+              if field.strip().lower() in FIELD_LABELS]
+    if not labels:
+        return "some scan details are unknown"
+    if len(labels) == 1:
+        return f"{labels[0]} is unknown"
+    return f"{', '.join(labels[:-1])} and {labels[-1]} are unknown"
+
+
+def unknown_reason(reply):
+    """content.js's unknownReason: the API's coverage_gaps when sent, else its coverage reasons read part by part."""
+    gaps = reply.get("coverage_gaps")
+    if not isinstance(gaps, list):
+        gaps = [
+            readable_reason(part)
+            for reason in filter(None, (reply.get("coverage_reasons") or {}).values())
+            for part in str(reason).split(";")
+        ]
+    return "; ".join(filter(None, gaps))
+
+
 @pytest.mark.parametrize("fixture, component, captures", HERO_CAPTURES)
 def test_hero_image_describes_its_recorded_api_reply(fixture, component, captures):
     # landing-src/scripts/capture-hero-overlay.py renders the extension's overlay from each reply; each
@@ -497,8 +528,15 @@ def test_hero_image_describes_its_recorded_api_reply(fixture, component, capture
         # incomplete one leaves the coverage text to the analysis line; the recorded reply is neither,
         # so its badge follows the API's verdict.
         '${escapeHtml(label)}${classification === "UNKNOWN" || classification !== verdict || incomplete ? "" : ` &mdash; ${escapeHtml(scoreDisplay)}`}',
-        'return Object.values(result.coverage_reasons || {}).filter(Boolean).join("; ") || '
-        '_t("unknownNoReason");',
+        # The Unknown "why" line: the API's readable coverage_gaps, else the reasons read as the overlay
+        # reads them (block ranges dropped, addresses named, field names as labels), ported below.
+        "const gaps = Array.isArray(result.coverage_gaps) ? result.coverage_gaps.filter(Boolean) : "
+        "Object.values(result.coverage_reasons || {}).filter(Boolean) "
+        '.flatMap(reason => String(reason).split(";")).map(readableReason).filter(Boolean); '
+        'return gaps.join("; ") || _t("unknownNoReason");',
+        r'.replace(/(?:initialize logs scanned over )?blocks?\s+\d+\s*-\s*\d+;?/gi, "")',
+        r'.replace(/\b0x[0-9a-fA-F]{8,}\b/g, "a contract address")',
+        r'const fields = /^unknown fields:\s*(.+)$/i.exec(clean);',
     ):
         assert rule in content, rule
 
@@ -529,8 +567,7 @@ def test_hero_image_describes_its_recorded_api_reply(fixture, component, capture
     if reply.get("danger_signals"):
         assert f"The danger signals include {reply['danger_signals'][0]}" in figure
     if incomplete:
-        reasons = "; ".join(filter(None, reply["coverage_reasons"].values()))
-        assert f"{messages['unknownWhy']} {reasons or messages['unknownNoReason']}" in figure
+        assert f"{messages['unknownWhy']} {unknown_reason(reply) or messages['unknownNoReason']}" in figure
     for name in captures:
         assert f'"/{name}"' in figure
         source = (LANDING_SRC / "public" / name).read_bytes()
