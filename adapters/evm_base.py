@@ -38,8 +38,9 @@ EIP1167_RUNTIME = re.compile(r'363d3d373d3d3d363d73([0-9a-f]{40})5af43d82803e903
 # check_honeypot and get_tax_info read the same honeypot.is reply, and a scan calls them back to back.
 HONEYPOT_IS_REPLY_TTL_SECONDS = 60
 # The structural analyzer, the payment rule and the spender lookup can all ask for one contract's
-# creation within a scan, and a creation does not change.
-CREATION_INFO_TTL_SECONDS = 300
+# creation within a scan, and a creation does not change, so a dated one is kept for a day and
+# its age counted again on each read.
+CREATION_INFO_TTL_SECONDS = 86400
 # Burned LP counts as locked, but these addresses cannot hold a lock, so a chain whose only known
 # "lockers" they are cannot tell unlocked liquidity from liquidity held by an unlisted locker.
 BURN_ADDRESSES = {
@@ -358,14 +359,18 @@ class EvmAdapter(ChainAdapter):
             return (None, None)
 
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
-        """Creation info, one lookup per contract shared by concurrent callers and kept for five
-        minutes. Only an answer with an age is kept, so a failed or undated lookup is asked again.
-        A cached answer is not a lookup, so it records nothing in the Unknown ledger.
+        """Creation info, one lookup per contract shared by concurrent callers and kept for a day,
+        its age counted again on each read. Only an answer with an age is kept, so a failed or
+        undated lookup is asked again. A cached answer is not a lookup, so it records nothing in
+        the Unknown ledger.
         """
         key = (self._chain_id, address.lower())
         cached = self._creation_infos.get(key)
         if cached is not None:
-            return dict(cached)
+            info = dict(cached)
+            created = datetime.fromisoformat(info['creation_time'])
+            info['age_days'] = (datetime.now(timezone.utc) - created).days
+            return info
         flight_key = (asyncio.get_running_loop(), key)
         flight = self._creation_inflight.get(flight_key)
         if flight is None:

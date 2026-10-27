@@ -9,7 +9,7 @@ import pytest
 from cachetools import TTLCache
 
 from adapters.evm_base import EvmAdapter
-from services.explorer_service import ExplorerResult, ExplorerService
+from services.explorer_service import VERIFIED_TTL_SECONDS, ExplorerResult, ExplorerService
 
 
 ADDRESS = "0x89e5db8b5aa49aa85ac63f691524311aeb649eba"
@@ -709,11 +709,38 @@ async def test_ttl_expiry_and_chain_cache_separation(http):
         http[0]({**SOURCIFY_ROUTER, "chainId": str(chain_id)})
     service = ExplorerService()
     service._cache = TTLCache(maxsize=10, ttl=300, timer=lambda: clock[0])
+    service._verified = TTLCache(maxsize=10, ttl=VERIFIED_TTL_SECONDS, timer=lambda: clock[0])
     await service.get_verification_status(ADDRESS, 4663)
     await service.get_verification_status(ADDRESS, 56)
     clock[0] = 301
     await service.get_verification_status(ADDRESS, 4663)
+    assert http[1].get.call_count == 2
+    clock[0] = VERIFIED_TTL_SECONDS + 1
+    await service.get_verification_status(ADDRESS, 4663)
     assert http[1].get.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_a_verified_answer_holds_for_a_day_and_an_unverified_one_is_asked_again(http):
+    enqueue, session, _ = http
+    clock = [0]
+    other = "0x" + "c" * 40
+    service = ExplorerService()
+    service._cache = TTLCache(maxsize=10, ttl=300, timer=lambda: clock[0])
+    service._verified = TTLCache(maxsize=10, ttl=VERIFIED_TTL_SECONDS, timer=lambda: clock[0])
+    enqueue(BLOCKSCOUT_ADDRESS)
+    enqueue({**BLOCKSCOUT_ADDRESS, "hash": other, "is_verified": False})
+    assert (await service.get_verification_status(ADDRESS, 677)).status == "verified"
+    assert (await service.get_verification_status(other, 677)).status == "unverified"
+    clock[0] = 301
+    enqueue({**BLOCKSCOUT_ADDRESS, "hash": other})
+    assert (await service.get_verification_status(ADDRESS.upper().replace("0X", "0x"), 677)).status == "verified"
+    assert (await service.get_verification_status(other, 677)).status == "verified"
+    assert session.get.call_count == 3
+    clock[0] = 301 + VERIFIED_TTL_SECONDS
+    enqueue(BLOCKSCOUT_ADDRESS)
+    assert (await service.get_verification_status(ADDRESS, 677)).status == "verified"
+    assert session.get.call_count == 4
 
 
 def transfer(block=10, internal=False, **changes):

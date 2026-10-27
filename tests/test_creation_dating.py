@@ -362,6 +362,29 @@ async def test_concurrent_callers_share_one_lookup_and_a_dated_answer_is_kept(ht
 
 
 @pytest.mark.asyncio
+async def test_a_dated_creation_is_kept_for_a_day_and_its_age_counted_on_each_read(http):
+    from cachetools import TTLCache
+
+    from adapters.evm_base import CREATION_INFO_TTL_SECONDS
+
+    enqueue, session = http
+    clock = [0]
+    adapter = _adapter()
+    adapter._creation_infos = TTLCache(maxsize=10, ttl=CREATION_INFO_TTL_SECONDS, timer=lambda: clock[0])
+    enqueue(TIMESTAMPED)
+    first = await adapter.get_contract_creation_info(ADDRESS)
+    adapter._creation_infos[(adapter._chain_id, ADDRESS.lower())]["age_days"] = 0
+    clock[0] = CREATION_INFO_TTL_SECONDS - 1
+    kept = await adapter.get_contract_creation_info(ADDRESS)
+    assert session.get.call_count == 1
+    assert kept == first and kept["age_days"] > 0
+    clock[0] = CREATION_INFO_TTL_SECONDS + 1
+    enqueue(TIMESTAMPED)
+    await adapter.get_contract_creation_info(ADDRESS)
+    assert session.get.call_count == 2
+
+
+@pytest.mark.asyncio
 async def test_a_refused_chain_s_dated_answer_is_kept_by_both_caches(http):
     enqueue, session = http
     enqueue(REFUSED)
