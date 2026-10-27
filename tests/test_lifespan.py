@@ -23,7 +23,7 @@ def mock_container(monkeypatch):
             "token_scanner", "calldata_decoder", "scam_db", "dex_service",
             "ethos_service", "honeypot_service", "contract_service", "risk_engine",
             "greenfield_service", "tenderly_simulator", "advisor", "_background_workers",
-            "_blacklist_reload_task",
+            "_blacklist_reload_task", "_botchain_warmup_task",
         )
     }
     settings = SimpleNamespace(
@@ -178,9 +178,13 @@ def test_the_botchain_explorer_warm_up_starts_in_the_background_when_677_is_serv
     with TestClient(api.app) as client:
         assert client.get("/api/health").status_code == 200
         assert adapter.warm_explorer_caches.await_count == (1 if warmed else 0)
-        released.set()
+        task = api._botchain_warmup_task
+    # Shutdown cancels a warm-up that is still retrying.
     if warmed:
         mock_container.web3_client._get_adapter.assert_called_once_with(677)
+        assert task.cancelled()
+    else:
+        assert task is None
 
 
 def test_the_official_token_list_loads_in_the_background_without_holding_startup(mock_container):
