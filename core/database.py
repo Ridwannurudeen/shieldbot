@@ -182,7 +182,7 @@ def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
         "risk_level": None,
         "risk_score": None,
         "coverage": None,
-        "coverage_reasons": {"scan": "Scan incomplete; coverage details were not recorded"},
+        "coverage_reasons": {"scan": "Scan incomplete: coverage details were not recorded"},
         "flags": [],
         "scanned_at": scanned_at,
     }

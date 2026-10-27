@@ -310,7 +310,12 @@ def test_chat_coverage_reads_a_still_running_lookup_as_one_gap():
     from analyzers.market import STILL_RUNNING as MARKET_STILL_RUNNING
     from core.chat_coverage import readable_coverage_gaps
 
-    for reason in (SIMULATION_STILL_RUNNING, MARKET_STILL_RUNNING):
+    for reason in (
+        SIMULATION_STILL_RUNNING,
+        MARKET_STILL_RUNNING,
+        "Explorer lookup still running at the request deadline and continues for the next scan",
+        "Scan incomplete: coverage details were not recorded",
+    ):
         assert readable_coverage_gaps({"scan": reason}) == [reason]
 
 

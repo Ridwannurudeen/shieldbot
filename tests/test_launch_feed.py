@@ -251,9 +251,9 @@ async def test_evidence_from_another_chain_is_ignored(db):
 @pytest.mark.parametrize(
     "stored,reason",
     [
-        ("unknown", "Scan incomplete; coverage details were not recorded"),
+        ("unknown", "Scan incomplete: coverage details were not recorded"),
         ("error", "Scan failed before completing"),
-        ("something_new", "Scan incomplete; coverage details were not recorded"),
+        ("something_new", "Scan incomplete: coverage details were not recorded"),
     ],
 )
 async def test_incomplete_outcomes_are_unknown_without_a_score(db, stored, reason):
