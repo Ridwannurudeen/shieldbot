@@ -153,6 +153,9 @@ class ExplorerService:
         self._blockscout_lanes: dict[str, _Lane] = {}
         self._inflight: dict[tuple, asyncio.Task] = {}
         self._last_request: dict[str, float] = {}
+        # How often each reply was forgotten: a reply fetched before its address was forgotten is
+        # returned to the lookup that asked but not cached.
+        self._forgotten: dict[tuple, int] = {}
 
     async def _request(
         self, provider: str, url: str, params: dict, chain_id: int, cache_key=None
@@ -244,7 +247,8 @@ class ExplorerService:
                     # Inside the host's lane, so a lookup queued behind the one that opened the
                     # breaker sends nothing.
                     provider_breakers.check(provider, chain_id)
-                    return self._keep(provider, chain_id, cache_key, await fetch())
+                    forgotten = self._forgotten.get(cache_key, 0)
+                    return self._keep(provider, chain_id, cache_key, await fetch(), forgotten)
             # Every caller asks, one that would share a lookup already out too, so while the
             # breaker is open none of them waits on that lookup.
             provider_breakers.check(provider, chain_id)
@@ -262,14 +266,19 @@ class ExplorerService:
         return await asyncio.shield(self._inflight[flight_key])
 
     async def _settle(self, provider, chain_id, cache_key, flight_key, lookup) -> ExplorerResult:
+        forgotten = self._forgotten.get(cache_key, 0)
         try:
-            return self._keep(provider, chain_id, cache_key, await lookup)
+            return self._keep(provider, chain_id, cache_key, await lookup, forgotten)
         finally:
-            self._inflight.pop(flight_key, None)
+            # A lookup started after its address was forgotten holds the key now.
+            if self._inflight.get(flight_key) is asyncio.current_task():
+                del self._inflight[flight_key]
 
-    def _keep(self, provider, chain_id, cache_key, result) -> ExplorerResult:
-        """Cache a fetched reply and count it in the Unknown ledger."""
-        self._cache[cache_key] = result
+    def _keep(self, provider, chain_id, cache_key, result, forgotten) -> ExplorerResult:
+        """Cache a fetched reply, unless its address was forgotten while it was fetched, and count
+        it in the Unknown ledger."""
+        if self._forgotten.get(cache_key, 0) == forgotten:
+            self._cache[cache_key] = result
         unknown_ledger.record(
             provider,
             chain_id,
@@ -320,6 +329,18 @@ class ExplorerService:
 
     def _contract_creation_request_details(self, address, chain_id):
         return self._blockscout_request_details(f"addresses/{address.lower()}", chain_id)
+
+    def forget_address(self, address: str, chain_id: int) -> None:
+        """Drop the Blockscout and Sourcify replies about address, cached or still being fetched, so
+        another contract deployed at it is asked about afresh."""
+        address = address.lower()
+        _, _, blockscout = self._contract_creation_request_details(address, chain_id)
+        url = f"https://sourcify.dev/server/v2/contract/{chain_id}/{address}"
+        for key in (blockscout, (url, ()), (url, (("fields", "deployment"),))):
+            self._cache.pop(key, None)
+            self._forgotten[key] = self._forgotten.get(key, 0) + 1
+            for flight_key in [flight_key for flight_key in self._inflight if flight_key[1] == key]:
+                del self._inflight[flight_key]
 
     def promote_contract_creation_lookup(self, address: str, chain_id: int) -> None:
         if not _is_address(address):

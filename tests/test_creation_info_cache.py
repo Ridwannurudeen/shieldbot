@@ -1,6 +1,7 @@
 """One creation lookup per contract, shared by a scan's structural, payment and spender checks."""
 
 import asyncio
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -19,6 +20,7 @@ DATED = {
 def _adapter(answer):
     adapter = EvmAdapter(56, "BSC", "https://rpc.invalid", etherscan_api_key="test-key")
     adapter._fetch_creation_info = AsyncMock(return_value=answer)
+    adapter._code_hash = AsyncMock(return_value="0x" + "c" * 64)
     return adapter
 
 
@@ -30,7 +32,9 @@ async def test_a_dated_creation_is_fetched_once_and_copied_to_each_caller():
     )
     first["age_days"] = 999
     third = await adapter.get_contract_creation_info(ADDRESS.upper().replace("0X", "0x"))
-    assert second == third == DATED
+    # A kept creation's age is counted again on each read.
+    age = (datetime.now(timezone.utc) - datetime.fromisoformat(DATED["creation_time"])).days
+    assert second == DATED and third == {**DATED, "age_days": age}
     adapter._fetch_creation_info.assert_awaited_once_with(ADDRESS)
     assert adapter._creation_inflight == {}
 

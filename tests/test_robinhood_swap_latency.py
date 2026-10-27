@@ -8,6 +8,7 @@ addresses are not looked up at all.
 
 import asyncio
 import time
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -261,10 +262,12 @@ async def test_an_abandoned_explorer_lookup_finishes_and_fills_the_caches(monkey
     adapter._explorer_service = ExplorerService()
 
     async def dated(creation):
-        return {**creation, "age_days": 90}
+        created = datetime.now(timezone.utc) - timedelta(days=90, hours=1)
+        return {**creation, "creation_time": created.isoformat(), "age_days": 90}
 
     adapter._date_creation = dated
     adapter.get_bytecode = AsyncMock(return_value="0x6080")
+    adapter._code_hash = AsyncMock(return_value="0x" + "c" * 64)
     mock_web3_client.is_verified_contract = lambda address, chain_id: adapter.is_verified_contract(address)
     mock_web3_client.get_contract_creation_info = (
         lambda address, chain_id: adapter.get_contract_creation_info(address)

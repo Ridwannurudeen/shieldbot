@@ -38,8 +38,13 @@ EIP1167_RUNTIME = re.compile(r'363d3d373d3d3d363d73([0-9a-f]{40})5af43d82803e903
 # check_honeypot and get_tax_info read the same honeypot.is reply, and a scan calls them back to back.
 HONEYPOT_IS_REPLY_TTL_SECONDS = 60
 # The structural analyzer, the payment rule and the spender lookup can all ask for one contract's
-# creation within a scan, and a creation does not change.
-CREATION_INFO_TTL_SECONDS = 300
+# creation within a scan, and a creation does not change, so a dated one is kept for a day and
+# its age counted again on each read.
+CREATION_INFO_TTL_SECONDS = 86400
+# A verified contract stays verified, so that answer is kept for a day; an unverified one can be
+# verified at any time, so it is asked again. Both day-long answers hold only while the code at
+# the address is the code they were given for, so a contract deployed there later is asked again.
+VERIFIED_TTL_SECONDS = 86400
 # Burned LP counts as locked, but these addresses cannot hold a lock, so a chain whose only known
 # "lockers" they are cannot tell unlocked liquidity from liquidity held by an unlisted locker.
 BURN_ADDRESSES = {
@@ -159,6 +164,7 @@ class EvmAdapter(ChainAdapter):
         self._router_v2_factories = router_v2_factories or {}
         self._honeypot_is_replies = TTLCache(maxsize=1024, ttl=HONEYPOT_IS_REPLY_TTL_SECONDS)
         self._creation_infos = TTLCache(maxsize=1024, ttl=CREATION_INFO_TTL_SECONDS)
+        self._verified = TTLCache(maxsize=2048, ttl=VERIFIED_TTL_SECONDS)
         self._creation_inflight = {}
         # Etherscan's refusal on a chain (its free tier) is permanent, so it is logged once.
         self._etherscan_refusal_logged = False
@@ -171,8 +177,9 @@ class EvmAdapter(ChainAdapter):
     def chain_name(self) -> str:
         return self._chain_name
 
-    async def _call_with_retry(self, fn, *args, retries=3, base_delay=1.0):
+    async def _call_with_retry(self, fn, *args, retries=3, base_delay=1.0, ledger=True):
         """Wrap a synchronous web3 call with retry + executor to avoid blocking the event loop.
+        A read that is no evidence of its own passes ledger=False, so the Unknown ledger does not count it.
 
         Only transient provider failures are retried, decided from structured error data, never
         exception text: the HTTP status on the requests HTTPError that web3's HTTPProvider raises,
@@ -209,12 +216,15 @@ class EvmAdapter(ChainAdapter):
                     await asyncio.sleep(delay)
                 elif not is_retriable:
                     answered = isinstance(e, (BadFunctionCallOutput, ContractLogicError))
-                    unknown_ledger.record('rpc', self._chain_id, 'answered' if answered else 'failed')
+                    if ledger:
+                        unknown_ledger.record('rpc', self._chain_id, 'answered' if answered else 'failed')
                     raise
             else:
-                unknown_ledger.record('rpc', self._chain_id, 'answered')
+                if ledger:
+                    unknown_ledger.record('rpc', self._chain_id, 'answered')
                 return result
-        unknown_ledger.record('rpc', self._chain_id, 'failed')
+        if ledger:
+            unknown_ledger.record('rpc', self._chain_id, 'failed')
         raise last_exc
 
     async def is_contract(self, address: str) -> Optional[bool]:
@@ -267,6 +277,28 @@ class EvmAdapter(ChainAdapter):
         match = EIP1167_RUNTIME.fullmatch(code.lower().removeprefix('0x')) if code else None
         return '0x' + match.group(1) if match else None
 
+    async def _code_hash(self, address: str) -> Optional[str]:
+        """The hash of the code at address, read once; None when it could not be read or there is none.
+        It names the contract a kept answer is about and is no evidence of its own, so it is not counted
+        in the Unknown ledger."""
+        try:
+            code = await self._call_with_retry(self.w3.eth.get_code, Web3.to_checksum_address(address), ledger=False)
+            return Web3.keccak(code).hex() if code else None
+        except Exception as e:
+            logger.warning("[%s] Code hash unknown: %s", self._chain_name, type(e).__name__)
+            return None
+
+    async def _same_code(self, kept: asyncio.Task, address: str) -> bool:
+        """Whether the code at address is still the code a kept answer was given for. When other code
+        is there, the explorer's replies about the address are dropped too, so the next lookup asks
+        about the contract now at it."""
+        kept_hash = None if kept.cancelled() else await asyncio.shield(kept)
+        code_hash = await self._code_hash(address)
+        if kept_hash is not None and code_hash is not None and kept_hash != code_hash:
+            if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
+                self._explorer_service.forget_address(address, self._chain_id)
+        return kept_hash is not None and kept_hash == code_hash
+
     async def _verification(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
         """The chain's explorer and Sourcify together: verified when either says so, unverified
         only when both say not, unknown when one could not be read and the other did not verify.
@@ -285,15 +317,23 @@ class EvmAdapter(ChainAdapter):
         if self._explorer_backend == 'sourcify_blockscout':
             from services.explorer_service import SOURCIFY_UNSUPPORTED_CHAINS, ExplorerResult
 
+            kept = self._verified.get(address.lower())
+            if kept is not None and await self._same_code(kept, address):
+                return (True, None)
+            code_hash = asyncio.create_task(self._code_hash(address))
             sources = 'Blockscout' if self._chain_id in SOURCIFY_UNSUPPORTED_CHAINS else 'Sourcify and Blockscout'
             result = await within_timeout(
                 self._explorer_service.get_verification_status(address, self._chain_id),
                 ExplorerResult('unknown', reason=f'{sources} timed out'),
             )
+            if result.status == 'verified':
+                self._verified[address.lower()] = code_hash
+                return (True, None)
+            code_hash.cancel()
             if result.status == 'unknown':
                 logger.warning("[%s] Verification unknown: %s", self._chain_name, result.reason)
                 return (None, None)
-            return (result.status == 'verified', None)
+            return (False, None)
         lookups = {'etherscan': self._etherscan_verification, 'sourcify': self._sourcify_verification}
         timed_out = object()
         answers = []
@@ -358,14 +398,18 @@ class EvmAdapter(ChainAdapter):
             return (None, None)
 
     async def get_contract_creation_info(self, address: str) -> Optional[Dict]:
-        """Creation info, one lookup per contract shared by concurrent callers and kept for five
-        minutes. Only an answer with an age is kept, so a failed or undated lookup is asked again.
-        A cached answer is not a lookup, so it records nothing in the Unknown ledger.
+        """Creation info, one lookup per contract shared by concurrent callers and kept for a day,
+        its age counted again on each read. Only an answer with an age is kept, so a failed or
+        undated lookup is asked again. A cached answer is not a lookup, so it records nothing in
+        the Unknown ledger.
         """
         key = (self._chain_id, address.lower())
         cached = self._creation_infos.get(key)
-        if cached is not None:
-            return dict(cached)
+        if cached is not None and await self._same_code(cached[0], address):
+            info = dict(cached[1])
+            created = datetime.fromisoformat(info['creation_time'])
+            info['age_days'] = (datetime.now(timezone.utc) - created).days
+            return info
         flight_key = (asyncio.get_running_loop(), key)
         flight = self._creation_inflight.get(flight_key)
         if flight is None:
@@ -400,6 +444,7 @@ class EvmAdapter(ChainAdapter):
                 and self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout')
                 else None
             )
+            code_hash = asyncio.create_task(self._code_hash(address))
             try:
                 info = await self._fetch_creation_info(address)
             finally:
@@ -408,7 +453,9 @@ class EvmAdapter(ChainAdapter):
         finally:
             self._creation_inflight.pop(flight_key, None)
         if info and info.get('age_days') is not None:
-            self._creation_infos[key] = info
+            self._creation_infos[key] = (code_hash, info)
+        else:
+            code_hash.cancel()
         return info
 
     async def _fetch_creation_info(self, address: str) -> Optional[Dict]:

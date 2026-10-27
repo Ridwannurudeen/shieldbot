@@ -508,3 +508,44 @@ async def test_an_open_etherscan_breaker_still_lets_sourcify_verify_at_once():
     result, http = await asyncio.wait_for(_verify({ADDRESS: VERIFIED_SOURCE}, {ADDRESS: SOURCIFY_VERIFIED}), 1)
     assert result == (True, None)
     assert [call.args[0] for call in http.session.get.call_args_list] == [f"{SOURCIFY}56/{ADDRESS}"]
+
+
+@pytest.mark.asyncio
+async def test_a_verified_answer_is_kept_while_the_code_at_the_address_is_the_same():
+    adapter = EvmAdapter(677, "BOT Chain", "https://rpc.invalid")
+    adapter._explorer_backend = "sourcify_blockscout"
+    adapter._explorer_service = MagicMock()
+    lookup = adapter._explorer_service.get_verification_status = AsyncMock(side_effect=[
+        ExplorerResult("verified"), ExplorerResult("unverified"), ExplorerResult("verified"),
+    ])
+    adapter.w3 = MagicMock()
+    adapter.w3.eth.get_code.return_value = bytes.fromhex("6080")
+    assert await adapter._verification(ADDRESS) == (True, None)
+    assert await adapter._verification(ADDRESS.upper().replace("0X", "0x")) == (True, None)
+    assert lookup.await_count == 1
+    # Other code at the address is another contract: the explorer's replies about the address are
+    # dropped, it is asked about, and its unverified answer is not kept.
+    adapter.w3.eth.get_code.return_value = bytes.fromhex("6081")
+    assert await adapter._verification(ADDRESS) == (False, None)
+    adapter._explorer_service.forget_address.assert_called_once_with(ADDRESS, 677)
+    assert await adapter._verification(ADDRESS) == (True, None)
+    assert lookup.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_a_kept_answer_whose_code_was_not_read_is_asked_again():
+    adapter = EvmAdapter(677, "BOT Chain", "https://rpc.invalid")
+    adapter._explorer_backend = "sourcify_blockscout"
+    adapter._explorer_service = MagicMock()
+    lookup = adapter._explorer_service.get_verification_status = AsyncMock(return_value=ExplorerResult("verified"))
+    adapter._code_hash = AsyncMock(return_value=None)
+    await adapter._verification(ADDRESS)
+    await adapter._verification(ADDRESS)
+    assert lookup.await_count == 2
+    adapter._explorer_service.forget_address.assert_not_called()
+    cancelled = asyncio.get_running_loop().create_future()
+    cancelled.cancel()
+    adapter._verified[ADDRESS] = cancelled
+    adapter._code_hash = AsyncMock(return_value="0x" + "c" * 64)
+    assert await adapter._verification(ADDRESS) == (True, None)
+    assert lookup.await_count == 3

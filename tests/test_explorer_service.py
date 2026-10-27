@@ -716,6 +716,54 @@ async def test_ttl_expiry_and_chain_cache_separation(http):
     assert http[1].get.call_count == 3
 
 
+@pytest.mark.asyncio
+async def test_forgetting_an_address_drops_its_cached_replies(http):
+    enqueue, session, _ = http
+    service = ExplorerService()
+    for _ in range(2):
+        enqueue({**SOURCIFY_ROUTER, "chainId": "4663"})
+        enqueue({**SOURCIFY_ROUTER, "chainId": "4663", "deployment": {}})
+        enqueue(BLOCKSCOUT_ADDRESS)
+    with patch.dict("os.environ", {"BLOCKSCOUT_API_KEY": "test-key"}):
+        for _ in range(2):
+            await service.get_sourcify_verification(ADDRESS, 4663)
+            await service.get_sourcify_deployment(ADDRESS, 4663)
+            await service.get_contract_creation_info(ADDRESS, 4663)
+        assert session.get.call_count == 3
+        service.forget_address(ADDRESS.upper().replace("0X", "0x"), 4663)
+        await service.get_sourcify_verification(ADDRESS, 4663)
+        await service.get_sourcify_deployment(ADDRESS, 4663)
+        await service.get_contract_creation_info(ADDRESS, 4663)
+    assert session.get.call_count == 6
+
+
+@pytest.mark.asyncio
+async def test_a_reply_fetched_before_its_address_was_forgotten_is_not_cached_or_shared(http):
+    enqueue, session, _ = http
+    release = asyncio.Event()
+
+    async def late():
+        await release.wait()
+        return {**SOURCIFY_ROUTER, "chainId": "4663"}
+
+    enqueue(None).json = AsyncMock(side_effect=late)
+    enqueue({**SOURCIFY_DEAD, "address": ADDRESS}, 404)
+    service = ExplorerService()
+    first = asyncio.create_task(service.get_sourcify_verification(ADDRESS, 4663))
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert session.get.call_count == 1
+    service.forget_address(ADDRESS, 4663)
+    # A lookup after the forget sends its own request rather than joining the one still out.
+    assert (await service.get_sourcify_verification(ADDRESS, 4663)).status == "unverified"
+    release.set()
+    assert (await first).status == "verified"
+    # The old reply came back after the forget, so the cache keeps the new one.
+    assert (await service.get_sourcify_verification(ADDRESS, 4663)).status == "unverified"
+    assert session.get.call_count == 2
+    assert service._inflight == {}
+
+
 def transfer(block=10, internal=False, **changes):
     # https://docs.blockscout.com/api-reference/addresses/list-all-internal-transactions-involving-a-specific-address
     # https://docs.blockscout.com/api-reference/addresses/list-transactions-involving-a-specific-address-with-to-from-filtering
@@ -973,6 +1021,7 @@ async def test_an_etherscan_reply_naming_the_block_reads_only_its_header(http):
     http[0]({"status": "1", "result": [{"contractCreator": FUNDER, "txHash": TX_HASH, "blockNumber": "1"}]})
     adapter = EvmAdapter(56, "Existing", "https://rpc.invalid", etherscan_api_key="test-key")
     adapter._call_with_retry = AsyncMock(side_effect=[{"timestamp": 1704067200}])
+    adapter._code_hash = AsyncMock(return_value=None)
     result = await adapter.get_contract_creation_info(ADDRESS)
     assert result["creator"] == FUNDER and result["tx_hash"] == TX_HASH
     assert result["creation_time"] == "2024-01-01T00:00:00+00:00"
