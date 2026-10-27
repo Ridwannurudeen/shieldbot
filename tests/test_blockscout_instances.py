@@ -229,6 +229,7 @@ def _bsc_adapter(http, deployment):
     )
     adapter._explorer_service.get_sourcify_deployment = AsyncMock(return_value=deployment)
     adapter._call_with_retry = AsyncMock(side_effect=[{"timestamp": 1704067200}])
+    adapter._code_hash = AsyncMock(return_value=None)
     return adapter
 
 
