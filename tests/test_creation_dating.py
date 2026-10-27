@@ -118,6 +118,7 @@ def _adapter(chain_id=1, name="Ethereum"):
     adapter = EvmAdapter(chain_id, name, "https://rpc.invalid", etherscan_api_key="test-key")
     adapter._explorer_service = ExplorerService()
     adapter.w3 = MagicMock()
+    adapter.w3.eth.get_code.return_value = bytes.fromhex("6080")
     return adapter
 
 
@@ -373,7 +374,7 @@ async def test_a_dated_creation_is_kept_for_a_day_and_its_age_counted_on_each_re
     adapter._creation_infos = TTLCache(maxsize=10, ttl=CREATION_INFO_TTL_SECONDS, timer=lambda: clock[0])
     enqueue(TIMESTAMPED)
     first = await adapter.get_contract_creation_info(ADDRESS)
-    adapter._creation_infos[(adapter._chain_id, ADDRESS.lower())]["age_days"] = 0
+    adapter._creation_infos[(adapter._chain_id, ADDRESS.lower())][1]["age_days"] = 0
     clock[0] = CREATION_INFO_TTL_SECONDS - 1
     kept = await adapter.get_contract_creation_info(ADDRESS)
     assert session.get.call_count == 1
@@ -382,6 +383,22 @@ async def test_a_dated_creation_is_kept_for_a_day_and_its_age_counted_on_each_re
     enqueue(TIMESTAMPED)
     await adapter.get_contract_creation_info(ADDRESS)
     assert session.get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_kept_creation_is_not_given_for_other_code_at_the_address(http):
+    enqueue, session = http
+    adapter = _adapter()
+    enqueue(TIMESTAMPED)
+    await adapter.get_contract_creation_info(ADDRESS)
+    adapter.w3.eth.get_code.return_value = bytes.fromhex("6081")
+    enqueue(TIMESTAMPED)
+    await adapter.get_contract_creation_info(ADDRESS)
+    assert session.get.call_count == 2
+    adapter.w3.eth.get_code.side_effect = requests.ConnectionError()
+    enqueue(TIMESTAMPED)
+    await adapter.get_contract_creation_info(ADDRESS)
+    assert session.get.call_count == 3
 
 
 @pytest.mark.asyncio

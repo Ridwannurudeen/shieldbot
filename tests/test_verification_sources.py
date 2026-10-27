@@ -508,3 +508,23 @@ async def test_an_open_etherscan_breaker_still_lets_sourcify_verify_at_once():
     result, http = await asyncio.wait_for(_verify({ADDRESS: VERIFIED_SOURCE}, {ADDRESS: SOURCIFY_VERIFIED}), 1)
     assert result == (True, None)
     assert [call.args[0] for call in http.session.get.call_args_list] == [f"{SOURCIFY}56/{ADDRESS}"]
+
+
+@pytest.mark.asyncio
+async def test_a_verified_answer_is_kept_while_the_code_at_the_address_is_the_same():
+    adapter = EvmAdapter(677, "BOT Chain", "https://rpc.invalid")
+    adapter._explorer_backend = "sourcify_blockscout"
+    adapter._explorer_service = MagicMock()
+    lookup = adapter._explorer_service.get_verification_status = AsyncMock(side_effect=[
+        ExplorerResult("verified"), ExplorerResult("unverified"), ExplorerResult("verified"),
+    ])
+    adapter.w3 = MagicMock()
+    adapter.w3.eth.get_code.return_value = bytes.fromhex("6080")
+    assert await adapter._verification(ADDRESS) == (True, None)
+    assert await adapter._verification(ADDRESS.upper().replace("0X", "0x")) == (True, None)
+    assert lookup.await_count == 1
+    # Other code at the address is another contract: it is asked about, and its unverified answer is not kept.
+    adapter.w3.eth.get_code.return_value = bytes.fromhex("6081")
+    assert await adapter._verification(ADDRESS) == (False, None)
+    assert await adapter._verification(ADDRESS) == (True, None)
+    assert lookup.await_count == 3

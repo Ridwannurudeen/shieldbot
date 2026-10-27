@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import aiohttp
-from cachetools import TLRUCache, TTLCache
+from cachetools import TLRUCache
 
 from core.circuit_breaker import CircuitOpenError, provider_breakers
 from core.unknown_ledger import unknown_ledger
@@ -37,9 +37,6 @@ BLOCKSCOUT_WITHOUT_CREATION_STATUS = {677}
 # provider blip does not leave a contract Unknown for five minutes.
 RESULT_TTL_SECONDS = 300
 UNKNOWN_RESULT_TTL_SECONDS = 30
-# A verified contract stays verified, so that answer holds for a day; an unverified one can be
-# verified at any time, so it is asked again with the reply it came from.
-VERIFIED_TTL_SECONDS = 86400
 
 
 def _result_ttu(key, result, now):
@@ -153,7 +150,6 @@ class ExplorerService:
 
     def __init__(self):
         self._cache = TLRUCache(maxsize=2048, ttu=_result_ttu)
-        self._verified = TTLCache(maxsize=2048, ttl=VERIFIED_TTL_SECONDS)
         self._blockscout_lanes: dict[str, _Lane] = {}
         self._inflight: dict[tuple, asyncio.Task] = {}
         self._last_request: dict[str, float] = {}
@@ -430,19 +426,10 @@ class ExplorerService:
         self, address: str, chain_id: int
     ) -> ExplorerResult:
         """Sourcify and Blockscout together: verified when either says so, unverified only when
-        both say not, unknown otherwise. A verified answer is kept for a day."""
+        both say not, unknown otherwise."""
         if not _is_address(address):
             return ExplorerResult("unknown", reason="Invalid address")
-        key = (chain_id, address.lower())
-        cached = self._verified.get(key)
-        if cached is not None:
-            return cached
-        result = await self._verification_status(address.lower(), chain_id)
-        if result.status == "verified":
-            self._verified[key] = result
-        return result
-
-    async def _verification_status(self, address: str, chain_id: int) -> ExplorerResult:
+        address = address.lower()
         if chain_id in SOURCIFY_UNSUPPORTED_CHAINS:
             blockscout = await self._blockscout(f"addresses/{address}", chain_id)
             if blockscout.status == "known":
