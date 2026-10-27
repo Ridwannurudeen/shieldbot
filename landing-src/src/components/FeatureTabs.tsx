@@ -131,7 +131,7 @@ function Media({ id }: { id: string }) {
     return (
       <Capture
         src="/hero-overlay-unknown.webp"
-        alt="The ShieldBot extension's dialog for a token approval on Robinhood Chain whose token has no supported pool. The verdict badge reads UNKNOWN. Why: No DexScreener pairs on requested chain (robinhood); Initialize logs scanned over blocks 85694876-85724875; No supported pool found; Unknown fields: buy_tax, sell_tax, can_sell. The danger signals include Top 10 holders own 100.0% of supply (burn, locked, pool and locker addresses excluded)."
+        alt="The ShieldBot extension's dialog for a token approval on Robinhood Chain whose token has no supported pool. The verdict badge reads UNKNOWN. Why: No DexScreener pairs on requested chain (robinhood); No supported pool found; buy tax, sell tax and whether the token can be sold are unknown. The danger signals include Top 10 holders own 100.0% of supply (burn, locked, pool and locker addresses excluded)."
         caption="Recorded /api/firewall reply of 11 October 2026, chain 4663, UNKNOWN. Upper part of the overlay at unreleased commit 2b54a1b."
       />
     );
