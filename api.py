@@ -207,6 +207,12 @@ async def lifespan(app: FastAPI):
     # The official Robinhood token list loads in the background, so startup and readiness never wait on
     # it and the first 4663 scans after a deploy find it loaded.
     _fire_and_forget(container.robinhood_assets.listed(), label="robinhood_official_list")
+    # The token most BOT Chain swaps pass through is looked up the same way, so the first swaps after a
+    # deploy do not wait on the chain's explorer.
+    if 677 in container.web3_client.get_supported_chain_ids():
+        _fire_and_forget(
+            container.web3_client._get_adapter(677).warm_explorer_caches(), label="botchain_explorer_warmup"
+        )
     _background_workers = settings.background_workers
     if _background_workers == "api":
         await container.start_mempool_monitor()
