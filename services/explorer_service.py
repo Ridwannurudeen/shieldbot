@@ -321,6 +321,16 @@ class ExplorerService:
     def _contract_creation_request_details(self, address, chain_id):
         return self._blockscout_request_details(f"addresses/{address.lower()}", chain_id)
 
+    def forget_address(self, address: str, chain_id: int) -> None:
+        """Drop the cached Blockscout and Sourcify replies about address, so another contract deployed
+        at it is asked about afresh."""
+        address = address.lower()
+        _, _, key = self._contract_creation_request_details(address, chain_id)
+        self._cache.pop(key, None)
+        url = f"https://sourcify.dev/server/v2/contract/{chain_id}/{address}"
+        self._cache.pop((url, ()), None)
+        self._cache.pop((url, (("fields", "deployment"),)), None)
+
     def promote_contract_creation_lookup(self, address: str, chain_id: int) -> None:
         if not _is_address(address):
             return

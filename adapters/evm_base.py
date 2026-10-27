@@ -177,8 +177,9 @@ class EvmAdapter(ChainAdapter):
     def chain_name(self) -> str:
         return self._chain_name
 
-    async def _call_with_retry(self, fn, *args, retries=3, base_delay=1.0):
+    async def _call_with_retry(self, fn, *args, retries=3, base_delay=1.0, ledger=True):
         """Wrap a synchronous web3 call with retry + executor to avoid blocking the event loop.
+        A read that is no evidence of its own passes ledger=False, so the Unknown ledger does not count it.
 
         Only transient provider failures are retried, decided from structured error data, never
         exception text: the HTTP status on the requests HTTPError that web3's HTTPProvider raises,
@@ -215,12 +216,15 @@ class EvmAdapter(ChainAdapter):
                     await asyncio.sleep(delay)
                 elif not is_retriable:
                     answered = isinstance(e, (BadFunctionCallOutput, ContractLogicError))
-                    unknown_ledger.record('rpc', self._chain_id, 'answered' if answered else 'failed')
+                    if ledger:
+                        unknown_ledger.record('rpc', self._chain_id, 'answered' if answered else 'failed')
                     raise
             else:
-                unknown_ledger.record('rpc', self._chain_id, 'answered')
+                if ledger:
+                    unknown_ledger.record('rpc', self._chain_id, 'answered')
                 return result
-        unknown_ledger.record('rpc', self._chain_id, 'failed')
+        if ledger:
+            unknown_ledger.record('rpc', self._chain_id, 'failed')
         raise last_exc
 
     async def is_contract(self, address: str) -> Optional[bool]:
@@ -278,18 +282,22 @@ class EvmAdapter(ChainAdapter):
         It names the contract a kept answer is about and is no evidence of its own, so it is not counted
         in the Unknown ledger."""
         try:
-            code = await asyncio.get_running_loop().run_in_executor(
-                None, self.w3.eth.get_code, Web3.to_checksum_address(address)
-            )
+            code = await self._call_with_retry(self.w3.eth.get_code, Web3.to_checksum_address(address), ledger=False)
             return Web3.keccak(code).hex() if code else None
         except Exception as e:
             logger.warning("[%s] Code hash unknown: %s", self._chain_name, type(e).__name__)
             return None
 
     async def _same_code(self, kept: asyncio.Task, address: str) -> bool:
-        """Whether the code at address is still the code a kept answer was given for."""
-        kept_hash = await asyncio.shield(kept)
-        return kept_hash is not None and kept_hash == await self._code_hash(address)
+        """Whether the code at address is still the code a kept answer was given for. When other code
+        is there, the explorer's replies about the address are dropped too, so the next lookup asks
+        about the contract now at it."""
+        kept_hash = None if kept.cancelled() else await asyncio.shield(kept)
+        code_hash = await self._code_hash(address)
+        if kept_hash is not None and code_hash is not None and kept_hash != code_hash:
+            if self._explorer_backend in ('sourcify_blockscout', 'etherscan_blockscout'):
+                self._explorer_service.forget_address(address, self._chain_id)
+        return kept_hash is not None and kept_hash == code_hash
 
     async def _verification(self, address: str) -> Tuple[Optional[bool], Optional[str]]:
         """The chain's explorer and Sourcify together: verified when either says so, unverified
