@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # the analyzer returns an Unknown with a named reason, not an error, before the registry cancels it. The
 # lookup runs on and fills the provider's caches for the next scan.
 MARKET_RESULT_RESERVE_SECONDS = 0.5
-STILL_RUNNING = 'Market lookup still running at the request deadline; it continues for the next scan'
+STILL_RUNNING = 'Market lookup still running at the request deadline and continues for the next scan'
 
 
 class MarketAnalyzer(Analyzer):

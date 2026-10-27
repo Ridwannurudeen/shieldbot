@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # so the analyzer returns an Unknown sellability, not an error, before the registry cancels it. The
 # simulation runs on and its cached answer serves the next scan.
 SIMULATION_RESULT_RESERVE_SECONDS = 0.5
-STILL_RUNNING = 'Own simulation still running at the request deadline; it continues for the next scan'
+STILL_RUNNING = 'Own simulation still running at the request deadline and continues for the next scan'
 
 
 class HoneypotAnalyzer(Analyzer):

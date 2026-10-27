@@ -305,6 +305,15 @@ def test_chat_coverage_names_the_pools_a_simulator_supports(supported):
     ]
 
 
+def test_chat_coverage_reads_a_still_running_lookup_as_one_gap():
+    from analyzers.honeypot import STILL_RUNNING as SIMULATION_STILL_RUNNING
+    from analyzers.market import STILL_RUNNING as MARKET_STILL_RUNNING
+    from core.chat_coverage import readable_coverage_gaps
+
+    for reason in (SIMULATION_STILL_RUNNING, MARKET_STILL_RUNNING):
+        assert readable_coverage_gaps({"scan": reason}) == [reason]
+
+
 def test_chat_scan_data_carries_the_readable_coverage_gaps(client):
     import api as api_module
 

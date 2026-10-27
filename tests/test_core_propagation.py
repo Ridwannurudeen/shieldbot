@@ -90,7 +90,7 @@ async def test_slow_explorer_lookup_degrades_only_its_field(mock_web3_client, sl
         "contract_age_days": slow_field != "contract_age_days",
     }
     assert result.data["coverage_reasons"] == {
-        slow_field: "Explorer lookup still running at the request deadline; it continues for the next scan",
+        slow_field: "Explorer lookup still running at the request deadline and continues for the next scan",
     }
     assert result.data["ownership_renounced"] is True
     assert result.data["has_proxy"] is False

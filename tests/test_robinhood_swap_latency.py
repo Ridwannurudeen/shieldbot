@@ -40,7 +40,7 @@ from tests.test_robinhood_assets import LISTED, NVDA, OTHER
 from utils.scam_db import ScamMatches
 
 CHAIN = 4663
-STILL_RUNNING = "Explorer lookup still running at the request deadline; it continues for the next scan"
+STILL_RUNNING = "Explorer lookup still running at the request deadline and continues for the next scan"
 KNOWN = [
     WETH, USDG, NVDA, *WHITELISTED_ROUTERS, *KNOWN_SPENDERS,
     PERMIT2_ADDRESS, POOL_MANAGER_ADDRESS, UNISWAP_V2_FACTORY, PANCAKESWAP_V2_FACTORY,

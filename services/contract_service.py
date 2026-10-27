@@ -481,7 +481,7 @@ class ContractService:
                 ):
                     results.setdefault('coverage_exemptions', {})[field] = late[field]
                 elif not lookup.done():
-                    field_reasons[field] = 'Explorer lookup still running at the request deadline; it continues for the next scan'
+                    field_reasons[field] = 'Explorer lookup still running at the request deadline and continues for the next scan'
                 elif lookup.exception() is not None:
                     logger.warning("Explorer lookup for %s failed: %s", address, type(lookup.exception()).__name__)
                     field_reasons[field] = f'Explorer lookup failed ({type(lookup.exception()).__name__})'
