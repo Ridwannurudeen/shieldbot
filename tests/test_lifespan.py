@@ -23,7 +23,7 @@ def mock_container(monkeypatch):
             "token_scanner", "calldata_decoder", "scam_db", "dex_service",
             "ethos_service", "honeypot_service", "contract_service", "risk_engine",
             "greenfield_service", "tenderly_simulator", "advisor", "_background_workers",
-            "_blacklist_reload_task",
+            "_blacklist_reload_task", "_botchain_warmup_task",
         )
     }
     settings = SimpleNamespace(
@@ -157,6 +157,34 @@ class TestLifespan:
             call.verdict_publisher.stop(),
         ]
         assert [made for made in mock_container.mock_calls if made in loops] == loops
+
+
+@pytest.mark.parametrize("chains, warmed", [([4663, 677], True), ([4663], False)], ids=["677-on", "677-off"])
+def test_the_botchain_explorer_warm_up_starts_in_the_background_when_677_is_served(mock_container, chains, warmed):
+    import threading
+
+    import api
+
+    released = threading.Event()
+
+    async def slow_warm_up():
+        while not released.is_set():
+            await asyncio.sleep(0.01)
+
+    adapter = MagicMock()
+    adapter.warm_explorer_caches = AsyncMock(side_effect=slow_warm_up)
+    mock_container.web3_client.get_supported_chain_ids = MagicMock(return_value=chains)
+    mock_container.web3_client._get_adapter = MagicMock(return_value=adapter)
+    with TestClient(api.app) as client:
+        assert client.get("/api/health").status_code == 200
+        assert adapter.warm_explorer_caches.await_count == (1 if warmed else 0)
+        task = api._botchain_warmup_task
+    # Shutdown cancels a warm-up that is still retrying.
+    if warmed:
+        mock_container.web3_client._get_adapter.assert_called_once_with(677)
+        assert task.cancelled()
+    else:
+        assert task is None
 
 
 def test_the_official_token_list_loads_in_the_background_without_holding_startup(mock_container):

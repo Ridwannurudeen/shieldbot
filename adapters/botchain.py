@@ -43,6 +43,14 @@ ROUTER_V2_FACTORIES = {
 # Robinhood Chain (services.robinhood_assets).
 CANONICAL_TOKENS = {WBOT: 'WBOT'}
 
+# The token most BOT Chain swaps pass through, besides canonical WBOT. Its explorer verification and
+# creation are looked up when the API starts, so the first swaps after a deploy are answered from the
+# caches: on 2026-10-27 scan.botchain.ai took 8.4 s for the address against the 7.5 s firewall deadline,
+# and after one restart it timed out. An attempt that leaves either unanswered is tried again.
+WARM_TOKENS = (USDT,)
+WARM_ATTEMPTS = 10
+WARM_RETRY_SECONDS = 60
+
 
 def canonical_token_reason(address: str, chain_id: int, finding: str) -> Optional[str]:
     """The note stating ``finding``, such as "sell simulation does not apply", for a canonical BOT Chain
@@ -86,6 +94,29 @@ class BotChainAdapter(EvmAdapter):
         )
         # No provider serves BOT Chain; ShieldBot simulates the BDEX buy and sell itself.
         self._simulator = BotChainSimulator(rpc, sim_rpc_url=os.getenv('BOTCHAIN_SIM_RPC_URL') or None)
+
+    async def warm_explorer_caches(self) -> None:
+        """Fill the verification and creation caches for WARM_TOKENS as background work, behind any
+        lookup a user is waiting on, trying each token every WARM_RETRY_SECONDS until both are
+        answered, WARM_ATTEMPTS times at most."""
+        from services.explorer_service import BACKGROUND
+
+        background = BACKGROUND.set(True)
+        try:
+            for token in WARM_TOKENS:
+                for attempt in range(WARM_ATTEMPTS):
+                    verified, _ = await self.is_verified_contract(token)
+                    creation = await self.get_contract_creation_info(token)
+                    if verified is not None and creation and creation.get('age_days') is not None:
+                        break
+                    if attempt < WARM_ATTEMPTS - 1:
+                        await asyncio.sleep(WARM_RETRY_SECONDS)
+                else:
+                    logger.warning(
+                        "[BOT Chain] Explorer caches not warmed for %s after %d attempts", token, WARM_ATTEMPTS
+                    )
+        finally:
+            BACKGROUND.reset(background)
 
     async def get_token_info(self, address: str) -> Dict:
         try:

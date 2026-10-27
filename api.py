@@ -105,6 +105,8 @@ _background_workers = "api"
 # With "external" the hunter's sweep, which reloads the scam blacklist, runs in workers.py, so the API
 # rereads the blacklist itself in this task; None with "api".
 _blacklist_reload_task: Optional[asyncio.Task] = None
+# The BOT Chain explorer warm-up, cancelled at shutdown if it is still retrying; None when 677 is not served.
+_botchain_warmup_task: Optional[asyncio.Task] = None
 _EXTERNAL_WORKERS_NOTE = (
     "Background work runs in the separate workers process (BACKGROUND_WORKERS=external), and this API "
     "process holds none of its in-memory state: the mempool counters and the launch watch's run state "
@@ -171,7 +173,7 @@ async def _blacklist_reload_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global container, _background_workers, _blacklist_reload_task
+    global container, _background_workers, _blacklist_reload_task, _botchain_warmup_task
     settings = Settings()
     container = ServiceContainer(settings)
     _bind_globals(container)
@@ -207,6 +209,13 @@ async def lifespan(app: FastAPI):
     # The official Robinhood token list loads in the background, so startup and readiness never wait on
     # it and the first 4663 scans after a deploy find it loaded.
     _fire_and_forget(container.robinhood_assets.listed(), label="robinhood_official_list")
+    # The token most BOT Chain swaps pass through is looked up the same way, so the first swaps after a
+    # deploy do not wait on the chain's explorer.
+    _botchain_warmup_task = None
+    if 677 in container.web3_client.get_supported_chain_ids():
+        _botchain_warmup_task = _fire_and_forget(
+            container.web3_client._get_adapter(677).warm_explorer_caches(), label="botchain_explorer_warmup"
+        )
     _background_workers = settings.background_workers
     if _background_workers == "api":
         await container.start_mempool_monitor()
@@ -256,6 +265,12 @@ async def lifespan(app: FastAPI):
 
     logger.info("ShieldAI Firewall API started")
     yield
+    if _botchain_warmup_task is not None:
+        _botchain_warmup_task.cancel()
+        try:
+            await _botchain_warmup_task
+        except asyncio.CancelledError:
+            pass
     if _blacklist_reload_task is not None:
         _blacklist_reload_task.cancel()
         try:
