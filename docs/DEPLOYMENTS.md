@@ -122,6 +122,11 @@ The registry has the same address as the Robinhood Chain one because the same ow
   submissions to scan.botchain.ai all left the address unverified while Blockscout's verifier service returned
   `verifier service connection` (HTTP 500) for an already verified BOT Chain contract as well. Resubmit the standard JSON input
   (runbook step 5) once that service answers again.
+- **Same code as the verified Robinhood Chain registry:** on 2026-10-27 the runtime code at the address on BOT Chain was byte for byte
+  the code at the same address on Robinhood Chain (2,417 bytes, metadata hash included; the contract has no immutables), which Sourcify
+  holds as an [exact match](https://sourcify.dev/server/v2/contract/4663/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) for creation and
+  runtime code, and both equal a fresh `forge build`. Anyone can repeat the check:
+  `(cd contracts/base && forge build) && python -m scripts.check_botchain_registry_code` exits 0 only when all three agree.
 
 ## Checking these values
 

@@ -145,6 +145,12 @@ If that command does not verify the source, use the standard JSON input form wit
 
 Submit the resulting standard JSON input through the Blockscout contract verification form and confirm its result there.
 
+While Blockscout's verifier cannot verify the registry, check it against the source from the repo root instead. The command compares the code on BOT Chain and on Robinhood Chain with a fresh build and reads Sourcify's match for the Robinhood Chain copy, and exits 0 only when all three agree:
+
+```bash
+(cd contracts/base && forge build) && python -m scripts.check_botchain_registry_code
+```
+
 ## 6. Check the deployment before configuring the server
 
 Every chain read in this step uses the BOT Chain RPC explicitly. Confirm nonempty code, the keystore owner, and the funded recorder:
