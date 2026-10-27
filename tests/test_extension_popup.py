@@ -632,3 +632,158 @@ def test_store_listing_claims_translations_only_where_they_are():
     listing = (ROOT / "docs" / "store-listing.md").read_text(encoding="utf-8")
     line = next(line for line in listing.splitlines() if "Tiếng Việt" in line and line.startswith("•"))
     assert "popup" in line and "welcome page" in line and "side panel" in line, line
+
+
+def test_sidepanel_card_shows_no_sell_tax_or_note_flag_for_a_sell_it_did_not_confirm():
+    """A provider's figure for a sell ShieldBot never ran is not a measured sell tax, and the note that the
+    sell could not be tested is the message's, not a red flag."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for extension JavaScript regression tests")
+    script = r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const source = fs.readFileSync('extension/sidepanel.js', 'utf8');
+const start = source.indexOf('  function renderRiskCard(scanData) {');
+const end = source.indexOf('  // -------------------------------------------------------------------', start);
+assert(start >= 0 && end > start);
+const cards = [];
+const context = vm.createContext({
+  document: {createElement: () => ({})},
+  messagesEl: {appendChild: card => cards.push(card), get scrollHeight() { return 0; }, set scrollTop(value) {}},
+  escapeHtml: String,
+});
+vm.runInContext(source.slice(start, end) + '\nthis.renderRiskCard = renderRiskCard;', context);
+const [goplusFilled, undecided, simulated, goplusTaxed] = JSON.parse(process.argv[1]);
+for (const data of [goplusFilled, undecided, simulated, goplusTaxed]) context.renderRiskCard(data);
+// GoPlus's 0% stands in for a sell ShieldBot found no pool to run: not a measured figure.
+assert(cards[0].innerHTML.includes('Sell tax: <span>Unknown</span>'));
+assert(cards[0].innerHTML.includes('Honeypot: <span>Not flagged by GoPlus (sell not simulated)</span>'));
+assert(!cards[0].innerHTML.includes('Sellability unknown'));
+// Flags copy apart.
+assert(cards[0].innerHTML.includes('Contract age: 0 days</span> <span class="risk-flag">New pair (<24h)</span>'));
+// An own simulation that left the sell undecided leaves GoPlus's answers unresolved too.
+assert(cards[1].innerHTML.includes('Honeypot: <span>Not flagged by GoPlus (sell not simulated)</span>'));
+assert(cards[1].innerHTML.includes('Sell tax: <span>Unknown</span>'));
+// A sell ShieldBot simulated keeps its measured tax.
+assert(cards[2].innerHTML.includes('Honeypot: <span>No</span>'));
+assert(cards[2].innerHTML.includes('Sell tax: <span>3%</span>'));
+// A positive tax GoPlus reported is evidence against the token: shown with its source, not as a measured figure.
+assert(cards[3].innerHTML.includes('Sell tax: <span>80% (GoPlus, not simulated)</span>'));
+assert(cards[3].innerHTML.includes('Honeypot: <span>Not flagged by GoPlus (sell not simulated)</span>'));
+"""
+    cases = [
+        {"status": "unknown", "risk_score": 25, "coverage": {"honeypot": 0},
+         "flags": ["Contract age: 0 days", "New pair (<24h)",
+                   "Sellability unknown: No supported pool found; Unknown fields: can_sell"],
+         "honeypot": {"is_honeypot": False, "can_buy": True, "can_sell": None, "buy_tax": 0, "sell_tax": 0,
+                      "coverage": {"is_honeypot": True, "buy_tax": True, "sell_tax": True, "can_buy": True,
+                                   "can_sell": False},
+                      "field_providers": {"is_honeypot": "goplus", "buy_tax": "goplus", "sell_tax": "goplus",
+                                          "can_buy": "goplus"}}},
+        {"status": "unknown", "risk_score": 0, "coverage": {"honeypot": 0},
+         "honeypot": {"is_honeypot": False, "can_sell": None, "sell_tax": 0, "undecided": True,
+                      "coverage": {"can_sell": False},
+                      "field_providers": {"is_honeypot": "goplus", "sell_tax": "goplus"}}},
+        {"status": "ok", "risk_score": 10, "risk_level": "LOW", "coverage": {"honeypot": 1},
+         "honeypot": {"is_honeypot": False, "can_sell": True, "sell_tax": 3, "coverage": {"can_sell": True},
+                      "field_providers": {"is_honeypot": "eth_simulateV1", "can_sell": "eth_simulateV1",
+                                          "sell_tax": "eth_simulateV1"}}},
+        {"status": "unknown", "risk_score": 20, "coverage": {"honeypot": 0},
+         "honeypot": {"is_honeypot": False, "can_sell": None, "sell_tax": 80, "undecided": True,
+                      "coverage": {"can_sell": False, "sell_tax": False},
+                      "field_providers": {"is_honeypot": "goplus", "sell_tax": "goplus"}}},
+    ]
+    result = subprocess.run(
+        [node, "-e", script, "--", json.dumps(cases)],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_sidepanel_message_keeps_the_servers_unknown_reply_and_reads_the_gaps_otherwise():
+    """The API's Unknown reply (readable gaps, nothing judged) is shown as sent when the API also sent the
+    gaps; any other text beside an unknown scan is replaced by the readable gaps, or by a generic line when
+    a server sends none (never a raw reason)."""
+    from core.chat_coverage import UNKNOWN_LINE
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for extension JavaScript regression tests")
+    script = r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const source = fs.readFileSync('extension/sidepanel.js', 'utf8');
+const start = source.indexOf('  function appendMessage(role, text, opts = {}) {');
+const end = source.indexOf('  // -------------------------------------------------------------------', start);
+assert(start >= 0 && end > start);
+const wrappers = [];
+function element() {
+  return {dataset: {}, className: '', innerHTML: '', textContent: '', children: [],
+    appendChild(child) { this.children.push(child); }, addEventListener() {}};
+}
+const context = vm.createContext({
+  document: {createElement: element},
+  messagesEl: {appendChild: wrapper => wrappers.push(wrapper), get scrollHeight() { return 0; }, set scrollTop(value) {}},
+  renderMarkdown: String,
+  t: key => ({unknownNoReason: 'Some checks did not complete.'})[key] || key,
+});
+vm.runInContext(source.slice(start, end) + '\nthis.appendMessage = appendMessage;', context);
+const [lead, scan] = JSON.parse(process.argv[1]);
+const reply = lead + '\n- whether the token can be sold is unknown\n\nThe pair is 4 hours old.';
+context.appendMessage('assistant', reply, {scanData: scan});
+assert.equal(wrappers[0].children[0].dataset.raw, reply);
+context.appendMessage('assistant', 'SAFE: 0/100', {scanData: scan});
+assert.equal(wrappers[1].children[0].dataset.raw, 'Unknown (incomplete provider coverage). '
+  + 'no pool ShieldBot can simulate a sale on, so it could not test selling; whether the token can be sold is unknown');
+// An older API sends no coverage_gaps: its raw reasons never show, and a reply of its that happens to start
+// with the Unknown line is not trusted either.
+const older = {...scan, coverage_gaps: undefined};
+context.appendMessage('assistant', 'SAFE: 0/100', {scanData: older});
+assert.equal(wrappers[2].children[0].dataset.raw, 'Unknown (incomplete provider coverage). Some checks did not complete.');
+context.appendMessage('assistant', reply, {scanData: older});
+assert.equal(wrappers[3].children[0].dataset.raw, 'Unknown (incomplete provider coverage). Some checks did not complete.');
+"""
+    scan = {
+        "status": "unknown", "risk_score": 25, "coverage": {"honeypot": 0},
+        "coverage_reasons": {"honeypot": "Initialize logs scanned over blocks 1-2; No supported pool found; Unknown fields: can_sell"},
+        "coverage_gaps": ["no pool ShieldBot can simulate a sale on, so it could not test selling",
+                          "whether the token can be sold is unknown"],
+    }
+    result = subprocess.run(
+        [node, "-e", script, "--", json.dumps([UNKNOWN_LINE, scan])],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_overlay_unknown_reason_prefers_the_readable_gaps():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for extension JavaScript regression tests")
+    source = (EXTENSION / "content.js").read_text(encoding="utf-8")
+    # Every Unknown line of the overlay, the explain box included, reads its reason through unknownReason.
+    assert source.count("result.coverage_reasons") == 1
+    script = r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const source = fs.readFileSync('extension/content.js', 'utf8');
+const start = source.indexOf('  // One line saying why a result is Unknown');
+const end = source.indexOf('  // The class a result is shown as', start);
+assert(start >= 0 && end > start);
+const context = vm.createContext({_t: key => key});
+vm.runInContext(source.slice(start, end) + '\nthis.unknownReason = unknownReason;', context);
+assert.equal(context.unknownReason({
+  coverage_reasons: {honeypot: 'Initialize logs scanned over blocks 1-2; No supported pool found'},
+  coverage_gaps: ['no pool ShieldBot can simulate a sale on, so it could not test selling'],
+}), 'no pool ShieldBot can simulate a sale on, so it could not test selling');
+// An older API without coverage_gaps: its plain reasons as sent, its internals (block ranges, field names,
+// addresses) read as what they are, never raw.
+assert.equal(context.unknownReason({coverage_reasons: {firewall_response: 'Provider timed out'}}), 'Provider timed out');
+assert.equal(context.unknownReason({coverage_reasons: {
+  honeypot: 'Initialize logs scanned over blocks 1-2; No supported pool found; Unknown fields: buy_tax, can_sell',
+  scan: 'Deployer 0x' + 'ab'.repeat(20) + ' unavailable',
+}}), 'No supported pool found; buy tax and whether the token can be sold are unknown; Deployer a contract address unavailable');
+assert.equal(context.unknownReason({coverage_gaps: [], coverage_reasons: {}}), 'unknownNoReason');
+"""
+    result = subprocess.run(
+        [node, "-e", script], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -150,6 +150,23 @@ class TestChatHistory:
         assert history[2]["message"] == "msg-4"
 
     @pytest.mark.asyncio
+    async def test_history_follows_insertion_order_not_the_clock(self, db, monkeypatch):
+        """A clock that moves back must not reorder the chat: the newest row is the last inserted one, and the
+        per-user cap keeps the last inserted rows, whatever their created_at says."""
+        import core.database as database
+
+        clock = [1_000.0, 900.0, 950.0]
+        monkeypatch.setattr(database.time, "time", lambda: clock.pop(0) if clock else 950.0)
+        await db.insert_chat_message("user-1", "assistant", "first, clock at 1000")
+        await db.insert_chat_message("user-1", "user", "second, clock back at 900")
+        await db.insert_chat_message("user-1", "assistant", "third, clock at 950", max_per_user=2)
+
+        history = await db.get_chat_history("user-1")
+        assert [row["message"] for row in history] == ["second, clock back at 900", "third, clock at 950"]
+        assert history[-1]["id"] > history[0]["id"]
+        assert history[-1]["created_at"] == 950.0
+
+    @pytest.mark.asyncio
     async def test_prune_old_chats(self, db):
         """Prune should delete messages older than max_age_seconds."""
         now = time.time()

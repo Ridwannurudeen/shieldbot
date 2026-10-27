@@ -182,7 +182,7 @@ def _launch_scan(stored_status, risk_score, scanned_at, finding) -> Dict:
         "risk_level": None,
         "risk_score": None,
         "coverage": None,
-        "coverage_reasons": {"scan": "Scan incomplete; coverage details were not recorded"},
+        "coverage_reasons": {"scan": "Scan incomplete: coverage details were not recorded"},
         "flags": [],
         "scanned_at": scanned_at,
     }
@@ -1470,24 +1470,26 @@ class Database:
             INSERT INTO chat_history (user_id, role, message, tools_used, created_at)
             VALUES (?, ?, ?, ?, ?)
         """, (user_id, role, message, tools_json, now))
-        # Evict oldest messages beyond the per-user cap
+        # Evict oldest messages beyond the per-user cap, by insertion order: a clock that moved back cannot
+        # make a newer row the oldest.
         await self._db.execute("""
             DELETE FROM chat_history WHERE id IN (
                 SELECT id FROM chat_history
                 WHERE user_id = ?
-                ORDER BY created_at DESC
+                ORDER BY id DESC
                 LIMIT -1 OFFSET ?
             )
         """, (user_id, max_per_user))
         await self._db.commit()
 
     async def get_chat_history(self, user_id: str, limit: int = 10) -> List[Dict]:
-        """Get the last N messages for a user, ordered oldest-first (for LLM context)."""
+        """Get the last N messages for a user, ordered oldest-first (for LLM context). Insertion order (the id)
+        decides which are the last and how they are ordered, so a clock that moved back cannot reorder them."""
         cursor = await self._db.execute("""
             SELECT id, role, message, tools_used, created_at
             FROM chat_history
             WHERE user_id = ?
-            ORDER BY created_at DESC
+            ORDER BY id DESC
             LIMIT ?
         """, (user_id, limit))
         rows = await cursor.fetchall()

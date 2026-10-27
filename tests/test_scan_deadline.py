@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -396,3 +397,35 @@ async def test_botchain_address_lookup_has_its_own_timeout_on_the_contract_servi
     assert data["reason"] == "Scam database unavailable: GoPlus address security: timed out"
     assert data["token_security_unsupported"] is True
     assert scam_db._GOPLUS_ADDRESS_CACHE[TOKEN.lower()]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_a_market_lookup_still_running_at_the_deadline_is_a_named_unknown_that_runs_on():
+    from analyzers.market import STILL_RUNNING as MARKET_STILL_RUNNING
+    from analyzers.market import MarketAnalyzer
+
+    release = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def slow_market(address, chain_id=56):
+        await release.wait()
+        finished.set()
+        return {"status": "ok"}
+
+    service = MagicMock(fetch_token_market_data=AsyncMock(side_effect=slow_market))
+    deadline = time.monotonic() + 0.55
+
+    (market,) = await registry_of(MarketAnalyzer(service)).run_all(
+        AnalysisContext(address=TOKEN, chain_id=56, extra={"deadline": deadline}),
+        deadline=deadline - time.monotonic(),
+    )
+
+    assert market.error is None
+    assert market.score == 0
+    assert (market.data["status"], market.data["reason"]) == ("unknown", MARKET_STILL_RUNNING)
+    assert market.flags == [f"Market data unknown: {MARKET_STILL_RUNNING}"]
+    assert not finished.is_set()
+    # The lookup was not cancelled with the analyzer: it fills the market caches for the next scan.
+    release.set()
+    await asyncio.wait_for(finished.wait(), 1)
+    service.fetch_token_market_data.assert_awaited_once_with(TOKEN, chain_id=56)

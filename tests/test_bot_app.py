@@ -1126,7 +1126,7 @@ class TestLaunchAlertDelivery:
         for text in texts[:2]:
             assert text.startswith("⚪ UNKNOWN: scan incomplete, not a safety verdict")
             assert "Risk score" not in text and "CLEARED" not in text and "no major risks" not in text
-        assert "Unknown: Scan incomplete; coverage details were not recorded" in texts[0]
+        assert "Unknown: Scan incomplete: coverage details were not recorded" in texts[0]
         assert "Unknown: Scan failed before completing" in texts[1]
         assert texts[2].startswith("🟢 CLEARED: a complete scan found no major risks")
 

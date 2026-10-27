@@ -3,7 +3,7 @@
 import os
 import asyncio
 import logging
-from typing import Dict
+from typing import Dict, Optional
 
 from adapters.evm_base import ERC20_ABI, EvmAdapter
 from adapters.robinhood import SIMULATION_PROVIDER, _simulation_response
@@ -35,6 +35,32 @@ KNOWN_SPENDERS = {
 ROUTER_V2_FACTORIES = {
     '0xae6ae8630f7a888dec0b9195c85f7515d5887655': V2_FACTORY,
 }
+
+# The chain's wrapped native coin at its exact address: the WETH() of the BDEX V2 router and the WETH9()
+# of its V3 router (services/botchain_simulation.py). Every BDEX pool is priced in it, so the sell
+# simulation and the market-pair checks say nothing about it, and its explorer verification and age are
+# not evidence. The analyzers skip those checks with a note, as they skip them for canonical WETH on
+# Robinhood Chain (services.robinhood_assets).
+CANONICAL_TOKENS = {WBOT: 'WBOT'}
+
+
+def canonical_token_reason(address: str, chain_id: int, finding: str) -> Optional[str]:
+    """The note stating ``finding``, such as "sell simulation does not apply", for a canonical BOT Chain
+    token at its exact address; None for any other token or chain."""
+    symbol = CANONICAL_TOKENS.get(address.lower()) if chain_id == 677 else None
+    if symbol is None:
+        return None
+    return f'Canonical {symbol} of BOT Chain (exact address): {finding}'
+
+
+def canonical_explorer_exemption(address: str, chain_id: int) -> Optional[Dict[str, str]]:
+    """Why a canonical BOT Chain token at its exact address needs no explorer verification or contract
+    age, per field; None for any other token or chain."""
+    symbol = CANONICAL_TOKENS.get(address.lower()) if chain_id == 677 else None
+    if symbol is None:
+        return None
+    reason = f'canonical BOT Chain token {symbol} (exact address)'
+    return {'is_verified': reason, 'contract_age_days': reason}
 
 
 class BotChainAdapter(EvmAdapter):

@@ -3,6 +3,9 @@ from typing import List, Optional, TYPE_CHECKING
 
 from core.verdicts import BLOCK_MIN, HIGH, LOW, MEDIUM, level_from_score
 
+# The explorer fields of the structural data, as a user-facing reason names them.
+EXPLORER_FIELD_NAMES = {'is_verified': 'verification', 'contract_age_days': 'contract age'}
+
 if TYPE_CHECKING:
     from core.analyzer import AnalyzerResult
 
@@ -543,7 +546,7 @@ class RiskEngine:
                 reasons[result.name] = result.error or (
                     'Honeypot simulation failed (unresolved)' if simulation_failed
                     else data.get('reason') or (
-                        'Structural data unknown: ' + ', '.join(structural_missing)
+                        'Structural data unknown: ' + ', '.join(EXPLORER_FIELD_NAMES[field] for field in structural_missing)
                         if structural_missing else 'Provider data unavailable or incomplete'
                     )
                 )

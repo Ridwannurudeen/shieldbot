@@ -501,28 +501,92 @@ async def test_a_proven_trap_beside_a_pool_the_rpc_could_not_simulate_stands_wit
     assert risk["risk_level"] != "LOW" and extension["risk_classification"] != "SAFE"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("chain_id", [42161, 4663])
-async def test_a_token_with_no_pool_to_simulate_is_still_decided_by_a_complete_clean_goplus_answer(
-    chain_id,
-):
+def no_pool_to_simulate(chain_id):
+    """The chain's adapter whose own simulation finds no pool to sell on, and the token."""
     if chain_id == 42161:
         fixture = load_arbitrum("v3_arb")
-        adapter = arbitrum_adapter(ArbitrumRpc(fixture, pools={}))
-        token = fixture["token"]
-    else:
-        adapter = adapter_with(RobinhoodRpc(TOKEN, 10**27))
-        token = TOKEN
+        return arbitrum_adapter(ArbitrumRpc(fixture, pools={})), fixture["token"]
+    return adapter_with(RobinhoodRpc(TOKEN, 10**27)), TOKEN
+
+
+NO_SELL = "Own simulation made no sell (unresolved)"
+
+
+def assert_no_sell_leaves_the_clean_goplus_answer_unresolved(data, analyzed, risk, extension, chain_id):
+    """ShieldBot's own simulation was consulted and made no sell (owner decision, 2026-10-26): GoPlus's clean
+    sell fields stay out, its "not a honeypot" is reported as GoPlus's and unresolved, and no surface reaches
+    LOW or SAFE on sellability."""
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+    assert data["undecided"] is True
+    assert NO_SELL in data["reason"]
+    assert data["can_sell"] is None and "can_sell" not in data["field_providers"]
+    assert data["sell_tax"] is None and "sell_tax" not in data["field_providers"]
+    assert data["coverage"]["can_sell"] is False
+    assert (data["is_honeypot"], data["field_providers"]["is_honeypot"]) == (False, "goplus")
+    assert analyzed.score == 0
+    assert data["simulation_failed"] is False
+    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data, chain_id=chain_id)
+    assert "Not Honeypot" not in report and "Sell Tax: 0%" not in report
+    assert "Sellability: Unknown" in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+async def test_a_token_with_no_pool_to_simulate_stays_unknown_beside_a_complete_clean_goplus_answer(
+    chain_id,
+):
+    adapter, token = no_pool_to_simulate(chain_id)
     data, analyzed, risk, extension = await scan(chain_id, adapter, token)
     assert "No supported pool found" in data["reason"]
-    assert data["can_sell"] is True and data["field_providers"]["can_sell"] == "goplus"
-    assert data["status"] == analyzed.data["status"] == risk["status"] == "ok"
-    assert (analyzed.score, risk["risk_level"], extension["risk_classification"]) == (
-        0,
-        "LOW",
-        "SAFE",
-    )
+    assert_no_sell_leaves_the_clean_goplus_answer_unresolved(data, analyzed, risk, extension, chain_id)
     assert data["rpc_failed"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+async def test_a_goplus_honeypot_flag_on_a_token_with_no_pool_to_simulate_still_counts(chain_id):
+    from core.verdicts import BLOCK_RECOMMENDED, HIGH_RISK
+
+    adapter, token = no_pool_to_simulate(chain_id)
+    goplus = {**CLEAN_GOPLUS, "data": {**CLEAN_GOPLUS["data"], "is_honeypot": "1"}}
+    data, analyzed, risk, extension = await scan(chain_id, adapter, token, goplus)
+    assert (data["is_honeypot"], data["field_providers"]["is_honeypot"]) == (True, "goplus")
+    assert data["can_sell"] is False and data["field_providers"]["can_sell"] == "goplus"
+    assert "Honeypot detected" in analyzed.flags and "Cannot sell token" in analyzed.flags
+    assert analyzed.score == 100
+    assert extension["risk_classification"] in (HIGH_RISK, BLOCK_RECOMMENDED)
+    assert data["undecided"] is True and data["status"] == "unknown"
+    report = format_full_report(risk, {}, {}, {}, honeypot_data=analyzed.data, chain_id=chain_id)
+    assert "Honeypot" in report and "Not Honeypot" not in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+@pytest.mark.parametrize(
+    "tax,percent,score,flag",
+    [("0.6", 60.0, 40, "Extreme sell tax: 60.0%"), ("0.25", 25.0, 20, None)],
+    ids=["60", "25"],
+)
+async def test_a_high_goplus_sell_tax_on_a_token_with_no_pool_to_simulate_is_scored_and_stays_unknown(
+    chain_id, tax, percent, score, flag
+):
+    adapter, token = no_pool_to_simulate(chain_id)
+    data, analyzed, risk, extension = await scan(chain_id, adapter, token, goplus_selling_at(tax))
+    # GoPlus's tax is evidence against the token, shown and scored, but not a measured sell's tax.
+    assert (data["sell_tax"], data["field_providers"]["sell_tax"]) == (percent, "goplus")
+    assert analyzed.score == score
+    assert [f for f in analyzed.flags if f.startswith("Extreme sell tax")] == ([flag] if flag else [])
+    assert data["coverage"]["sell_tax"] is False and data["coverage"]["can_sell"] is False
+    assert data["can_sell"] is None and data["undecided"] is True
+    assert_unknown_never_safe(data, analyzed, risk, extension)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain_id", [42161, 4663])
+async def test_a_goplus_sell_tax_of_at_most_20_on_a_token_with_no_pool_to_simulate_stays_out(chain_id):
+    adapter, token = no_pool_to_simulate(chain_id)
+    data, analyzed, risk, extension = await scan(chain_id, adapter, token, goplus_selling_at("0.2"))
+    assert_no_sell_leaves_the_clean_goplus_answer_unresolved(data, analyzed, risk, extension, chain_id)
 
 
 @pytest.mark.asyncio
@@ -824,17 +888,16 @@ async def test_a_getter_that_reverts_is_not_an_answer_of_no_pool(chain_id, looku
     [REVERTED, {"code": -32000, "message": "execution reverted"}],
     ids=["code-3", "message"],
 )
-async def test_a_total_supply_that_reverts_is_still_answered_by_a_complete_clean_goplus_answer(
+async def test_a_total_supply_that_reverts_stays_unknown_beside_a_complete_clean_goplus_answer(
     chain_id, reverted
 ):
-    # A contract without totalSupply() reverts, legitimately: nothing to simulate, and GoPlus decides.
+    # A contract without totalSupply() reverts, legitimately: nothing to simulate, so no sell was made, and
+    # GoPlus's clean answer cannot settle sellability in its place.
     adapter, node = discovery_with(chain_id, {"error": reverted}, "totalSupply")
     data, analyzed, risk, extension = await scan(chain_id, adapter)
     assert node.hits == 1
     assert "totalSupply() unavailable; cannot size a buy" in data["reason"]
-    assert data["can_sell"] is True and data["field_providers"]["can_sell"] == "goplus"
-    assert data["status"] == analyzed.data["status"] == risk["status"] == "ok"
-    assert (analyzed.score, risk["risk_level"], extension["risk_classification"]) == (0, "LOW", "SAFE")
+    assert_no_sell_leaves_the_clean_goplus_answer_unresolved(data, analyzed, risk, extension, chain_id)
     assert data["rpc_failed"] is False
 
 

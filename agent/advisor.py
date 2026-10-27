@@ -18,7 +18,8 @@ from utils.web3_client import UnsupportedChainError
 from utils.ai_analyzer import AIEmptyResponse, AIRefused
 
 from agent.prompts import ADVISOR_SYSTEM_PROMPT, EXPLAIN_SCAN_TEMPLATE, HAIKU_MODEL, SONNET_MODEL
-from core.chat_coverage import readable_coverage_gaps
+from core.chat_coverage import UNKNOWN_LINE, observed_facts, readable_coverage_gaps, unknown_reply
+from core.extension_formatter import is_scan_incomplete
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,14 @@ AI_CHAT_PAUSED = (
     "AI chat is paused for today because the daily AI budget is used up. "
     "It resumes at 00:00 UTC."
 )
+
+# Closes the reply to the first question that follows a scan without a verdict and brings no new address.
+RESCAN_LINE = (
+    "Rescan once the missing checks can run, or paste another address: ShieldBot gives no verdict on a token "
+    "it could not finish checking."
+)
+# How long after that scan's reply such a question is still taken to be about the token.
+FOLLOW_UP_WINDOW_SECONDS = 600
 
 
 def _untagged(text: str) -> str:
@@ -155,6 +164,22 @@ class Advisor:
         history = await self.db.get_chat_history(user_id, limit=10)
         context = await self._gather_context(intent, data, chain_id=chain_id)
 
+        # A scan without a verdict, by the one rule every surface uses (core.extension_formatter), gets the
+        # server's own reply with no model text (api.agent_chat sends the same). The first message after that
+        # reply that brings no new address, within FOLLOW_UP_WINDOW_SECONDS, is about that token: it gets the
+        # reply again with a rescan line, not model text that could judge the token. The gated reply ends with
+        # that line, so it does not arm the gate again; later questions reach the model, which saw no
+        # incomplete scan, and a new scan is a newer turn.
+        unknown_scan = intent == "CONTRACT_CHECK" and is_scan_incomplete(context["scan"])
+        newest = history[-1] if history else None
+        after_unknown_scan = (
+            intent == "GENERAL" and newest is not None and newest["role"] == "assistant"
+            and newest["message"].startswith(UNKNOWN_LINE) and not newest["message"].endswith(RESCAN_LINE)
+            # History comes in insertion order (core.database), so the newest row is the last inserted one; a
+            # clock that moved back since (a negative age) ends the window as surely as time does.
+            and 0 <= time.time() - newest["created_at"] <= FOLLOW_UP_WINDOW_SECONDS
+        )
+
         # Build the user content — inject context when available.
         # Wrap in XML delimiters to mitigate prompt injection via API data; nothing inside can close them.
         if context:
@@ -178,7 +203,15 @@ class Advisor:
 
         # Call AI or return fallback
         model_response_available = False
-        if not self.ai.is_available():
+        if unknown_scan:
+            scan = context["scan"]
+            response_text = unknown_reply(
+                scan.get("coverage_reasons", {}),
+                observed_facts(scan.get("coverage", {}), context.get("market")),
+            )
+        elif after_unknown_scan:
+            response_text = f"{newest['message']}\n\n{RESCAN_LINE}"
+        elif not self.ai.is_available():
             response_text = (
                 "AI analysis is currently unavailable. "
                 "Please try again later or check your API key configuration."
@@ -238,7 +271,8 @@ class Advisor:
                 except Exception as e:
                     logger.error("AI token usage record failed: %s", type(e).__name__)
 
-        # Persist both sides of the conversation; a paused reply would only crowd tomorrow's history
+        # Persist both sides of the conversation, the reply exactly as the user receives it; a paused reply would
+        # only crowd tomorrow's history
         if response_text != AI_CHAT_PAUSED:
             await self.db.insert_chat_message(user_id, "user", message)
             await self.db.insert_chat_message(user_id, "assistant", response_text)

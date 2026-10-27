@@ -906,6 +906,18 @@ def test_the_bot_legacy_token_report_reads_either_flag_as_a_sell_it_did_not_sett
     assert '✅ Can Sell' not in report and 'Unknown Can Sell' in report
 
 
+def test_the_bot_legacy_token_report_reads_a_sell_the_simulation_never_made_as_unsettled(bot_report_functions):
+    # The service's answer for a token whose own simulation found no pool to sell on: GoPlus's "not a
+    # honeypot" reported and undecided, its clean sell tax refused.
+    result = {'address': '0x' + 'a' * 40, 'status': 'unknown', 'safety_level': 'unknown', 'risk_score': 0,
+              'coverage': {'honeypot': 0}, 'is_honeypot': False, 'buy_tax': 0, 'sell_tax': None,
+              'checks': {'can_buy': True, 'can_sell': None}, 'undecided': True}
+    report = bot_report_functions['format_token_result'](result, 4663)
+    assert 'Not a honeypot' not in report and 'Unknown (honeypot data incomplete)' in report
+    assert 'Unknown Can Sell' in report and 'Sell: Unknown' in report
+    assert '**Safety:** ⚪ UNKNOWN' in report
+
+
 def _legacy_simulations():
     from tests.test_own_simulation_failure import PROVEN_TRAP, TRAP_POOL, simulation_of
 

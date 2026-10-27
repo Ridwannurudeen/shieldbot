@@ -9,7 +9,9 @@ from typing import Optional
 
 from eth_utils import keccak
 
+from adapters.botchain import canonical_explorer_exemption
 from adapters.evm_base import BURN_ADDRESSES
+from core.risk_engine import EXPLORER_FIELD_NAMES
 from services.launch_discovery import SOURCES, LaunchDiscoveryError, _decode_log, _quantity
 from services.robinhood_assets import OFFICIAL_LIST_WAIT_SECONDS
 from utils.scam_db import GOPLUS_ADDRESS_TIMEOUT_SECONDS
@@ -274,7 +276,8 @@ class ContractService:
         EXPLORER_RESULT_RESERVE_SECONDS before it leaves only its own field unknown, with a named
         reason, and runs on to fill the explorer caches for the next scan. Without one (background
         scans) both are awaited, as before. An exact Robinhood Chain address ``robinhood_assets``
-        knows has no explorer lookup: its verification and age are reported as exemptions.
+        knows, or a canonical BOT Chain token (adapters.botchain), has no explorer lookup: its
+        verification and age are reported as exemptions.
         """
         from utils.web3_client import UnsupportedChainError
 
@@ -313,9 +316,9 @@ class ContractService:
             field_reasons = {}
             source_code = None
 
-            exemption = None
+            exemption = canonical_explorer_exemption(address, chain_id)
             official = None
-            if robinhood_assets is not None:
+            if exemption is None and robinhood_assets is not None:
                 exemption = robinhood_assets.static_explorer_exemption(address, chain_id)
                 if exemption is None and chain_id == 4663:
                     official = asyncio.create_task(robinhood_assets.explorer_exemption(address, chain_id))
@@ -478,7 +481,7 @@ class ContractService:
                 ):
                     results.setdefault('coverage_exemptions', {})[field] = late[field]
                 elif not lookup.done():
-                    field_reasons[field] = 'Explorer lookup still running at the request deadline; it continues for the next scan'
+                    field_reasons[field] = 'Explorer lookup still running at the request deadline and continues for the next scan'
                 elif lookup.exception() is not None:
                     logger.warning("Explorer lookup for %s failed: %s", address, type(lookup.exception()).__name__)
                     field_reasons[field] = f'Explorer lookup failed ({type(lookup.exception()).__name__})'
@@ -490,7 +493,10 @@ class ContractService:
                     results['contract_age_days'] = lookup.result().get('age_days')
 
             if chain_id == 677:
-                if creator_security_task is not None:
+                if exemption is not None:
+                    # A canonical token's creator is not evidence about it, so it is not looked up.
+                    results['creator_address_status'] = 'not_needed'
+                elif creator_security_task is not None:
                     if (
                         creator_security_task.done()
                         and not creator_security_task.cancelled()
@@ -524,7 +530,8 @@ class ContractService:
             if field_reasons:
                 results['coverage_reasons'] = field_reasons
                 results['reason'] = '; '.join(filter(None, (
-                    results.get('reason'), *(f'{field}: {reason}' for field, reason in field_reasons.items()),
+                    results.get('reason'),
+                    *(f'{EXPLORER_FIELD_NAMES[field]}: {reason}' for field, reason in field_reasons.items()),
                 )))
 
             # GoPlus also finds blacklist functions under names the selector table does not list

@@ -2,7 +2,7 @@
 
 import logging
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
-from core.risk_engine import database_matches, medium_matches
+from core.risk_engine import EXPLORER_FIELD_NAMES, database_matches, medium_matches
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,9 @@ class StructuralAnalyzer(Analyzer):
                 data['coverage'][field] = data.get(field) is not None or field in exemptions
         data['status'] = 'unknown' if data.get('status') == 'unknown' or not all(data['coverage'].values()) else 'ok'
         if data['status'] == 'unknown':
-            missing = ', '.join(field for field, covered in data['coverage'].items() if not covered)
+            missing = ', '.join(
+                EXPLORER_FIELD_NAMES.get(field, field) for field, covered in data['coverage'].items() if not covered
+            )
             data['reason'] = data.get('reason') or (
                 f'Structural data unknown: {missing}' if missing else 'Structural provider data incomplete'
             )
@@ -80,6 +82,12 @@ class StructuralAnalyzer(Analyzer):
                         'GoPlus token security does not cover BOT Chain.'
                     )
                     notes.append('Creator labels not checked before the request deadline')
+                elif data.get('creator_address_status') == 'not_needed':
+                    # A canonical token (adapters.botchain): its creator is not looked up.
+                    notes.append(
+                        'Scam check: GoPlus address labels checked for the token. '
+                        'GoPlus token security does not cover BOT Chain.'
+                    )
                 else:
                     notes.append(
                         'Scam check: GoPlus address labels checked for the token. '
@@ -115,9 +123,8 @@ class StructuralAnalyzer(Analyzer):
                     + ', '.join(selected)
                 )
         if exemptions:
-            named = {'is_verified': 'verification', 'contract_age_days': 'contract age'}
             notes.append(
-                f"Explorer {' and '.join(named[field] for field in exemptions)} not needed: "
+                f"Explorer {' and '.join(EXPLORER_FIELD_NAMES[field] for field in exemptions)} not needed: "
                 f"{next(iter(exemptions.values()))}"
             )
 

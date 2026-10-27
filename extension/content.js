@@ -623,9 +623,34 @@
   }
 
   // One line saying why a result is Unknown, from its coverage reasons.
+  // The API's coverage_gaps say the reasons in plain words. A response without them (an older API) gives
+  // its coverage reasons with the internals read as what they are, as core.chat_coverage does server side:
+  // block ranges dropped, addresses named as such, field names as their labels.
+  const FIELD_LABELS = {
+    buy_tax: "buy tax",
+    sell_tax: "sell tax",
+    can_sell: "whether the token can be sold",
+    can_buy: "whether the token can be bought",
+    is_honeypot: "honeypot status",
+  };
+  function readableReason(reason) {
+    const clean = String(reason)
+      .replace(/(?:initialize logs scanned over )?blocks?\s+\d+\s*-\s*\d+;?/gi, "")
+      .replace(/\b0x[0-9a-fA-F]{8,}\b/g, "a contract address")
+      .replace(/^[\s;]+|[\s;]+$/g, "");
+    const fields = /^unknown fields:\s*(.+)$/i.exec(clean);
+    if (!fields) return clean;
+    const labels = fields[1].split(",").map(field => FIELD_LABELS[field.trim().toLowerCase()]).filter(Boolean);
+    if (!labels.length) return "some scan details are unknown";
+    if (labels.length === 1) return `${labels[0]} is unknown`;
+    return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]} are unknown`;
+  }
   function unknownReason(result) {
-    return Object.values(result.coverage_reasons || {}).filter(Boolean).join("; ") ||
-      _t("unknownNoReason");
+    const gaps = Array.isArray(result.coverage_gaps)
+      ? result.coverage_gaps.filter(Boolean)
+      : Object.values(result.coverage_reasons || {}).filter(Boolean)
+        .flatMap(reason => String(reason).split(";")).map(readableReason).filter(Boolean);
+    return gaps.join("; ") || _t("unknownNoReason");
   }
 
   // The class a result is shown as. One that is not complete is Unknown,
@@ -1366,8 +1391,7 @@
       if (incomplete) {
         loadingEl.style.display = "none";
         textEl.style.display = "block";
-        textEl.textContent = `${_t("overlayIncompleteCoverage")}. ` +
-          Object.values(result.coverage_reasons || {}).join("; ");
+        textEl.textContent = `${_t("overlayIncompleteCoverage")}. ${unknownReason(result)}`;
         return;
       }
 

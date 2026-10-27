@@ -40,7 +40,7 @@ from tests.test_robinhood_assets import LISTED, NVDA, OTHER
 from utils.scam_db import ScamMatches
 
 CHAIN = 4663
-STILL_RUNNING = "Explorer lookup still running at the request deadline; it continues for the next scan"
+STILL_RUNNING = "Explorer lookup still running at the request deadline and continues for the next scan"
 KNOWN = [
     WETH, USDG, NVDA, *WHITELISTED_ROUTERS, *KNOWN_SPENDERS,
     PERMIT2_ADDRESS, POOL_MANAGER_ADDRESS, UNISWAP_V2_FACTORY, PANCAKESWAP_V2_FACTORY,
@@ -343,7 +343,7 @@ async def test_firewall_swap_answers_inside_the_deadline_with_structural_present
     # alone unknown (GoPlus gives its verification), named.
     assert response["coverage"][f"{weth}:structural"] == 1
     assert 0 < response["coverage"][f"{other}:structural"] < 1
-    assert response["coverage_reasons"][f"{other}:structural"] == f"contract_age_days: {STILL_RUNNING}"
+    assert response["coverage_reasons"][f"{other}:structural"] == f"contract age: {STILL_RUNNING}"
     assert not any("unavailable" in reason for reason in response["coverage_reasons"].values())
     assert response["coverage"][f"{other}:honeypot"] == 1
     assert response["status"] == "unknown"

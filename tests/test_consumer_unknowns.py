@@ -1117,9 +1117,12 @@ async def test_real_advisor_chat_keeps_text_only_for_complete_scan(consumer_api,
         assert response['response'] == 'Advisor analysis text'
         assert not response['scan_data']['risk_display'].startswith('Unknown')
     else:
+        from core.chat_coverage import unknown_reply
         assert response['response'] != 'Advisor analysis text'
         assert response['response'].startswith('ShieldBot could not finish checking this token, so it has no verdict.')
-        assert response['response'].endswith('\n\nAdvisor analysis text')
+        # No model text at all for a scan without a verdict, and no model call.
+        assert response['response'] == unknown_reply(scan['coverage_reasons'])
+        ai.chat_with_usage.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1535,7 +1538,11 @@ async def test_advisor_scan_failure_renders_unknown_chat(consumer_api):
     response = await api.agent_chat(api.ChatRequest(message='check 0x' + 'a' * 40, user_id='test'),
         SimpleNamespace(client=SimpleNamespace(host='advisor-scan-failure'), headers={}))
     assert response['response'].startswith('ShieldBot could not finish checking this token, so it has no verdict.')
-    assert response['response'].endswith('\n\nThe scan could not test whether the token can be sold.')
+    # The server's own words only: the model's text, judging or not, is not in the reply, nor was it asked for.
+    assert response['response'] == (
+        'ShieldBot could not finish checking this token, so it has no verdict.\n- Contract scan unavailable'
+    )
+    ai.chat_with_usage.assert_not_awaited()
     assert 'SAFE' not in response['response']
     assert response['scan_data']['status'] == 'unknown'
     assert response['scan_data']['coverage_reasons']
