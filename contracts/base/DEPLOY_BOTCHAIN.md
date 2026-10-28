@@ -237,7 +237,7 @@ Deploy (owner only). The command signs with the `robinhood-owner` keystore:
 ~/.foundry/bin/forge script script/DeployGuardAndTransfer.s.sol:DeployGuardAndTransfer --rpc-url botchain --account robinhood-owner --legacy --broadcast
 ```
 
-The script asserts every pinned address after deploying. Save both addresses and transaction hashes from `broadcast/DeployGuardAndTransfer.s.sol/677/run-latest.json` into [docs/DEPLOYMENTS.md](../../docs/DEPLOYMENTS.md), then read them back:
+The script's assertions run in its simulation before anything is sent; the reads below check the deployed contracts. Save both addresses and transaction hashes from `broadcast/DeployGuardAndTransfer.s.sol/677/run-latest.json` into [docs/DEPLOYMENTS.md](../../docs/DEPLOYMENTS.md), then read them back:
 
 ```bash
 export GUARD=<deployed guard address>
