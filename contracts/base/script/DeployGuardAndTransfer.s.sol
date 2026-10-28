@@ -6,16 +6,21 @@ import {ShieldBotVerdictRegistry} from "../src/ShieldBotVerdictRegistry.sol";
 import {ShieldBotVerdictGuard} from "../src/ShieldBotVerdictGuard.sol";
 import {ShieldBotGuardedTransfer} from "../src/ShieldBotGuardedTransfer.sol";
 
-/// @notice Deploys the verdict guard and guarded USDG transfer on Robinhood Chain (4663).
-/// @dev Reads only public addresses from REGISTRY, EXPECTED_RECORDER, SUBJECT, USDG and RECIPIENT.
-///      No key is read here: the owner signs with a Foundry keystore (--account). See DEPLOY_ROBINHOOD.md.
+/// @notice Deploys the verdict guard and guarded stablecoin transfer on Robinhood Chain (4663) or BOT Chain (677).
+/// @dev Reads only public addresses from REGISTRY, EXPECTED_RECORDER, SUBJECT, USDG and RECIPIENT. USDG names the
+///      transfer's stablecoin: Paxos USDG on Robinhood Chain, Tether USD on BOT Chain.
+///      No key is read here: the owner signs with a Foundry keystore (--account). See DEPLOY_ROBINHOOD.md and
+///      DEPLOY_BOTCHAIN.md.
 contract DeployGuardAndTransfer is Script {
-    /// @notice Deployment was attempted on a chain other than Robinhood Chain (4663).
+    /// @notice Deployment was attempted on a chain other than Robinhood Chain (4663) or BOT Chain (677).
     /// @param actualChainId The chain ID of the selected RPC.
     error WrongChain(uint256 actualChainId);
 
     function run() external returns (ShieldBotVerdictGuard guard, ShieldBotGuardedTransfer guardedTransfer) {
-        if (block.chainid != 4663) revert WrongChain(block.chainid);
+        if (block.chainid != 4663 && block.chainid != 677) revert WrongChain(block.chainid);
+        address stablecoin = block.chainid == 4663
+            ? 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168
+            : 0xaBabc7Ddc03e501d190C676BF3d92ef0e6e87a3C;
         address registry = vm.envAddress("REGISTRY");
         address expectedRecorder = vm.envAddress("EXPECTED_RECORDER");
         address subject = vm.envAddress("SUBJECT");
@@ -43,7 +48,7 @@ contract DeployGuardAndTransfer is Script {
         console2.log("  RECIPIENT:         ", recipient);
         console2.log("  transfer.usdg():   ", address(guardedTransfer.usdg()));
         console2.log("  USDG:              ", usdg);
-        console2.log("  Paxos USDG proxy:  ", address(0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168));
+        console2.log("  Pinned stablecoin: ", stablecoin);
 
         assert(address(guard.registry()) == registry);
         assert(ShieldBotVerdictRegistry(registry).recorder() == expectedRecorder);
@@ -51,6 +56,6 @@ contract DeployGuardAndTransfer is Script {
         assert(guardedTransfer.subject() == subject);
         assert(guardedTransfer.recipient() == recipient);
         assert(address(guardedTransfer.usdg()) == usdg);
-        assert(usdg == 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168);
+        assert(usdg == stablecoin);
     }
 }

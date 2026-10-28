@@ -47,6 +47,23 @@ contract DeployGuardAndTransferTest is Test {
         assertEq(guardedTransfer.subject(), subject);
         assertEq(guardedTransfer.recipient(), recipient);
         assertEq(address(guardedTransfer.usdg()), usdg);
+
+        vm.chainId(677);
+        vm.expectRevert(stdError.assertionError);
+        script.run();
+
+        address usdt = 0xaBabc7Ddc03e501d190C676BF3d92ef0e6e87a3C;
+        vm.setEnv("USDG", vm.toString(usdt));
+        (guard, guardedTransfer) = script.run();
+        assertEq(address(guard.registry()), address(registry));
+        assertEq(address(guardedTransfer.guard()), address(guard));
+        assertEq(guardedTransfer.subject(), subject);
+        assertEq(guardedTransfer.recipient(), recipient);
+        assertEq(address(guardedTransfer.usdg()), usdt);
+
+        vm.chainId(4663);
+        vm.expectRevert(stdError.assertionError);
+        script.run();
     }
 
     function test_Run_RejectsWrongChainBeforeReadingAddresses() public {

@@ -205,6 +205,53 @@ cast call "$REGISTRY" 'latestRecord(address)((uint8,uint64,uint64,bytes32))' "$U
 
 The receipt must contain `VerdictRecorded`. Its evidence hash must match `/api/verdict/677/<USDT address>`, and `latestRecord` must agree with that verdict and evidence hash. A failed check is not a recorded smoke result.
 
+## Guard and guarded transfer
+
+After the registry, the owner deploys `ShieldBotVerdictGuard` and `ShieldBotGuardedTransfer` with `script/DeployGuardAndTransfer.s.sol`, the script used on Robinhood Chain. On BOT Chain it pins Tether USD as the transfer's stablecoin, and it refuses any other address in `USDG`. The guard reads the registry above. The transfer moves a caller's USDT to `RECIPIENT` only while the guard allows `SUBJECT`.
+
+`SUBJECT` is COW (`0x5aF9A0E7472134A6A5ad02a7D327e83ddD24b337`): it has BDEX V2 pools with WBOT and USDT, and its latest registry verdict was LOW when this section was written. Check that before deploying, because the transfer refuses every call while the subject has no allowed verdict:
+
+```bash
+export REGISTRY=0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138
+export SUBJECT=0x5aF9A0E7472134A6A5ad02a7D327e83ddD24b337
+cast call "$REGISTRY" 'latestRecord(address)((uint8,uint64,uint64,bytes32))' "$SUBJECT" --rpc-url https://rpc.botchain.ai
+```
+
+The first field must be `1` (LOW) or `2` (MEDIUM).
+
+Dry run, which sends nothing:
+
+```bash
+export BOTCHAIN_RPC_URL=https://rpc.botchain.ai
+export EXPECTED_RECORDER=$RECORDER
+export USDG=$USDT
+export RECIPIENT=$OWNER
+~/.foundry/bin/forge script script/DeployGuardAndTransfer.s.sol:DeployGuardAndTransfer --rpc-url botchain --sender "$OWNER" --legacy
+```
+
+On 2026-10-28 the dry run showed chain 677, every pinned address equal to its input, the guard at `0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e` and the transfer at `0x336254bA85406D9af39357101b688E2B757751b3` (the owner's nonces 1 and 2, so the same addresses as on Robinhood Chain), and 923,790 gas, about 0.0185 BOT at 20 gwei. Stop if the chain, an address or the estimate differs materially.
+
+Deploy (owner only). The command signs with the `robinhood-owner` keystore:
+
+```bash
+~/.foundry/bin/forge script script/DeployGuardAndTransfer.s.sol:DeployGuardAndTransfer --rpc-url botchain --account robinhood-owner --legacy --broadcast
+```
+
+The script asserts every pinned address after deploying. Save both addresses and transaction hashes from `broadcast/DeployGuardAndTransfer.s.sol/677/run-latest.json` into [docs/DEPLOYMENTS.md](../../docs/DEPLOYMENTS.md), then read them back:
+
+```bash
+export GUARD=<deployed guard address>
+export TRANSFER=<deployed transfer address>
+cast call "$GUARD" 'registry()(address)' --rpc-url https://rpc.botchain.ai
+cast call "$GUARD" 'check(address,uint64)(bool,uint8)' "$SUBJECT" 2592000 --rpc-url https://rpc.botchain.ai
+cast call "$TRANSFER" 'guard()(address)' --rpc-url https://rpc.botchain.ai
+cast call "$TRANSFER" 'usdg()(address)' --rpc-url https://rpc.botchain.ai
+```
+
+`registry()` must be the registry, `check` must return `true` and `0` while the subject's verdict is allowed and at most 30 days old, `guard()` must be the guard and `usdg()` must be USDT.
+
+A wallet uses the transfer by approving USDT to it and calling `transfer(amount, maxAge)`, where `amount` is in USDT's 6 decimal units and `maxAge` is the oldest verdict, in seconds, the caller accepts. The call reverts with `NotAllowed` when the guard refuses the subject. The guard itself only reads, so calls to it are not transactions.
+
 ## Five token checks recorded
 
 Before scanning, choose and name one snapshot block. At that block, calculate each candidate token's total depth as its WBOT reserves summed across every BDEX V2 pair plus its WBOT balance summed across every V3 pool. Exclude WBOT and USDT. Require deployed code and valid token metadata. Sort candidates by total depth descending, then by lowercase token address ascending. Record the snapshot block, all candidate inputs, and the five selected tokens in this file before scanning.
