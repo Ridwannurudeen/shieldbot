@@ -657,7 +657,7 @@ def test_the_bot_chain_panel_reads_its_own_registry_count_and_explorer():
     result = render(stats, steps=steps)
     assert f"0{tile}" in result["text"]
     assert "1,367Registry Recordsconfirmed on-chainRegistry contract ↗" in result["text"]
-    assert "Telegram scans publish here; no launch discovery, guard or guarded transfer on BOT Chain." in result["text"]
+    assert "Telegram scans publish here, and a guard and a guarded transfer read the registry; no launch discovery on BOT Chain." in result["text"]
     assert result["links"] == [
         f"https://robinhoodchain.blockscout.com/address/{REGISTRY}",
         f"https://scan.botchain.ai/address/{REGISTRY}",

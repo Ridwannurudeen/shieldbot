@@ -1476,7 +1476,8 @@ def test_stylesheets_hold_no_c1_control_characters():
 def test_the_site_shows_the_bot_chain_registry():
     # docs/DEPLOYMENTS.md records the BOT Chain (677) registry. Its address equals the Robinhood Chain one (the same
     # owner deployed both at nonce 0), so an address alone proves nothing: each page must carry the row's own
-    # scan.botchain.ai link, the chain id and the deployment date, and must not claim a BOT Chain guard.
+    # scan.botchain.ai link, the chain id and the deployment date, and the BOT Chain guard and guarded transfer, deployed
+    # on 29 October 2026, are recorded and claimed.
     deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
     row = re.search(
         r"^\| `ShieldBotVerdictRegistry` \| BOT Chain \(677\) \| \[`(0x[0-9a-fA-F]{40})`\]\((https://scan\.botchain\.ai/address/0x[0-9a-fA-F]{40})\) \| 2026-10-26 ",
@@ -1486,7 +1487,8 @@ def test_the_site_shows_the_bot_chain_registry():
     assert row, "docs/DEPLOYMENTS.md should record the BOT Chain registry"
     address, url = row.groups()
     assert url.endswith(address)
-    assert not re.search(r"^\| `ShieldBotVerdict(Guard|GuardedTransfer)` \| BOT Chain", deployments, re.MULTILINE)
+    for name in ("ShieldBotVerdictGuard", "ShieldBotGuardedTransfer"):
+        assert re.search(rf"^\| `{name}` \| BOT Chain \(677\) \| .* \| 2026-10-29 ", deployments, re.MULTILINE), name
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
     for name in ("OnChain.tsx", "Footer.tsx"):
         source = " ".join(read(COMPONENTS / name).split())
@@ -1495,10 +1497,12 @@ def test_the_site_shows_the_bot_chain_registry():
         assert "(677)" in source and "26 October 2026" in source, name
     assert url in bundle, "landing bundle is stale: missing the BOT Chain registry link"
     assert "Contracts · BOT Chain (677)" in read(COMPONENTS / "Footer.tsx")
-    assert "No guard or guarded transfer on BOT Chain." in " ".join(read(COMPONENTS / "OnChain.tsx").split())
+    assert "A guard and a guarded transfer that read it were deployed on BOT Chain on 29 October 2026." in " ".join(
+        read(COMPONENTS / "OnChain.tsx").split()
+    )
     about = " ".join(read(LANDING_SRC / "public" / "about.html").split())
     assert f'<a href="{url}"' in about and "On BOT Chain (677) a verdict registry was deployed on 26 October 2026" in about
-    assert "BOT Chain has no guard or guarded transfer." in about
+    assert "A freshness guard and a guarded transfer contract that read it were deployed there on 29 October 2026" in about
 
 
 def test_the_registry_figures_read_each_chain_from_the_stats_reply():
@@ -1542,7 +1546,7 @@ def test_the_bot_chain_faq_and_meta_description_match_their_structured_data():
         "BDEX V2 and V3 pools paired with WBOT",
         "/rescue bot: scans BOT Chain approvals",
         "Telegram /scan and /token results can be recorded in the verdict registry deployed on BOT Chain on 26 October 2026.",
-        "BOT Chain has no guard or guarded transfer.",
+        "A guard and a guarded transfer that read it were deployed on BOT Chain on 29 October 2026.",
     ):
         assert clause in answers[0], clause
     description = (
