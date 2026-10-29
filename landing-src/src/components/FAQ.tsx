@@ -20,7 +20,7 @@ const faqs = [
   },
   {
     q: "What does ShieldBot do on BOT Chain?",
-    a: "It simulates buys and sells on supported BDEX V2 and V3 pools paired with WBOT; tokens without a supported pool read Unknown for sellability. It checks GoPlus address labels for the token and, when Blockscout supplies its creator, the creator; /rescue bot: scans BOT Chain approvals. Telegram /scan and /token results can be recorded in the verdict registry deployed on BOT Chain on 26 October 2026. BOT Chain has no guard or guarded transfer.",
+    a: "It simulates buys and sells on supported BDEX V2 and V3 pools paired with WBOT; tokens without a supported pool read Unknown for sellability. It checks GoPlus address labels for the token and, when Blockscout supplies its creator, the creator; /rescue bot: scans BOT Chain approvals. Telegram /scan and /token results can be recorded in the verdict registry deployed on BOT Chain on 26 October 2026. A guard and a guarded transfer that read it were deployed on BOT Chain on 29 October 2026.",
   },
   {
     q: "How do I install ShieldBot, and what does it cost?",

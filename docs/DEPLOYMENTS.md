@@ -10,7 +10,7 @@ from `https://bsc-dataseed1.binance.org/`, show each creating the contract liste
 attestor and the BNB Smart Chain verifier were retired on 2026-09-26: nothing in this repository writes
 to either any more, so no new records are written. The records already on both chains stay. The Robinhood
 Chain (4663) rows were read the same way on **2026-09-27** from `https://rpc.mainnet.chain.robinhood.com`, and
-the BOT Chain (677) row on **2026-10-26** from `https://rpc.botchain.ai`.
+the BOT Chain (677) rows on **2026-10-26** (registry) and **2026-10-29** (guard and transfer) from `https://rpc.botchain.ai`.
 
 | Contract | Chain | Address | Deployed (UTC) | Records (when read) | Written by |
 |---|---|---|---|---|---|
@@ -21,6 +21,8 @@ the BOT Chain (677) row on **2026-10-26** from `https://rpc.botchain.ai`.
 | `ShieldBotVerdictGuard` | Robinhood Chain (4663) | [`0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e`](https://robin.etherscan.io/address/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e) | 2026-09-27 20:43:47 | none (reads the registry) | nothing: it has no state to write |
 | `ShieldBotGuardedTransfer` | Robinhood Chain (4663) | [`0x336254bA85406D9af39357101b688E2B757751b3`](https://robin.etherscan.io/address/0x336254bA85406D9af39357101b688E2B757751b3) | 2026-09-27 20:43:47 | none | callers of `transfer(amount, maxAge)` |
 | `ShieldBotVerdictRegistry` | BOT Chain (677) | [`0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138`](https://scan.botchain.ai/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) | 2026-10-26 10:49:31 | 0 records at block 28,038,547 (2026-10-26 11:15 UTC) | the verdict drain, as recorder `0xF234F4c09845079235AD27C83c85B6e98Ea263F7` |
+| `ShieldBotVerdictGuard` | BOT Chain (677) | [`0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e`](https://scan.botchain.ai/address/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e) | 2026-10-29 05:34:39 | none (reads the registry) | nothing: it has no state to write |
+| `ShieldBotGuardedTransfer` | BOT Chain (677) | [`0x336254bA85406D9af39357101b688E2B757751b3`](https://scan.botchain.ai/address/0x336254bA85406D9af39357101b688E2B757751b3) | 2026-10-29 05:34:39 | none | callers of `transfer(amount, maxAge)` |
 
 Every owner below is an externally owned account (`eth_getCode` returns no code), not a multisig.
 
@@ -127,6 +129,17 @@ The registry has the same address as the Robinhood Chain one because the same ow
   holds as an [exact match](https://sourcify.dev/server/v2/contract/4663/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) for creation and
   runtime code, and both equal a fresh `forge build`. Anyone can repeat the check:
   `(cd contracts/base && forge build) && python -m scripts.check_botchain_registry_code` exits 0 only when all three agree.
+
+- **`ShieldBotVerdictGuard`:** `0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e`, deployed on 2026-10-29 from `build/677-guard` at `c5db9fd` with
+  `script/DeployGuardAndTransfer.s.sol` (see [DEPLOY_BOTCHAIN.md](../contracts/base/DEPLOY_BOTCHAIN.md)) in transaction
+  `0xd0b2b6e0...0fc3`, block 28,356,859, 282,071 gas. `registry()` is the BOT Chain
+  registry above. Its runtime code is byte for byte the code of the Sourcify verified guard at the same address on Robinhood Chain
+  (keccak `0x241ac147...52aa` on both on 2026-10-29), because the only immutable is the registry address, which is the same on both chains.
+  `check(COW, 30 days)` returned `(true, 0)` on 2026-10-29.
+- **`ShieldBotGuardedTransfer`:** `0x336254bA85406D9af39357101b688E2B757751b3`, deployed in transaction
+  `0x12507588...0b79`, block 28,356,860, 428,537 gas. `guard()` is the guard above,
+  `subject()` is COW (`0x5aF9A0E7472134A6A5ad02a7D327e83ddD24b337`), `usdg()` is BOT Chain's Tether USD
+  (`0xaBabc7Ddc03e501d190C676BF3d92ef0e6e87a3C`) and `recipient()` is `0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4`.
 
 ## Checking these values
 
