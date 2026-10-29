@@ -119,11 +119,9 @@ The registry has the same address as the Robinhood Chain one because the same ow
   BOT Chain key (`services/verdict_publisher.py`), held only by the API unit ([DEPLOYMENT.md](DEPLOYMENT.md)). `totalRecords()` was 0 at block 28,038,547.
 - **Source:** the deployed runtime bytecode and the creation code in the deployment transaction equal a local build of
   `src/ShieldBotVerdictRegistry.sol` with the settings in `contracts/base/foundry.toml` (solc 0.8.28, optimizer 200 runs, EVM cancun),
-  with the recorder address as the only constructor argument. Not verified on an explorer as of 2026-10-26: Sourcify does not support
-  chain 677 (`unsupported_chain`), and the standard JSON input, flattened source and `forge verify-contract --verifier blockscout`
-  submissions to scan.botchain.ai all left the address unverified while Blockscout's verifier service returned
-  `verifier service connection` (HTTP 500) for an already verified BOT Chain contract as well. Resubmit the standard JSON input
-  (runbook step 5) once that service answers again.
+  with the recorder address as the only constructor argument. Verified on scan.botchain.ai on 2026-10-29 (full match, through
+  `forge verify-contract --verifier blockscout`), once Blockscout's verifier service, which had answered `verifier service connection`
+  (HTTP 500) since 2026-10-26, answered again. Sourcify does not support chain 677 (`unsupported_chain`).
 - **Same code as the verified Robinhood Chain registry:** on 2026-10-27 the runtime code at the address on BOT Chain was byte for byte
   the code at the same address on Robinhood Chain (2,417 bytes, metadata hash included; the contract has no immutables), which Sourcify
   holds as an [exact match](https://sourcify.dev/server/v2/contract/4663/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138) for creation and
@@ -135,11 +133,12 @@ The registry has the same address as the Robinhood Chain one because the same ow
   `0xd0b2b6e0...0fc3`, block 28,356,859, 282,071 gas. `registry()` is the BOT Chain
   registry above. Its runtime code is byte for byte the code of the Sourcify verified guard at the same address on Robinhood Chain
   (keccak `0x241ac147...52aa` on both on 2026-10-29), because the only immutable is the registry address, which is the same on both chains.
-  `check(COW, 30 days)` returned `(true, 0)` on 2026-10-29.
+  `check(COW, 30 days)` returned `(true, 0)` on 2026-10-29. Source verified on scan.botchain.ai on 2026-10-29 (full match).
 - **`ShieldBotGuardedTransfer`:** `0x336254bA85406D9af39357101b688E2B757751b3`, deployed in transaction
   `0x12507588...0b79`, block 28,356,860, 428,537 gas. `guard()` is the guard above,
   `subject()` is COW (`0x5aF9A0E7472134A6A5ad02a7D327e83ddD24b337`), `usdg()` is BOT Chain's Tether USD
-  (`0xaBabc7Ddc03e501d190C676BF3d92ef0e6e87a3C`) and `recipient()` is `0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4`.
+  (`0xaBabc7Ddc03e501d190C676BF3d92ef0e6e87a3C`) and `recipient()` is `0x8d02b6ECffed8A3e1e5C3649AA4670c72C366ae4`. Source verified on scan.botchain.ai on
+  2026-10-29 (full match).
 
 ## Checking these values
 

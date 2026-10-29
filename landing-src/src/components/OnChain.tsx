@@ -316,8 +316,7 @@ export default function OnChain() {
             <p className="min-w-0 text-sm leading-relaxed text-secondary">
               Telegram /scan and /token results on BOT Chain can be recorded here, each with the hash of its
               evidence. Any contract can read it with a BOT Chain RPC such as https://rpc.botchain.ai. A guard and a
-              guarded transfer that read it were deployed on BOT Chain on 29 October 2026. Source not yet verified on the explorer; the bytecode matches a local
-              build.
+              guarded transfer that read it were deployed on BOT Chain on 29 October 2026. All three are source verified on the explorer.
             </p>
           </div>
         </div>

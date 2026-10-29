@@ -1503,6 +1503,10 @@ def test_the_site_shows_the_bot_chain_registry():
     about = " ".join(read(LANDING_SRC / "public" / "about.html").split())
     assert f'<a href="{url}"' in about and "On BOT Chain (677) a verdict registry was deployed on 26 October 2026" in about
     assert "A freshness guard and a guarded transfer contract that read it were deployed there on 29 October 2026" in about
+    # All three BOT Chain contracts were source verified on scan.botchain.ai on 29 October 2026.
+    assert "All three are source verified on the explorer." in " ".join(read(COMPONENTS / "OnChain.tsx").split())
+    assert "The source of all three BOT Chain contracts is verified on BOT Chain's explorer" in about
+    assert "cannot verify" not in about
 
 
 def test_the_registry_figures_read_each_chain_from_the_stats_reply():

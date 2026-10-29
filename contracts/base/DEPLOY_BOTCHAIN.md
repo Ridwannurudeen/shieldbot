@@ -129,10 +129,10 @@ export REGISTRY=<deployed registry address>
 
 ## 5. Verify on Blockscout
 
-Try the Etherscan-compatible Blockscout verifier first:
+Try the Etherscan-compatible Blockscout verifier first. `foundry.toml` reads `ETHERSCAN_V2_API_KEY` for its Etherscan entries, so set it to any value; Blockscout needs no key:
 
 ```bash
-~/.foundry/bin/forge verify-contract "$REGISTRY" src/ShieldBotVerdictRegistry.sol:ShieldBotVerdictRegistry --chain-id 677 --verifier blockscout --verifier-url https://scan.botchain.ai/api/ --constructor-args "$(cast abi-encode 'constructor(address)' "$RECORDER")"
+ETHERSCAN_V2_API_KEY=blockscout ~/.foundry/bin/forge verify-contract "$REGISTRY" src/ShieldBotVerdictRegistry.sol:ShieldBotVerdictRegistry --chain-id 677 --verifier blockscout --verifier-url https://scan.botchain.ai/api/ --constructor-args "$(cast abi-encode 'constructor(address)' "$RECORDER")"
 ```
 
 This verification path is unverified until tried. A successful submission is not a verified result. Confirm the contract source and constructor argument on `https://scan.botchain.ai/address/$REGISTRY?tab=contract`.
@@ -145,7 +145,7 @@ If that command does not verify the source, use the standard JSON input form wit
 
 Submit the resulting standard JSON input through the Blockscout contract verification form and confirm its result there.
 
-While Blockscout's verifier cannot verify the registry, check it against the source from the repo root instead. The command compares the code on BOT Chain and on Robinhood Chain with a fresh build and reads Sourcify's match for the Robinhood Chain copy, and exits 0 only when all three agree:
+To check the registry without trusting the explorer, compare it with the source from the repo root. The command compares the code on BOT Chain and on Robinhood Chain with a fresh build and reads Sourcify's match for the Robinhood Chain copy, and exits 0 only when all three agree:
 
 ```bash
 (cd contracts/base && forge build) && python -m scripts.check_botchain_registry_code
@@ -249,6 +249,13 @@ cast call "$TRANSFER" 'usdg()(address)' --rpc-url https://rpc.botchain.ai
 ```
 
 `registry()` must be the registry, `check` must return `true` and `0` while the subject's verdict is allowed and at most 30 days old, `guard()` must be the guard and `usdg()` must be USDT.
+
+Verify both on Blockscout the same way as the registry (on 2026-10-29 both returned `Pass - Verified`):
+
+```bash
+ETHERSCAN_V2_API_KEY=blockscout ~/.foundry/bin/forge verify-contract "$GUARD" src/ShieldBotVerdictGuard.sol:ShieldBotVerdictGuard --chain-id 677 --verifier blockscout --verifier-url https://scan.botchain.ai/api/ --watch --constructor-args "$(cast abi-encode 'constructor(address)' "$REGISTRY")"
+ETHERSCAN_V2_API_KEY=blockscout ~/.foundry/bin/forge verify-contract "$TRANSFER" src/ShieldBotGuardedTransfer.sol:ShieldBotGuardedTransfer --chain-id 677 --verifier blockscout --verifier-url https://scan.botchain.ai/api/ --watch --constructor-args "$(cast abi-encode 'constructor(address,address,address,address)' "$GUARD" "$SUBJECT" "$USDT" "$OWNER")"
+```
 
 A wallet uses the transfer by approving USDT to it and calling `transfer(amount, maxAge)`, where `amount` is in USDT's 6 decimal units and `maxAge` is the oldest verdict, in seconds, the caller accepts. The call reverts with `NotAllowed` when the guard refuses the subject. The guard itself only reads, so calls to it are not transactions.
 
