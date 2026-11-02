@@ -18,7 +18,7 @@ ShieldBot is a transaction security service for nine EVM chains. The V2 plan bel
 
 | Channel | Repository scope | Release qualification |
 |---------|------------------|-----------------------|
-| Chrome Extension | Wrapped provider requests and risk overlays | Version 3.1.0 is released; proceed overrides remain |
+| Chrome Extension | Wrapped provider requests and risk overlays | Version 3.4.0 is released on the Chrome Web Store (30 October 2026); proceed overrides remain |
 | RPC Proxy | Transaction-checking proxy implementation | Deployment and wallet compatibility not verified by this roadmap; coverage depends on chain and providers |
 | SDK | See `sdk/` and the current README | Package publication status not verified here |
 | Telegram | 12 registered command handlers | Running deployment not verified here; chain support is not complete provider coverage |
@@ -65,7 +65,7 @@ ShieldBot is a transaction security service for nine EVM chains. The V2 plan bel
 - [x] **SDK code**: See `sdk/`; package publication is not verified by this roadmap.
 - [x] **Public threat dashboard** — Real-time feed of detected threats and campaigns.
 - [x] **Threat Feed API** — Subscribe to ShieldBot's intelligence.
-- [x] **Chrome Web Store release evidence**: The store was checked on 8 October 2026 through Google's update service and serves 3.1.0.
+- [x] **Chrome Web Store release evidence**: The store was checked on 8 October 2026 through Google's update service and served 3.1.0; it has served 3.4.0 since 30 October 2026.
 - [x] **Landing page**: Historical URL https://shieldbotsecurity.online; deployment is not verified here.
 
 ---
