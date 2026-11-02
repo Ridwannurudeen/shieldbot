@@ -754,9 +754,8 @@ HERO_SECTION_COPY = {
     "Chains.tsx": (
         "Contract scans run on all 9 chains. The other checks depend on the chain, and a check that cannot run is "
         "reported as Unknown, never as Safe.",
-        "It has been tested with Rabby; MetaMask testing is still outstanding.",
-        "The Chrome Web Store serves extension 3.1.0, which sends Robinhood Chain requests to the API for analysis. BOT "
-        "Chain support is in extension 3.4.0 in the repository and is not yet on the Store.",
+        "The Chrome Web Store serves extension 3.4.0, which sends Robinhood Chain and BOT Chain requests to the API for analysis. "
+        "Version 3.1.0 was tested with Rabby; 3.4.0 has not yet been tested with a wallet, and MetaMask testing is still outstanding.",
         "Accent ring: a chain with a ShieldBot verdict registry.",
     ),
     "WorkedExample.tsx": (

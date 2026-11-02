@@ -1,6 +1,6 @@
 # Chrome Web Store listing and release checklist for 3.4.0
 
-Version 3.1.0 was uploaded to the Chrome Web Store and is now served under the listing title ShieldAI Transaction Firewall, while this repository prepares version 3.4.0 for the same listing. The version was checked on 8 October 2026 through Google's update service.
+Version 3.1.0 was uploaded to the Chrome Web Store and served under the listing title ShieldAI Transaction Firewall until 30 October 2026, when the same listing, now titled ShieldBot Transaction Firewall, began serving version 3.4.0. The 3.1.0 version was checked on 8 October 2026 through Google's update service.
 
 The listing checked on 23 September 2026 was version 3.0.1, English only, and said the
 extension "blocks the transaction", offers "Tenderly pre-execution simulation" and "Permit2
@@ -102,7 +102,7 @@ smoke test in section 3 has passed with them.
    shows screens the extension does not have, such as the light "Threat Dashboard" mock.
 8. Privacy practices tab: compare the listing with the 3.4.0 wording in
    `docs/CHROME_WEB_STORE_DISCLOSURE.md`.
-9. The listing serves 3.1.0, as checked on 8 October 2026 through Google's update service. Still to confirm: the listing shows the new text, and an existing 3.0.1 install updates without a "Setup Required" message.
+9. The listing served 3.1.0 when checked on 8 October 2026 through Google's update service and has served 3.4.0 since 30 October 2026. Still to confirm: the listing shows the new text, and an existing 3.0.1 install updates without a "Setup Required" message.
 
 ## 3. Fifteen-minute smoke test (MetaMask, then Rabby)
 
