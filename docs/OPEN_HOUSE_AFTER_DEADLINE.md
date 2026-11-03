@@ -16,7 +16,7 @@ The HackQuest submission is the [`open-house-submission`](https://github.com/Rid
 | `f1c2af7` | 2026-10-05 | Restores hookless USDG simulation without pool batching, including official stock tokens when a pool resolves. |
 | `302eb66` | 2026-10-05 | Sends simulations to an optional faster node with a five second timeout, falling back to the official node (commits `0ad9c17` and `302eb66`). |
 
-Production has run `302eb66` since 5 October 2026 and has not been redeployed; on 10 October 2026 the server's checkout was `302eb66` and its services had last started at 13:36 UTC on 5 October. The next deployment will follow the Open House result on 12 October 2026. Deployment notes are in [SUBMISSION.md](SUBMISSION.md).
+Production ran `302eb66` from 5 October 2026 until 12 October 2026; on 10 October 2026 the server's checkout was `302eb66` and its services had last started at 13:36 UTC on 5 October. The table stops there. Production has been redeployed since 12 October 2026 and runs `6d3cb17`, deployed on 2 November 2026. Deployment notes up to `302eb66` are in [SUBMISSION.md](SUBMISSION.md).
 
 ## Every commit on main after the deadline, up to `cad9130`
 
