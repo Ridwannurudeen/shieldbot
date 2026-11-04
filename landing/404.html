@@ -13,135 +13,81 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
   <link rel="shortcut icon" href="/favicon.png">
   <link rel="stylesheet" href="/css/tokens.css">
-  <style>
-    @font-face {
-      font-family: "Geist";
-      font-style: normal;
-      font-weight: 400;
-      font-display: swap;
-      src: url("/fonts/geist-latin-400-normal.woff2") format("woff2");
-      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-    }
-    @font-face {
-      font-family: "Geist";
-      font-style: normal;
-      font-weight: 500;
-      font-display: swap;
-      src: url("/fonts/geist-latin-500-normal.woff2") format("woff2");
-      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
-    }
-    @font-face {
-      font-family: "IBM Plex Mono";
-      font-style: normal;
-      font-weight: 400;
-      font-display: swap;
-      src: url("/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
-      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
-    }
-    @font-face {
-      font-family: "Geist Fallback";
-      src: local("Arial");
-      size-adjust: 134.8%;
-      ascent-override: 74.56%;
-      descent-override: 21.88%;
-      line-gap-override: 0%;
-    }
-    *, *::before, *::after { box-sizing: border-box; }
-    body {
-      min-width: 320px;
-      margin: 0;
-      background: var(--ground);
-      color: var(--ink);
-      font: 400 16px/1.65 "Geist", "Geist Fallback", Arial, Helvetica, sans-serif;
-      text-rendering: optimizeLegibility;
-    }
-    a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
-    a:hover { color: var(--ink); }
-    a:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-    .site-nav { border-bottom: 1px solid var(--hairline-strong); background: var(--ground-alt); }
-    .nav-inner {
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 24px;
-      width: calc(100% - 32px);
-      max-width: 1152px;
-      min-height: 64px;
-      margin: 0 auto;
-    }
-    .nav-links { display: flex; flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: 4px 24px; }
-    .nav-links a { display: inline-flex; align-items: center; min-height: 44px; color: var(--ink); font-size: 15px; text-decoration: none; }
-    .theme-toggle {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 36px;
-      height: 36px;
-      padding: 0;
-      border: 0;
-      border-radius: 8px;
-      background: transparent;
-      color: var(--ink);
-      cursor: pointer;
-    }
-    .theme-toggle:hover { background: var(--ground-alt); }
-    .theme-icon-moon { display: none; }
-    :root[data-theme="light"] .theme-icon-sun { display: none; }
-    :root[data-theme="light"] .theme-icon-moon { display: block; }
-    main {
-      width: calc(100% - 32px);
-      max-width: 720px;
-      margin: 0 auto;
-      padding: 48px 0 88px;
-    }
-    main h1 { margin: 0; font-size: 32px; font-weight: 500; line-height: 1.15; letter-spacing: -0.03em; }
-    .footer { border-top: 1px solid var(--hairline-strong); background: var(--ground-alt); }
-    .footer-inner { width: calc(100% - 32px); max-width: 1152px; margin: 0 auto; padding: 24px 0; }
-    .footer-links { display: flex; flex-wrap: wrap; gap: 8px 24px; }
-    .footer-links a { display: inline-flex; align-items: center; min-height: 40px; color: var(--ink); font-size: 14px; text-decoration: none; }
-    .footer-links a:hover { color: var(--accent); }
-    @media (max-width: 600px) {
-      main { padding: 36px 0 64px; }
-      .nav-inner { gap: 12px; }
-      .nav-links { gap: 4px 14px; }
-      .nav-links a { font-size: 14px; }
-    }
-  </style>
+  <link rel="stylesheet" href="/css/pages.css">
     <script src="/js/plausible-init.js"></script>
     <script async src="/js/script.js"></script>
     <script src="/js/theme-toggle.js" defer></script>
+    <script src="/js/static-nav.js" defer></script>
 </head>
 <body>
 
   <nav class="site-nav" aria-label="Main">
     <div class="nav-inner">
-      <div class="nav-links">
-        <a href="/">Home</a>
-        <a href="/dashboard">Dashboard</a>
+      <a class="wordmark" href="/">ShieldBot</a>
+      <div class="nav-actions">
+        <div class="nav-links">
+          <a href="/#how">How it works</a>
+          <a href="/#registry">Registry</a>
+          <a href="/#coverage">Coverage</a>
+          <a href="/safety.html">Safety</a>
+          <a href="https://api.shieldbotsecurity.online/docs" target="_blank" rel="noopener noreferrer">Docs</a>
+        </div>
+        <button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Light theme" title="Light theme">
+          <svg class="theme-icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+          </svg>
+          <svg class="theme-icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+            <path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z" />
+          </svg>
+        </button>
+        <a class="nav-cta" href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Add to Chrome</a>
+        <details class="mobile-menu">
+          <summary aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu">
+            <svg viewBox="0 0 32 32" width="24" height="24" fill="currentColor" aria-hidden="true">
+              <g class="menu-icon-bars">
+                <path d="M4 6H28V8H4z" />
+                <path d="M4 24H28V26H4z" />
+                <path d="M4 12H28V14H4z" />
+                <path d="M4 18H28V20H4z" />
+              </g>
+              <path class="menu-icon-close" d="M17.4141 16 24 9.4141 22.5859 8 16 14.5859 9.4143 8 8 9.4141 14.5859 16 8 22.5859 9.4143 24 16 17.4141 22.5859 24 24 22.5859 17.4141 16z" />
+            </svg>
+          </summary>
+          <div class="mobile-panel" id="mobile-menu">
+            <a href="/#how">How it works</a>
+            <a href="/#registry">Registry</a>
+            <a href="/#coverage">Coverage</a>
+            <a href="/safety.html">Safety</a>
+            <a href="https://api.shieldbotsecurity.online/docs" target="_blank" rel="noopener noreferrer">Docs</a>
+            <a class="nav-cta" href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk" target="_blank" rel="noopener noreferrer">Add to Chrome</a>
+          </div>
+        </details>
       </div>
-      <button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Light theme" title="Light theme">
-        <svg class="theme-icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="4" />
-          <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-        </svg>
-        <svg class="theme-icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-          <path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z" />
-        </svg>
-      </button>
     </div>
   </nav>
 
-  <main>
-    <h1>That address does not resolve.</h1>
+  <main class="wrap">
+    <div class="hero">
+      <h1>That address does not resolve.</h1>
+      <p><a href="/">Go to the home page</a></p>
+    </div>
   </main>
 
   <footer class="footer">
     <div class="footer-inner">
-      <nav class="footer-links" aria-label="Legal">
-        <a href="/privacy.html">Privacy Policy</a>
-        <a href="/terms.html">Terms of Service</a>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/about.html">About</a>
+        <a href="/safety.html">Safety guide</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
         <a href="/security.html">Security</a>
+        <a href="/dashboard">Dashboard</a>
+        <a href="https://t.me/shieldbot_bnb_bot" target="_blank" rel="noopener noreferrer">Telegram bot</a>
+        <a href="https://github.com/Ridwannurudeen/shieldbot" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="mailto:support@shieldbotsecurity.online">support@shieldbotsecurity.online</a>
       </nav>
+      <p class="footer-legal">&#169; 2026 ShieldBot. ShieldBot does not issue, sell or endorse any token.</p>
     </div>
   </footer>
 </body>

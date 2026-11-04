@@ -17,31 +17,19 @@ const shapes: Record<Verdict, { classes: string; glyph?: string }> = {
   registry: { classes: "bg-ground-alt text-ink border border-edge" },
 };
 
-// On a verdict field (the hero stage, index.css .field-*) the field already carries the verdict's hue, so the chip
-// carries shape and word in white: BLOCK a paper fill, HIGH RISK a heavy paper edge with "!", SAFE a thin paper edge;
-// UNKNOWN keeps its grey dashed fill. CAUTION and registry never sit on a field.
-const onField: Partial<Record<Verdict, string>> = {
-  block: "bg-paper text-block-on-paper",
-  high: "text-paper border-2 border-paper",
-  safe: "text-paper border border-paper",
-  unknown: shapes.unknown.classes,
-};
-
 export default function Badge({
   verdict,
   size = "md",
-  field = false,
   children,
   className,
 }: {
   verdict: Verdict;
   size?: "md" | "lg";
-  field?: boolean;
   children: ReactNode;
   className?: string;
 }) {
   const { glyph } = shapes[verdict];
-  const classes = field ? onField[verdict] : shapes[verdict].classes;
+  const classes = shapes[verdict].classes;
   return (
     <span
       className={[

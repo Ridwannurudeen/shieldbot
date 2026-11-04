@@ -8,6 +8,7 @@ fail when a source changes without the site, or when the committed builds fall b
 import gzip
 import json
 import re
+from datetime import date
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -60,7 +61,9 @@ def test_every_chain_count_on_the_site_matches_the_registry():
             )
             statements += 1
     assert statements, "the site should state how many chains it supports"
-    assert "SUPPORTED_CHAINS = %d;" % len(chain_info()) in read(COMPONENTS / "Chains.tsx")
+    chains = read(COMPONENTS / "Chains.tsx")
+    table = re.search(r"const chains: Chain\[\] = \[(.*?)\n\];", chains, re.S).group(1)
+    assert len(re.findall(r"chainId:", table)) == len(chain_info())
 
 
 def test_mempool_chain_count_matches_the_monitor():
@@ -70,18 +73,23 @@ def test_mempool_chain_count_matches_the_monitor():
 
 
 def test_chains_section_lists_every_scan_chain():
-    names = re.findall(r'^\s+name: "([^"]+)",', read(COMPONENTS / "Chains.tsx"), re.MULTILINE)
-    assert len(names) == len(chain_info())
-    assert "Robinhood Chain" in names
+    chains = read(COMPONENTS / "Chains.tsx")
+    rows = re.findall(r'chainId: (\d+),\s*name: "([^"]+)"', chains)
+    assert len(rows) == len(chain_info())
+    assert {int(chain_id) for chain_id, _ in rows} == set(chain_info())
+    aliases = {"BSC": "BNB Chain"}
+    assert {name for _, name in rows} == {
+        aliases.get(info["name"], info["name"]) for info in chain_info().values()
+    }
 
 
 def test_mechanism_and_try_it_chain_maps_match_the_registry():
-    # Mechanism names the chains /api/stats reports; TryIt offers the chains POST /api/scan accepts.
-    mechanism = re.search(r"const chainNames: Record<number, string> = \{(.*?)\};", read(COMPONENTS / "Mechanism.tsx"), re.S)
-    mechanism_ids = [int(chain_id) for chain_id in re.findall(r"^\s+(\d+): \"[^\"]+\",$", mechanism.group(1), re.M)]
+    # Proof names the chains /api/stats reports; TryIt offers the chains POST /api/scan accepts.
+    proof = re.search(r"const chainNames: Record<number, string> = \{(.*?)\};", read(COMPONENTS / "Proof.tsx"), re.S)
+    proof_ids = [int(chain_id) for chain_id in re.findall(r"^\s+(\d+): \"[^\"]+\",$", proof.group(1), re.M)]
     try_it = re.search(r"const chainOptions = \[(.*?)\];", read(COMPONENTS / "TryIt.tsx"), re.S)
     try_it_ids = [int(chain_id) for chain_id in re.findall(r"\{ id: (\d+), name: \"[^\"]+\" \}", try_it.group(1))]
-    for ids in (mechanism_ids, try_it_ids):
+    for ids in (proof_ids, try_it_ids):
         assert len(ids) == len(set(ids))
         assert set(ids) == set(chain_info())
 
@@ -89,12 +97,11 @@ def test_mechanism_and_try_it_chain_maps_match_the_registry():
 def test_bot_chain_row_claims_only_its_own_bdex_simulation():
     # GoPlus token security does not cover BOT Chain; sell simulation there is ShieldBot's own, on BDEX
     # pools with WBOT, while address labels are checked separately.
-    row = re.search(r'\{\s*//[^\n]*\n\s*chainId: 677,(.*?)logo:', read(COMPONENTS / "Chains.tsx"), re.S)
+    row = re.search(r'\{\s*chainId: 677,(.*?)\n\s*\}', read(COMPONENTS / "Chains.tsx"), re.S)
     assert row, "Chains.tsx should have a BOT Chain row"
     assert 'simulation: "ShieldBot",' in row.group(1)
-    assert 'simulationScope: "BDEX V2 and V3 pools with WBOT",' in row.group(1)
-    assert "unavailableLabel" not in row.group(1)
-    assert 'label: chain.unavailableLabel ?? "GoPlus flags only"' in read(COMPONENTS / "Chains.tsx")
+    assert 'simulationScope: "BDEX V2 and V3 pools pairing the token with WBOT",' in row.group(1)
+    assert 'return "GoPlus flags only";' in read(COMPONENTS / "Chains.tsx")
 
 
 def test_chains_section_coverage_matches_the_code():
@@ -130,10 +137,14 @@ def test_chains_section_coverage_matches_the_code():
     assert set(adapters) == set(chain_info())
     aliases = {"BSC": "BNB Chain"}
     ids = {aliases.get(info["name"], info["name"]): chain_id for chain_id, info in chain_info().items()}
-    rows = re.findall(
-        r'name: "([^"]+)",\s*simulation: ("[^"]+"|null),\s*mempool: (true|false),\s*launches: (true|false),',
-        read(COMPONENTS / "Chains.tsx"),
-    )
+    chains_source = read(COMPONENTS / "Chains.tsx")
+    rows = []
+    for match in re.finditer(r'\{\s*chainId: (\d+),\s*name: "([^"]+)"', chains_source):
+        row = chains_source[match.start() : chains_source.index("}", match.start())]
+        simulation = re.search(r'simulation: ("[^"]+"|null)', row).group(1)
+        mempool = re.search(r"mempool: (true|false)", row).group(1)
+        launches = re.search(r"launches: (true|false)", row).group(1)
+        rows.append((match.group(1), match.group(2), simulation, mempool, launches))
     # Web3Client.supports_honeypot_simulation reads the same flag; without honeypot.is or it, no
     # sell is simulated (adapters/evm_base.py HONEYPOT_IS_UNSUPPORTED).
     simulator = {
@@ -145,22 +156,17 @@ def test_chains_section_coverage_matches_the_code():
         for chain_id, adapter in adapters.items()
     }
     assert len(rows) == len(chain_info())
-    for name, simulation, mempool, launches in rows:
+    for chain_id, name, simulation, mempool, launches in rows:
+        chain_id = int(chain_id)
+        assert ids[name] == chain_id
         assert json.loads(simulation) == simulator[ids[name]], name
         assert (mempool == "true") == supports_pending_transactions(ids[name]), name
         assert (launches == "true") == (ids[name] == LAUNCH_CHAIN_ID), name
 
-    def listed(provider):
-        names = [name for name, chain_id in ids.items() if simulator[chain_id] == provider]
-        # The site leads every chain list with Ethereum; the rest keep the registry's order.
-        names = sorted(names, key=lambda name: name != "Ethereum")
-        return " and ".join([", ".join(names[:-1]), names[-1]]) if len(names) > 1 else names[0]
-
-    prose = " ".join(read(COMPONENTS / "Chains.tsx").split())
-    assert (
-        f"honeypot.is simulates a buy and a sell on {listed('honeypot.is')}, and ShieldBot runs its "
-        f"own on supported {listed('ShieldBot')} pool routes."
-    ) in prose
+    chains = read(COMPONENTS / "Chains.tsx")
+    assert 'return "GoPlus flags only";' in chains
+    assert '"Observed on last poll"' in chains and '"Not read on last poll"' in chains
+    assert '<span className="whitespace-nowrap">/launchalerts</span>' in chains
 
 
 def test_arbitrum_simulation_scope_matches_the_code():
@@ -177,7 +183,7 @@ def test_arbitrum_simulation_scope_matches_the_code():
     chains = " ".join(read(COMPONENTS / "Chains.tsx").split())
     for path in (COMPONENTS / "Chains.tsx", LANDING_SRC / "public" / "about.html", ROOT / "README.md"):
         assert scope in " ".join(read(path).split()), path.name
-    assert re.search(r'name: "Arbitrum", [^}]*simulationScope: "Some WETH pools, see below",', chains)
+    assert scope in chains
 
 
 
@@ -207,32 +213,6 @@ def test_botchain_simulation_scope_matches_the_code():
     for path, sentence in unknown.items():
         assert sentence in " ".join(read(path).split()), path.name
 
-def test_mcp_counts_match_the_code():
-    from mcp_server.prompts import PROMPT_DEFINITIONS
-    from mcp_server.resources import RESOURCE_DEFINITIONS, RESOURCE_TEMPLATE_DEFINITIONS
-    from mcp_server.tools import TOOL_DEFINITIONS
-
-    agent = " ".join(read(COMPONENTS / "AgentSecurity.tsx").split())
-    # MCP lists parameterised resources as templates. The site names every resource, and every tool or
-    # resource whose definition says it is not implemented as a stub, so a count never includes a stub
-    # unsaid and only one resource is a threat feed.
-    resources = [definition["name"] for definition in RESOURCE_DEFINITIONS + RESOURCE_TEMPLATE_DEFINITIONS]
-    assert resources == ["Threat Feed", "Agent Health", "Wallet Guardian"], "the MCP resources changed: update the site"
-    stubs = [
-        definition["name"]
-        for definition in TOOL_DEFINITIONS + RESOURCE_TEMPLATE_DEFINITIONS
-        if "not implemented" in definition["description"].lower()
-    ]
-    assert stubs == ["check_approval_risk", "query_threat_graph", "Wallet Guardian"], "an MCP stub changed: update the site"
-    assert "get_robinhood_launches" in [tool["name"] for tool in TOOL_DEFINITIONS]
-    assert (
-        f"with {len(TOOL_DEFINITIONS)} tools (one lists Robinhood Chain launches), a threat feed resource, "
-        f"an agent health resource and {len(PROMPT_DEFINITIONS)} analysis prompts. The approval risk and threat "
-        "graph tools and the wallet guardian resource are stubs that return Unknown."
-    ) in agent
-    assert "threat resources" not in agent
-
-
 def test_the_site_says_the_robinhood_contracts_are_deployed():
     # docs/DEPLOYMENTS.md: the verdict registry, the freshness guard and the guarded transfer were deployed on
     # Robinhood Chain on 2026-09-27. No page, source or built, may still call that deployment in progress.
@@ -245,18 +225,18 @@ def test_the_site_says_the_robinhood_contracts_are_deployed():
     for name, text in pages.items():
         stale = re.search(r"deployment[^.]*in progress", " ".join(text.split()), re.IGNORECASE)
         assert not stale, f"{name}: {stale.group(0)!r}"
-    for component in ("FAQ.tsx", "FeatureTabs.tsx"):
-        prose = " ".join(read(COMPONENTS / component).split())
-        assert "deployed on Robinhood Chain on 27 September 2026" in prose, component
+    faq = " ".join(read(COMPONENTS / "FAQ.tsx").split())
+    registry = read(COMPONENTS / "Registry.tsx")
+    assert "deployed on Robinhood Chain on 27 September 2026" in faq
+    assert registry.count('chain: "Robinhood Chain"') == 3
+    assert registry.count('deployed: "27 September 2026"') == 3
 
 
 def test_the_site_shows_the_robinhood_contract_addresses():
     # docs/DEPLOYMENTS.md records the deployment. The on-chain section must show each contract's address as
     # recorded there, link its explorer page and its Sourcify match, and the built bundle must carry the addresses.
     deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
-    section = read(COMPONENTS / "OnChain.tsx")
-    # The footer lists the same three contracts, shortened, each linked to its explorer page.
-    footer = read(COMPONENTS / "Footer.tsx")
+    section = read(COMPONENTS / "Registry.tsx")
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
     for contract in ("ShieldBotVerdictRegistry", "ShieldBotVerdictGuard", "ShieldBotGuardedTransfer"):
         row = re.search(
@@ -268,14 +248,7 @@ def test_the_site_shows_the_robinhood_contract_addresses():
         assert f"https://robin.etherscan.io/address/{address}" in section, contract
         assert f"https://sourcify.dev/server/v2/contract/4663/{address}" in section, contract
         assert address in bundle, f"landing bundle is stale: missing {contract}"
-        assert f'address: "{address}"' in footer, f"Footer.tsx: {contract}"
-    assert "Deployed 27 September 2026" in read(COMPONENTS / "ContractCard.tsx")
-    assert "0x7578ca9e…f0c772a4" in section
-    assert "judge guide" in section
-    verification_code = re.search(r"const verificationCode = `([^`]*)`;", section).group(1)
-    export_lines = [line for line in verification_code.splitlines() if line.startswith("export ")]
-    assert len(export_lines) == 4
-    assert "#" not in verification_code
+        assert f'address: "{address}"' in section, f"Registry.tsx: {contract}"
     # Recorded fixture JSON under landing-src/scripts/ is excluded on purpose: these are verbatim API replies whose only 64-hex values are public evidence hashes and calldata.
     source = "\n".join(read(path) for path in (LANDING_SRC / "src").rglob("*") if path.is_file())
     assert not re.search(r"0x[0-9a-fA-F]{64}", source)
@@ -295,9 +268,10 @@ def test_dashboard_links_the_registry_recorded_in_deployments():
 
 
 def test_evidence_links_are_not_fine_print():
-    assert "min-h-[44px]" in read(COMPONENTS / "ContractCard.tsx")
-    assert read(COMPONENTS / "ContractCard.tsx").count('name="external"') == 1
-    assert "text-[13px] text-emerald" not in read(COMPONENTS / "OnChain.tsx")
+    registry = read(COMPONENTS / "Registry.tsx")
+    assert registry.count("min-h-11 shrink-0 items-center whitespace-nowrap") >= 2
+    assert "Sourcify" in registry and "Explorer" in registry
+    assert "evidence_hash" in registry
 
 
 def welcome_text() -> str:
@@ -337,13 +311,16 @@ def test_approval_scans_are_described_as_erc20_only():
     # chain for the ERC-20 Approval event only: NFT approvals (ApprovalForAll) are never scanned.
     rescue = read(ROOT / "services" / "rescue_service.py")
     assert rescue.count("APPROVAL_FOR_ALL_TOPIC") == 1, "rescue_service.py now uses ApprovalForAll: update the site"
-    statements = 0
+    how = read(COMPONENTS / "HowItWorks.tsx")
+    statement = "Lists risky ERC-20 allowances. It never revokes them."
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert statement in how and statement in bundle
     for name, text in landing_texts().items():
         prose = " ".join(text.split())
         for match in re.finditer(r"\btoken approvals\b", prose):
-            assert prose[: match.start()].endswith("ERC-20 "), f"{name}: {prose[match.start() - 40 : match.end()]!r}"
-            statements += 1
-    assert statements, "the site should say which approvals it scans"
+            assert prose[: match.start()].endswith("ERC-20 "), (
+                f"{name}: {prose[match.start() - 40 : match.end()]!r}"
+            )
 
 
 def extension_chain_ids() -> set:
@@ -424,7 +401,7 @@ def test_score_bands_on_the_site_match_the_classifier():
 
 
 def test_no_placeholder_numbers_stand_in_for_live_data():
-    for component in ("Mechanism.tsx", "TryIt.tsx", "WhyUnknown.tsx"):
+    for component in ("Proof.tsx", "TryIt.tsx", "Chains.tsx"):
         assert "FALLBACK" not in read(COMPONENTS / component), component
     dashboard = read(DASHBOARD_SRC)
     for placeholder in ("SEED_KPI", "FALLBACK_CHAIN_DATA", "* 180", "* 0.08"):
@@ -458,19 +435,17 @@ def test_structured_data_is_valid_and_matches_the_visible_faq():
         data = json.loads(block)
         if data["@type"] == "FAQPage":
             entities += data["mainEntity"]
+    visible = list(zip(
+        re.findall(r'^\s+q: "([^"]+)",', faq_source, re.MULTILINE),
+        re.findall(r'^\s+a: "([^"]+)",', faq_source, re.MULTILINE),
+    ))
     assert entities, "index.html should carry FAQ structured data"
-    for entity in entities:
-        assert json.dumps(entity["name"], ensure_ascii=False) in faq_source
-        assert json.dumps(entity["acceptedAnswer"]["text"], ensure_ascii=False) in faq_source
+    assert [(entity["name"], entity["acceptedAnswer"]["text"]) for entity in entities] == visible
 
 
 HERO_CAPTURES = [
-    # (recorded reply, component whose alt text describes it, captures made from the reply)
-    ("hero-overlay-response.json", "HeroRecord.tsx", ("hero-overlay.webp", "hero-overlay-mobile.webp")),
-    ("hero-overlay-unknown-response.json", "HeroRecord.tsx", ("hero-overlay-unknown.webp",)),
-    ("hero-overlay-safe-response.json", "HeroRecord.tsx", ("hero-overlay-safe.webp",)),
-    ("hero-overlay-unknown-response.json", "FeatureTabs.tsx", ("hero-overlay-unknown.webp",)),
-    ("hero-overlay-safe-response.json", "FeatureTabs.tsx", ("hero-overlay-safe.webp",)),
+    # The hero shows one recorded reply and one final verdict capture.
+    ("hero-overlay-response.json", "HeroRecord.tsx", ("hero-overlay.webp",)),
 ]
 
 
@@ -561,9 +536,9 @@ def test_hero_image_describes_its_recorded_api_reply(fixture, component, capture
             "UNKNOWN": "classUnknown",
         }[shown]
     ]
-    if shown != "UNKNOWN" and not incomplete:
-        label = f"{label} — {messages['overlaySafety']} {100 - score}/100"
     assert f"The verdict badge reads {label}" in figure
+    if not incomplete:
+        assert f"Safety: {100 - score}/100" in figure
     if reply.get("danger_signals"):
         assert f"The danger signals include {reply['danger_signals'][0]}" in figure
     if incomplete:
@@ -598,6 +573,7 @@ def test_hero_story_shows_the_real_loading_dialog():
         "safety.html",
         "sitemap.xml",
         ".well-known/security.txt",
+        "css/pages.css",
         "js/plausible-init.js",
         "try/index.html",
         "try/harness.js",
@@ -682,7 +658,8 @@ def test_security_policy_is_published_linked_and_listed():
     assert policy, "security.txt should name the security policy page"
     page = policy.group(1)
     assert (LANDING_SRC / "public" / page).is_file()
-    assert f'href="/{page}"' in read(COMPONENTS / "Footer.tsx")
+    footer = read(COMPONENTS / "Footer.tsx")
+    assert f'href: "/{page}"' in footer
     assert f"<loc>https://shieldbotsecurity.online/{page}</loc>" in read(LANDING_SRC / "public" / "sitemap.xml")
 
 
@@ -712,81 +689,101 @@ def test_built_landing_bundle_stays_inside_its_budget():
     assert packed <= 100_000, f"landing JS is {packed:,} B gzipped, over the 100,000 B budget"
 
 
-@pytest.mark.parametrize("component", ["HowItWorks.tsx", "AgentSecurity.tsx", "FeatureTabs.tsx"])
+@pytest.mark.parametrize("component", ["HowItWorks.tsx", "Registry.tsx"])
 def test_built_landing_bundle_contains_the_current_feature_copy(component):
-    # The claims these sections make (what the extension refuses, ERC-20 approvals only) ship only in the
-    # built bundle, so an edit to the source without `npm run build` must fail here, not go out stale.
+    # The merged interfaces and commands ship in the built bundle, not only in source files.
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
-    descriptions = re.findall(r'^\s+desc: "([^"]+)",', read(COMPONENTS / component), re.MULTILINE)
-    assert bundle and descriptions
-    for text in descriptions:
-        # The source may write a character as a JavaScript escape (0\\u2013100), which the build decodes.
-        text = re.sub(r"\\u([0-9a-fA-F]{4})", lambda match: chr(int(match.group(1), 16)), text)
-        escaped = "".join(ch if ord(ch) < 128 else f"\\u{ord(ch):04x}" for ch in text)
-        assert text in bundle or escaped in bundle, (
-            f"landing bundle is stale: missing {component} text {text[:60]!r}"
-        )
+    copy = {
+        "HowItWorks.tsx": (
+            "Chrome extension", "Telegram bot", "REST API", "MCP server",
+            "/token <address>", "/scan <address>", "/rescue <wallet>",
+            "/report <address> <reason>", "/launchalerts",
+            "Token checks, contract scans, ERC-20 allowances, reports and launch alerts.",
+            "Model Context Protocol server for AI agents, over SSE.",
+            "Telegram bot commands",
+        ),
+        "Registry.tsx": (
+            "Recent registry records", "Deployed contracts", "Guard call",
+            "ShieldBotVerdictRegistry", "ShieldBotVerdictGuard",
+            "ShieldBotGuardedTransfer", "Explorer", "Sourcify",
+        ),
+    }[component]
+    source = read(COMPONENTS / component)
+    assert bundle
+    if component == "HowItWorks.tsx":
+        assert 'aria-label="Telegram bot commands"' in source
+    for text in copy:
+        assert text in source, f"{component} no longer contains {text!r}"
+        assert text in bundle, f"landing bundle is stale: missing {component} structure {text!r}"
 
 
-HERO_SECTION_COPY = {
-    "HeroRecord.tsx": (
-        "Recorded reply of 26 September 2026, chain 1, BLOCK RECOMMENDED.",
-        "Recorded reply of 11 October 2026, chain 4663, UNKNOWN.",
-        "Recorded reply of 11 October 2026, chain 42161, SAFE.",
-        "Recorded examples, not live scans.",
-        "overlay at unreleased commit 2b54a1b, fed that reply.",
-    ),
-    "TryIt.tsx": (
-        "Checking, this can take up to 25 seconds",
-        "Too many checks from this connection. Wait a minute and try again.",
-        "Quick check: no sell simulation, so a token reads Unknown here.",
-    ),
-    "Mechanism.tsx": (
-        "Each check runs, or it says it did not.",
-        "A source that is not running reads Unavailable, never 0.",
-        "GET /api/stats did not answer, so every figure reads Unavailable.",
-    ),
-    "WhyUnknown.tsx": (
-        "A check that did not run is not a pass.",
-        "The typed data could not be read, so the overlay says Unknown and why.",
-        "did not answer.",
-    ),
-    "Chains.tsx": (
-        "Contract scans run on all 9 chains. The other checks depend on the chain, and a check that cannot run is "
-        "reported as Unknown, never as Safe.",
-        "The Chrome Web Store serves extension 3.4.0, which sends Robinhood Chain and BOT Chain requests to the API for analysis. "
-        "Version 3.1.0 was tested with Rabby; 3.4.0 has not yet been tested with a wallet, and MetaMask testing is still outstanding.",
-        "Accent ring: a chain with a ShieldBot verdict registry.",
-    ),
-    "WorkedExample.tsx": (
-        "One token. Two transactions.",
-        "1 · Simulated sell to the pool",
-        "2 · Simulated transfer to a fresh address",
-    ),
-    "OnChain.tsx": (
-        "Newest confirmed records in the registry",
-        "Records of the newest launches ShieldBot blocked",
-        "Also on BOT Chain (677)",
-        "/api/verdicts/recent?chain_id=4663&limit=",
-        # The guard's MEDIUM caveat sits beside the visible guard description, not only in a non-default tab.
-        "A guard contract allows only a fresh LOW or MEDIUM record; everything else is denied. Permission is not a "
-        "safety guarantee: the guard accepts MEDIUM risk.",
-    ),
-    "CtaCard.tsx": (
-        "Check before you sign.",
-        "Ask the registry before funds move.",
-    ),
+LANDING_SECTION_PINS = {
+    "Hero.tsx": ("Know before you sign.", "Add to Chrome", "Open in Telegram"),
+    "HowItWorks.tsx": ("Intercept", "Check", "Report"),
+    "TryIt.tsx": ("Token or contract address", "Check now"),
+    "Proof.tsx": ("One token. Two simulated transactions.", "transactions_monitored"),
+    "Registry.tsx": ("Recent registry records", "Deployed contracts"),
+    "Chains.tsx": ("Sell simulation", "Public mempool", "Launch scans"),
+    "FAQ.tsx": ("What is ShieldBot?", "I think I signed something bad. What now?"),
 }
 
 
-@pytest.mark.parametrize("component", sorted(HERO_SECTION_COPY))
+def test_landing_uses_the_approved_section_map_and_shared_shell():
+    app = read(LANDING_SRC / "src" / "App.tsx")
+    order = [app.index(f"<{name} />") for name in ("Hero", "HowItWorks", "TryIt", "Proof", "Registry", "Chains", "FAQ")]
+    assert order == sorted(order)
+    assert all(f'<Section id="{anchor}" title=' in app or f'<Section id="{anchor}"' in read(COMPONENTS / component)
+               for anchor, component in (
+                   ("how", "HowItWorks.tsx"), ("try", "TryIt.tsx"), ("proof", "Proof.tsx"),
+                   ("registry", "Registry.tsx"), ("coverage", "Chains.tsx"), ("faq", "FAQ.tsx"),
+               ))
+    section = read(COMPONENTS / "Section.tsx")
+    assert '"pt-20 pb-12 md:pt-20 md:pb-11"' in section
+    assert "eyebrow" not in section.lower() and "subtitle" not in section.lower()
+    assert "Contract scans run on all" not in read(COMPONENTS / "Chains.tsx")
+    assert "The Chrome Web Store serves extension 3.4.0" not in read(COMPONENTS / "Chains.tsx")
+    assert "The Chrome Web Store serves extension 3.4.0" in read(COMPONENTS / "FAQ.tsx")
+    assert 'id="top"' in app and 'id="main"' in app
+
+
+def test_landing_navigation_and_footer_follow_the_shared_spec():
+    navbar = read(COMPONENTS / "Navbar.tsx")
+    nav_items = re.findall(r'\{ label: "([^"]+)", href: "([^"]+)" \}', navbar)
+    assert nav_items == [
+        ("How it works", "#how"),
+        ("Registry", "#registry"),
+        ("Coverage", "#coverage"),
+        ("Safety", "/safety.html"),
+        ("Docs", "https://api.shieldbotsecurity.online/docs"),
+    ]
+    assert 'href="#top"' in navbar
+    assert navbar.count("<NavLinks") == 2
+    assert navbar.count("<ThemeToggle />") == 2
+    footer = read(COMPONENTS / "Footer.tsx")
+    footer_items = re.findall(r'\{ label: "([^"]+)", href: "([^"]+)" \}', footer)
+    assert footer_items == [
+        ("About", "/about.html"),
+        ("Safety guide", "/safety.html"),
+        ("Privacy", "/privacy.html"),
+        ("Terms", "/terms.html"),
+        ("Security", "/security.html"),
+        ("Dashboard", "/dashboard"),
+        ("Telegram bot", "https://t.me/shieldbot_bnb_bot"),
+        ("GitHub", "https://github.com/Ridwannurudeen/shieldbot"),
+        ("support@shieldbotsecurity.online", "mailto:support@shieldbotsecurity.online"),
+    ]
+    assert 'placeholder="Email for updates"' in footer
+    assert 'aria-label="Email for updates"' in footer
+    assert "© 2026 ShieldBot. ShieldBot does not issue, sell or endorse any token." in footer
+
+
+@pytest.mark.parametrize("component", sorted(LANDING_SECTION_PINS))
 def test_built_landing_bundle_contains_the_current_hero_section_copy(component):
-    # The hero, try-it, mechanism and chain sections ship only in the built bundle, so their copy is pinned in
-    # both the source and the bundle: a source edit without `npm run build` fails here.
+    # Each section heading and its main content structure ship in both source and the built bundle.
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
     source = read(COMPONENTS / component)
     assert bundle
-    for text in HERO_SECTION_COPY[component]:
+    for text in LANDING_SECTION_PINS[component]:
         assert text in source, f"{component} no longer says {text[:60]!r}; update the pin"
         assert text in bundle, f"landing bundle is stale: missing {component} text {text[:60]!r}"
 
@@ -852,11 +849,28 @@ def test_fonts_are_self_hosted_and_the_build_copies_them():
 
 
 def test_every_static_page_declares_its_geist_face():
+    # The static pages share one stylesheet, css/pages.css, which declares the Geist face from this origin's fonts:
+    # every page links it, source and built, and no line of a page or of the stylesheet is a stray patch line.
     for name in ("404.html", "about.html", "privacy.html", "terms.html", "security.html", "safety.html"):
         for page in (LANDING_SRC / "public" / name, ROOT / "landing" / name):
             html = read(page)
             assert not any(line.startswith("+") for line in html.splitlines()), page
-            assert re.search(r"^\s*@font-face\s*\{[^}]*Geist", html, re.MULTILINE), page
+            assert html.count('<link rel="stylesheet" href="/css/pages.css">') == 1, page
+    # A Geist face that loads a local /fonts/geist- file (the Arial based Geist Fallback face alone does not count),
+    # no @import, and every url(), however it is quoted, a file in public/fonts.
+    for sheet in (LANDING_SRC / "public" / "css" / "pages.css", ROOT / "landing" / "css" / "pages.css"):
+        css = read(sheet)
+        assert not any(line.startswith("+") for line in css.splitlines()), sheet
+        faces = re.findall(r"^\s*@font-face\s*\{([^}]*)\}", css, re.MULTILINE)
+        assert any(
+            re.search(r"font-family:\s*([\"']?)Geist\1\s*;", face) and re.search(r"url\(\s*[\"']?/fonts/geist-", face)
+            for face in faces
+        ), sheet
+        assert "@import" not in css.lower(), sheet
+        urls = [url.strip("\"'") for url in re.findall(r"url\(\s*([^)]*?)\s*\)", css, re.IGNORECASE)]
+        assert urls and all(
+            re.fullmatch(r"/fonts/[\w.-]+", url) and (LANDING_SRC / "public" / url[1:]).is_file() for url in urls
+        ), urls
 
 
 def test_the_site_ships_without_framer_motion():
@@ -871,86 +885,155 @@ def test_the_site_ships_without_framer_motion():
 
 
 def test_the_site_describes_the_quick_scan_as_the_readme_does():
-    text = "a token it recognises reads Unknown there"
-    assert text in read(ROOT / "README.md")
-    assert text in read(COMPONENTS / "AgentSecurity.tsx")
+    # The try-it form uses the quick scan route; the API reply keeps its no-sell result Unknown with its reason.
+    api = " ".join(read(ROOT / "api.py").split())
+    try_it = read(COMPONENTS / "TryIt.tsx")
+    verdicts = read(LANDING_SRC / "src" / "firewallVerdict.ts")
+    assert 'SCAN_URL = "https://api.shieldbotsecurity.online/api/scan"' in try_it
+    assert '_QUICK_SCAN_SELLABILITY_UNKNOWN = (' in api
+    assert '"Sellability unknown: this quick scan does not simulate a sell; /api/firewall runs the full token check"' in api
+    assert 'UNKNOWN: { verdict: "unknown", text: "UNKNOWN" }' in verdicts
+    assert 'reply.classification === "UNKNOWN"' in verdicts
+    assert "reasons={reply.coverage_reasons}" in try_it
 
 
-def test_the_site_says_which_verdicts_reach_the_registry():
-    # Only Telegram scans, guard rescans, and launches that are blocked or guard-watched are recorded on-chain
-    # (docs/SUBMISSION.md); a launch the hunter is merely watching is stored as off.
-    text = "Telegram scans, guard rescans, and launches it blocks or the guard watches"
-    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
-    assert "guard-watched" in read(ROOT / "docs" / "SUBMISSION.md")
-    assert text in read(COMPONENTS / "OnChain.tsx")
-    assert text in bundle
+def test_registry_uses_recent_verdicts_and_blocked_launch_fallback():
+    # The Registry lists confirmed records from its route, with blocked launches only as the documented fallback.
+    docs = " ".join(read(ROOT / "docs" / "SUBMISSION.md").split())
+    source = read(COMPONENTS / "Registry.tsx")
+    feed = read(LANDING_SRC / "src" / "registryFeed.ts")
+    assert "guard-watched" in docs
+    assert "GET /api/verdicts/recent?chain_id=4663&limit=3" in feed
+    assert 'outcome=blocked&limit=3' in feed
+    assert "/api/verdicts/recent?chain_id=4663&limit=3" in source
+    assert "outcome=blocked&limit=3" in source
+    assert 'fallback ? "Records of the newest launches ShieldBot blocked" : "Recent registry records"' in " ".join(source.split())
 
 
 def test_hero_demo_shows_documented_examples_and_makes_no_request():
-    # The hero plays captures of recorded replies and draws their records, says so, and does not talk to the
-    # network. TryIt.tsx, the section after the hero, calls the API (POST /api/scan). The VIRTUAL guard example left the page with
-    # verdictScenes.ts in PR C and is in FeatureTabs.tsx since PR D1 (plan 3.3).
+    # The hero shows one dated extension capture without requesting data; API-backed examples sit in Proof and Registry.
     story = read(COMPONENTS / "HeroRecord.tsx")
-    assert "Recorded examples, not live scans" in story
+    assert story.count('src="/hero-overlay.webp"') == 1
+    assert "Recorded reply," in story
     for name in ("HeroRecord.tsx", "VerdictRecord.tsx", "CheckRow.tsx"):
         for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
             assert forbidden not in read(COMPONENTS / name), (name, forbidden)
     try_it = read(COMPONENTS / "TryIt.tsx")
     assert "https://api.shieldbotsecurity.online/api/scan" in try_it
+    registry = read(COMPONENTS / "Registry.tsx")
+    assert "useFeed()" in registry and "Recent registry records" in registry
+    assert "fetch(" not in registry
     for forbidden in ("XMLHttpRequest", "WebSocket", "EventSource"):
         assert forbidden not in try_it, forbidden
-    # The VIRTUAL guard example is in the feature tabs, with the answer docs/SUBMISSION.md records (plan 3.3).
-    tabs = read(COMPONENTS / "FeatureTabs.tsx")
+    assert "live, not the request above" not in story
+    assert "useFeed()" not in story
+    for forbidden in ("XMLHttpRequest", "WebSocket", "EventSource"):
+        assert forbidden not in registry, forbidden
+
+
+def test_guard_example_matches_the_deployment_and_submission_records():
     deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
-    subject = re.search(r"`subject\(\)` is VIRTUAL \(`(0x[0-9a-fA-F]{40})`\)", deployments).group(1)
-    assert subject.lower() in tabs.lower()
-    assert "allowed=True, reason=0" in tabs and "allowed=True, reason=0" in read(ROOT / "docs" / "SUBMISSION.md")
-    assert "Derived, not a recorded call" in tabs
-    for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
-        assert forbidden not in tabs, forbidden
-    # ARBROKER, the documented Arbitrum honeypot, is shown in the Arbitrum coverage note.
-    fixture = json.loads(read(ROOT / "tests" / "fixtures" / "arbitrum_simulation" / "v2_honeypot.json"))
-    assert fixture["token"] in read(COMPONENTS / "Chains.tsx")
-    # The SAFE fixture is the ARB approval of docs/SUBMISSION.md; the UNKNOWN one has incomplete coverage.
-    scripts = LANDING_SRC / "scripts"
-    safe = json.loads(read(scripts / "hero-overlay-safe-request.json"))
-    assert safe["chainId"] == 42161 and f"(`{safe['to']}`)" in read(ROOT / "docs" / "SUBMISSION.md")
-    assert json.loads(read(scripts / "hero-overlay-safe-response.json"))["classification"] == "SAFE"
-    unknown = json.loads(read(scripts / "hero-overlay-unknown-response.json"))
-    assert unknown["status"] != "ok" and any(unknown["coverage_reasons"].values())
+    virtual = re.search(
+        r"subject\(\)\W+is VIRTUAL\W+(0x[0-9a-fA-F]{40})\W+",
+        deployments,
+    )
+    assert virtual, "docs/DEPLOYMENTS.md should record the guarded transfer's VIRTUAL subject"
+    submission = read(ROOT / "docs" / "SUBMISSION.md")
+    result = re.search(
+        r"guard\.check\(subject, maxAge\): (allowed=(?:True|False), reason=\d+)`? for VIRTUAL",
+        submission,
+    )
+    assert result, "docs/SUBMISSION.md should record the deployment verifier result"
+    address = virtual.group(1)
+    registry = read(COMPONENTS / "Registry.tsx")
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    recorded = f"guard.check(VIRTUAL, 900)  // {result.group(1)}"
+    derived = "guard.check(0x3435\u202626dd, 900)  // allowed=False, reason=4 HONEYPOT"
+    caveat = (
+        "Permission is not a safety guarantee: the guard accepts MEDIUM risk. "
+        "Permission lasts only while a subject is actively watched and republished."
+    )
+    assert 'href={`https://robin.etherscan.io/address/${VIRTUAL}`}' in registry
+    virtual_constant = re.search(
+        rf'([A-Za-z_$][\w$]*)="{re.escape(address)}"', bundle, re.IGNORECASE
+    )
+    assert virtual_constant
+    assert (
+        f'href:`https://robin.etherscan.io/address/${{{virtual_constant.group(1)}}}`'
+        in bundle
+    )
+    assert address.casefold() in registry.casefold()
+    assert address.casefold() in bundle.casefold()
+    for text in (
+        "// Recorded on Robinhood Chain, 27 September 2026",
+        recorded,
+        "// Derived, not a recorded call",
+        derived,
+        caveat,
+        "https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/SUBMISSION.md",
+    ):
+        assert text in registry, text
+        assert text in bundle, text
+
+
+def test_registry_records_link_each_onchain_transaction():
+    registry = read(COMPONENTS / "Registry.tsx")
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    for text in ("https://robin.etherscan.io/tx/", "record.tx_hash", "tx {short(record.tx_hash)}"):
+        assert text in registry, text
+    assert registry.count('aria-label={`Transaction ${record.tx_hash}`}') == 2  # the stacked records and the table
+    assert registry.count("robin.etherscan.io/tx/${record.tx_hash}") == 2  # the stacked records and the table
+    assert "https://robin.etherscan.io/tx/" in bundle
+    assert "tx " in bundle
+
+
+def test_registry_links_the_judge_guide_and_limits_the_claim():
+    registry = read(COMPONENTS / "Registry.tsx")
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    for text in (
+        "https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/JUDGE_GUIDE.md#3-verify-a-verdict-without-trusting-the-api",
+        "Verify a verdict without trusting the API",
+        "A match proves the recorder committed those bytes. It does not prove the scan was right, that an issuer is genuine, or that a token will stay sellable.",
+    ):
+        assert text in registry, text
+        assert text in bundle, text
+
+
+def test_guard_permission_caveats_keep_their_scope():
+    caveat = (
+        "Permission is not a safety guarantee: the guard accepts MEDIUM risk. "
+        "Permission lasts only while a subject is actively watched and republished."
+    )
+    registry = read(COMPONENTS / "Registry.tsx")
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert caveat in registry
+    assert caveat in bundle
+
+
+def test_guarded_transfer_row_disclaims_a_live_usdg_payment():
+    note = (
+        "Asks the guard, then moves approved USDG. Its subject is VIRTUAL; "
+        "no live guarded USDG payment is claimed."
+    )
+    registry = read(COMPONENTS / "Registry.tsx")
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert note in registry
+    assert note in bundle
 
 
 def test_live_chain_matrix_and_check_definitions_use_reported_fields():
-    # The matrix sends no request of its own: sell simulation and launch scans are the pinned rows above (the
-    # adapter configuration GET /api/coverage/{chain_id} serves), and the mempool column reads the one
-    # GET /api/stats the page already makes, so a page load stays well inside the API's per-IP limit.
+    # The table uses the existing stats request for mempool readings and has no legend or in-component fetch.
     chains = read(COMPONENTS / "Chains.tsx")
     for forbidden in ("fetch(", "XMLHttpRequest", "setTimeout("):
         assert forbidden not in chains, forbidden
     assert "useStats()" in chains
     assert "**adapter.capabilities()," in read(ROOT / "api.py")
     assert "GoPlus flags only" in chains
-    # Three mempool readings, kept apart as the API keeps them (public_mempool yes / unobservable / no): a public
-    # mempool the monitor did not read on its last poll is the legend's outline, not the dashed "does not run here".
-    assert '{ state: "unavailable", label: "No public mempool" }' in chains
-    assert '{ state: "available", label: "Observed on last poll" }' in chains
-    assert '{ state: "unknown", label: "Not read on last poll" }' in chains
-    assert "Not observable" not in chains
-    assert "Dashed: does not run on this chain" in chains and "Outline: Unavailable" in chains
+    assert 'return "No public mempool";' in chains
+    assert '"Observed on last poll"' in chains
+    assert '"Not read on last poll"' in chains
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
     assert "Not read on last poll" in bundle
-    # /api/coverage serves sell simulation but no launch scan field: the footnote keeps the two sources apart.
-    assert "Sell simulation: from the code, the chain adapters, the configuration GET /api/coverage/" in chains
-    assert "Launch scans: from the code, services/launch_discovery.py, Robinhood Chain only." in chains
-    assert "Sell simulation and launch scans: from the code" not in chains
-    assert 'label: "/launchalerts"' in chains
-    assert "<CapabilityCell {...launchCell(chain)} />" in chains
-    assert 'label="Unavailable"' not in chains
-    assert "Public mempool: Unavailable. GET /api/stats did not answer" in chains
-    assert "Where it says None" not in chains
-    # One legend vocabulary with Mechanism's check cells: Filled, Dashed, Outline: Unavailable.
-    assert "Outline: Unavailable" in chains and "Not available" not in chains
-    assert '"None"' not in read(COMPONENTS / "WhyUnknown.tsx")
     assert "table-fixed" in chains
     assert "min-w-[720px]" not in chains
 
@@ -960,33 +1043,28 @@ def test_live_chain_matrix_and_check_definitions_use_reported_fields():
     assert "controller.abort();" in stats
     assert "if (!r.ok) throw" in stats
 
-    mechanism = read(COMPONENTS / "Mechanism.tsx")
-    assert "useStats()" in mechanism and "fetch(" not in mechanism
-    assert "CHECK_ORDER.map((key)" in mechanism
-    for key in ("structural", "market", "behavioral", "honeypot", "intent", "signature"):
-        assert f"{key}:" in mechanism
-    assert "Dashed: partial or no run" in mechanism
-    assert "A dashed cell is not a pass." in mechanism
-    assert "GET /api/stats did not answer, so every figure reads Unavailable." in mechanism
+    assert 'href="https://api.shieldbotsecurity.online/api/stats"' in chains
+    assert 'stats.mempool_chains_observable.includes(chain.chainId)' in chains
 
 
 def test_registry_records_use_full_and_compact_verdict_records():
-    worked = read(COMPONENTS / "WorkedExample.tsx")
-    rows = read(COMPONENTS / "OnChain.tsx")
-    why = read(COMPONENTS / "WhyUnknown.tsx")
-    assert "<VerdictRecord" in worked
-    assert 'variant="full"' in worked
-    assert "evidenceHash={record.evidence_hash}" in worked
-    assert "short(record.subject)" in worked
-    assert "<VerdictRecord" in rows
-    assert 'variant="compact"' in rows
-    assert "evidenceHash={record.evidence_hash}" in rows
-    assert "record.onchain_status" in rows
-    # One chain line for a registry record, from the route, in every section that draws one.
+    proof = read(COMPONENTS / "Proof.tsx")
+    registry = read(COMPONENTS / "Registry.tsx")
+    assert "<VerdictRecord" in proof
+    assert "evidenceHash={record.evidence_hash}" in proof
+    assert "observed_block={record.observed_block}" not in proof
+    assert "record.onchain_status" in proof
+    assert "<table" in registry and "<th scope=\"col\"" in registry
+    assert "short(subject)" in registry
+    assert "record?.onchain_status" in registry
+    assert "record?.observed_block" in registry
+    assert "record?.evidence_hash" in registry
+    # Both live views use the same route's chain identity and verdict mapping.
     assert 'export const REGISTRY_CHAIN = { id: 4663, name: "Robinhood Chain" };' in read(LANDING_SRC / "src" / "registryFeed.ts")
-    for source in (worked, rows, why):
-        assert "chain={REGISTRY_CHAIN}" in source
+    assert "chain={REGISTRY_CHAIN}" in proof
+    for source in (proof, registry):
         assert '"Robinhood Chain" }' not in source
+        assert 'registryChip(record.verdict, record.verdict_code)' in source
 
 
 def run_typescript(script: str, *args: str) -> str:
@@ -1039,7 +1117,7 @@ process.stdout.write(JSON.stringify(words.map((word) => [word, registryChip(word
     assert chips[None][0]["label"] == "Unavailable"
     assert '  registry: { classes: "' in read(COMPONENTS / "Badge.tsx")
     assert "registry" not in read(LANDING_SRC / "src" / "firewallVerdict.ts")
-    for name in ("WhyUnknown.tsx", "OnChain.tsx", "WorkedExample.tsx"):
+    for name in ("Proof.tsx", "Registry.tsx"):
         source = read(COMPONENTS / name)
         assert 'import { registryChip } from "../registryVerdict";' in source, name
         assert "registryChip(record.verdict, record.verdict_code)" in source, name
@@ -1047,48 +1125,35 @@ process.stdout.write(JSON.stringify(words.map((word) => [word, registryChip(word
         assert "function registryChip" not in source, name
 
 
-def test_registry_requests_are_shared_and_the_strip_loads_its_records_near_the_viewport():
+def test_registry_requests_are_shared_and_recent_records_load_near_the_viewport():
     # The API allows 10 requests in 5 seconds and 30 a minute per IP (api.py rate_limiter). The why-unknown record
-    # goes through the feed, so an address is fetched once; the strip's other records wait for the strip.
+    # goes through the feed, so an address is fetched once; other records wait for the table.
     assert "RateLimiter(requests_per_minute=30, burst=10)" in read(ROOT / "api.py")
     feed = read(LANDING_SRC / "src" / "registryFeed.ts")
     assert "}, 10_000)," in feed and "controller.abort();" in feed
     assert "if (current.asked.has(address)) continue;" in feed
     assert "want(current, addresses.slice(0, 1));" in feed
     assert "if (current.restWanted) want(current, current.rest);" in feed
-    why = read(COMPONENTS / "WhyUnknown.tsx")
-    assert "const record = useRecord(SUBJECT);" in why
-    assert "/api/verdict/4663/${SUBJECT}`)" not in why
-    strip = read(COMPONENTS / "OnChain.tsx")
-    assert "new IntersectionObserver(" in strip and "loadRecentRecords();" in strip
-    assert "fetch(" not in strip
+    proof = read(COMPONENTS / "Proof.tsx")
+    registry = read(COMPONENTS / "Registry.tsx")
+    assert "useFeed()" in proof and "useFeed()" in registry
+    assert "new IntersectionObserver(" in registry and "loadRecentRecords();" in registry
+    assert "fetch(" not in proof and "fetch(" not in registry
 
 
 def test_try_it_uses_a_verdict_record_without_repeated_hero_captures():
     try_it = read(COMPONENTS / "TryIt.tsx")
     assert 'import VerdictRecord from "./VerdictRecord";' in try_it
     assert "<VerdictRecord" in try_it
-    assert 'variant="full"' in try_it
     assert "evidenceHash={reply.evidence_hash}" in try_it
-    assert "hero-overlay-safe.webp" not in try_it
-    assert "hero-overlay-unknown.webp" not in try_it
-    assert "rounded-md" in try_it
-    assert "border-secondary" in try_it
-    assert "border-hairline-strong" not in try_it
-    assert "rounded-full" not in try_it
-    assert "rounded-2xl" not in try_it
-    assert "before:h-px" not in try_it
-    assert "after:h-px" not in try_it
+    assert "reasons={reply.coverage_reasons}" in try_it
+    assert "reply.evidence_url" in try_it
     for kind in ("idle", "invalid", "loading", "result", "bad-request", "rate-limited", "unavailable"):
         assert f'kind: "{kind}"' in try_it
     assert "const TIMEOUT_MS = 30_000;" in try_it
     assert "setTimeout(() => controller.abort(), TIMEOUT_MS)" in try_it
     assert "useEffect(() => () => request.current?.abort(), [])" in try_it
     assert "signal: controller.signal," in try_it
-    # An Unknown from /api/scan says which check did not run: its coverage keys are not the six checks, so the
-    # reasons are printed on their own.
-    assert "reasons={reply.coverage_reasons}" in try_it
-    assert "coverage={reply.coverage}" not in try_it
     assert 'if (!/^0x[0-9a-fA-F]{40}$/.test(value))' in try_it
 
 
@@ -1115,54 +1180,43 @@ process.stdout.write(renderToStaticMarkup(React.createElement(VerdictRecord, pro
     assert "<ol" not in markup
 
 
-def test_a_null_check_reads_unavailable_with_the_legends_ink_outline():
-    # A coverage value served as null is not a 0: its cell reads Unavailable, drawn as the legend's ink outline,
-    # which clears 3:1 on white; 0 still reads as a check that did not run.
+def test_a_null_check_reads_unavailable_and_zero_reads_did_not_run():
+    # Missing coverage remains distinct from a check whose API value is zero.
     script = r"""
 const React = require(path.join(root, "node_modules", "react"));
 const {renderToStaticMarkup} = require(path.join(root, "node_modules", "react-dom", "server"));
 const CheckRow = require(path.join(root, "src", "components", "CheckRow.tsx")).default;
-const out = {};
-for (const variant of ["full", "compact"]) {
-  out[variant] = renderToStaticMarkup(React.createElement(CheckRow, {coverage: JSON.parse(process.argv[2]), variant}));
-}
-process.stdout.write(JSON.stringify(out));
+process.stdout.write(renderToStaticMarkup(React.createElement(CheckRow, {
+  coverage: JSON.parse(process.argv[2]),
+  reasons: {market: "sell route unavailable"},
+})));
 """
     coverage = {"structural": 1, "market": None, "behavioral": 0, "honeypot": 0.5}
-    markup = json.loads(run_typescript(script, json.dumps(coverage)))
-    cells = dict(zip(CHECK_ORDER, markup["full"].split("<li")[1:]))
-    assert "Unavailable" in cells["market"] and not re.search(r">\s*0</span>", cells["market"])
-    assert "border-ink bg-ground" in cells["market"] and "border-edge" not in cells["market"]
-    assert re.search(r">\s*0</span>", cells["behavioral"]) and "border-edge" in cells["behavioral"]
-    for key in ("intent", "signature"):
-        assert "Unavailable" in cells[key] and "border-ink bg-ground" in cells[key], key
-    assert "market: Unavailable" in markup["compact"] and "market: did not run" not in markup["compact"]
-    legend = read(COMPONENTS / "Mechanism.tsx")
-    assert re.search(r'border border-ink bg-ground" />\s*Outline: Unavailable', legend)
+    markup = run_typescript(script, json.dumps(coverage))
+    visible = " ".join(re.sub(r"<[^>]+>", " ", markup).split())
+    assert "market Unavailable" in visible
+    assert "behavioral did not run" in visible
+    assert "honeypot partial" in visible
+    assert "sell route unavailable" in visible
+    assert "market: Unavailable" not in visible
 
 
-def test_a_code_block_says_when_its_lines_scroll_sideways():
+def test_a_code_block_wraps_long_lines_without_a_scroll_hint():
     block = read(COMPONENTS / "CodeBlock.tsx")
-    assert "new ResizeObserver(measure)" in block
-    assert "setOverflows(element.scrollWidth > element.clientWidth)" in block
-    assert "Scroll the block sideways to read each line in full" in block
+    assert "whitespace-pre-wrap break-words" in block
+    assert "Scroll the block sideways" not in block
+    assert "ResizeObserver" not in block
 
 
-def test_the_feature_index_is_a_vertical_tablist_with_roving_focus():
-    tabs = " ".join(read(COMPONENTS / "FeatureTabs.tsx").split())
-    for text in (
-        'role="tablist"',
-        'aria-orientation="vertical"',
-        'role="tab"',
-        'role="tabpanel"',
-        "tabIndex={selected ? 0 : -1}",
-        "const next = current === last ? 0 : current + 1;",
-        "const previous = current === 0 ? last : current - 1;",
-        "ArrowDown: next, ArrowRight: next, ArrowUp: previous, ArrowLeft: previous, Home: 0, End: last,",
-        "event.preventDefault(); select(target);",
-        "tabs.current[i]?.focus();",
-    ):
-        assert text in tabs, text
+def test_the_feature_index_is_a_three_step_process_with_four_surfaces():
+    how = read(COMPONENTS / "HowItWorks.tsx")
+    assert "<ol" in how and "</ol>" in how
+    for step in ("Intercept", "Check", "Report"):
+        assert f">{step}</h3>" in how
+    for surface in ("Chrome extension", "Telegram bot", "REST API", "MCP server"):
+        assert f'name: "{surface}"' in how
+    assert len(re.findall(r'\["/(?:token|scan|rescue|report|launchalerts)[^\"]*"', how)) == 5
+    assert "<CheckRow coverage={recordedReply.coverage} />" in how
 
 
 def test_the_faq_opens_one_native_button_answer_at_a_time():
@@ -1185,14 +1239,18 @@ def test_the_footer_health_line_reads_unavailable_when_the_api_does_not_answer()
     assert 'if request.url.path in ("/", "/api/health",' in read(ROOT / "api.py")
     footer = " ".join(read(COMPONENTS / "Footer.tsx").split())
     for text in (
-        'fetch("https://api.shieldbotsecurity.online/api/health", { signal: controller.signal })',
+        'fetch("https://api.shieldbotsecurity.online/api/health", { signal: controller.signal, })',
         "const timeout = setTimeout(() => controller.abort(), 10_000);",
-        "if (!r.ok) throw new Error(`HTTP ${r.status}`);",
+        "if (!response.ok) throw new Error(`HTTP ${response.status}`);",
         "if (active) setHealth(null);",
         "active = false; clearTimeout(timeout); controller.abort();",
-        '"Unavailable. GET /api/health did not answer."',
+        '"API unavailable"',
+        '"API checking"',
+        "API up, ${health.supported_chains.length} chains",
     ):
         assert text in footer, text
+    assert 'className={message ? "mt-2 text-xs text-secondary" : "sr-only"}' in footer
+    assert 'role="status"' in footer
 
 
 def test_built_dashboard_contains_the_current_source_strings():
@@ -1208,36 +1266,32 @@ def test_built_dashboard_contains_the_current_source_strings():
 CHECK_ORDER = ["structural", "market", "behavioral", "honeypot", "intent", "signature"]
 
 
-def recorded_replies() -> dict:
-    # landing-src/src/recordedReplies.ts is one object literal; read it as JSON (quote the keys, drop trailing
-    # commas) so each transcribed field can be compared with its fixture.
-    source = read(LANDING_SRC / "src" / "recordedReplies.ts")
-    body = source[source.index("> = {") + 4 : source.rindex("};") + 1]
-    body = re.sub(r"(?m)^(\s*)(\w+):", r'\1"\2":', body)
-    body = re.sub(r",(\s*[}\]])", r"\1", body)
-    return json.loads(body)
-
-
 def test_the_hero_records_are_the_recorded_replies_field_for_field():
-    # The hero's verdict records are drawn from the three recorded /api/firewall replies. The JSON is not imported
-    # (it carries full evidence hashes), so every field the page renders is transcribed and checked here.
-    replies = recorded_replies()
-    assert sorted(replies) == ["block", "safe", "unknown"]
-    recordings = {
-        entry["fixture"]: entry for entry in json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-recordings.json"))["recordings"]
-    }
-    for name, record in replies.items():
-        fixture = json.loads(read(LANDING_SRC / "scripts" / record["fixture"]))
-        assert record["sent_at"] == recordings[record["fixture"].removesuffix("-response.json")]["sent_at"], name
-        for field in ("status", "partial", "classification", "risk_score", "coverage", "chain_id", "network", "plain_english"):
-            assert record[field] == fixture[field], (name, field)
-        assert list(record["coverage"]) == list(fixture["coverage"]) == CHECK_ORDER, name
-        assert record.get("coverage_reasons") == fixture.get("coverage_reasons"), name
-        digest = fixture["evidence_hash"]
-        assert record["evidence_hash"] == f"{digest[:6]}…{digest[-4:]}", name
-    unknown = replies["unknown"]
-    assert unknown["coverage"]["market"] == 0 and 0 < unknown["coverage"]["honeypot"] < 1
-    assert set(unknown["coverage_reasons"]) == {"market", "honeypot"}
+    # Both visible dates follow the timestamp of the captured hero reply.
+    fixture = json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-response.json"))
+    recordings = json.loads(
+        read(LANDING_SRC / "scripts" / "hero-overlay-recordings.json")
+    )["recordings"]
+    sent_at = next(
+        recording["sent_at"]
+        for recording in recordings
+        if recording["fixture"] == "hero-overlay"
+    )
+    year, month, day = (int(part) for part in sent_at[:10].split("-"))
+    months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    recorded_date = f"{day} {months[month - 1]} {year}"
+    story = read(COMPONENTS / "HeroRecord.tsx")
+    recorded = read(LANDING_SRC / "src" / "recordedReplies.ts")
+    coverage_block = re.search(r"coverage: \{(.*?)\}", recorded, re.S).group(1)
+    coverage = {key: float(value) for key, value in re.findall(r"(\w+): ([0-9.]+)", coverage_block)}
+    assert fixture["classification"] == "BLOCK_RECOMMENDED" and fixture["chain_id"] == 1
+    assert fixture["risk_score"] == 100 and all(value == 1 for value in fixture["coverage"].values())
+    assert 'fixture: "hero-overlay-response.json"' in recorded
+    assert coverage == fixture["coverage"]
+    assert f"Recorded checks, {recorded_date}" in read(COMPONENTS / "HowItWorks.tsx")
+    assert 'src="/hero-overlay.webp"' in story
+    assert f"Recorded reply, {recorded_date}" in story
+    assert "BLOCK RECOMMENDED" in story and "Safety: 0/100" in story
 
 
 def test_the_check_row_order_is_fixed():
@@ -1251,8 +1305,7 @@ def test_the_check_row_order_is_fixed():
 
 
 def test_a_verdict_record_never_renders_a_full_hash():
-    # Render VerdictRecord (both variants) with a 64-hex value in every text field and the coverage keys in
-    # reverse order: no 64-hex string may reach the markup, and the cells keep CHECK_ORDER.
+    # A served reason and every registry field may contain a 64-hex value; none reaches the markup in full.
     import shutil
     import subprocess
 
@@ -1275,111 +1328,64 @@ const React = require(path.join(root, "node_modules", "react"));
 const {renderToStaticMarkup} = require(path.join(root, "node_modules", "react-dom", "server"));
 const VerdictRecord = require(path.join(root, "src", "components", "VerdictRecord.tsx")).default;
 const props = JSON.parse(process.argv[2]);
-const out = {};
-for (const variant of ["full", "compact"]) out[variant] = renderToStaticMarkup(React.createElement(VerdictRecord, {...props, variant}));
-process.stdout.write(JSON.stringify(out));
+process.stdout.write(renderToStaticMarkup(React.createElement(VerdictRecord, props)));
 """
     digest = "0x" + "ab12" * 16
-    coverage = dict(zip(reversed(CHECK_ORDER), (1, 0.5, 0, 1, 1, 0)))
     props = {
         "chip": {"verdict": "unknown", "label": "UNKNOWN"},
-        "coverage": coverage,
         "reasons": {key: f"reason for {key}: {digest}" for key in CHECK_ORDER},
-        "reason": f"served reason {digest}",
-        "recordedAt": "2026-10-11T09:21:20Z",
         "chain": {"id": 4663, "name": "Robinhood Chain"},
         "block": 85035031,
         "publishedAt": 1760000000,
         "evidenceHash": digest,
-        "guard": f"guard.check({digest}, 900)",
-        "request": f"approve(address,uint256) · to {digest}",
-        "source": "test",
     }
     result = subprocess.run(
         [node, "-e", script, str(LANDING_SRC), json.dumps(props)],
         cwd=LANDING_SRC, capture_output=True, text=True, encoding="utf-8", check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    for variant, markup in json.loads(result.stdout).items():
-        assert not re.search(r"0x[0-9a-fA-F]{64}", markup), variant
-        assert "0xab12…ab12" in markup, variant
-        row = markup[: markup.index("</ol>")]
-        assert sorted(CHECK_ORDER, key=lambda key: row.index(f">{key}")) == CHECK_ORDER, variant
-        for label in ("Recorded", "Chain", "Block", "Published", "Evidence", "Guard"):
-            assert f">{label}</dt>" in markup, (variant, label)
-        assert "approve(address,uint256) · to 0xab12…ab12" in markup, variant
+    markup = result.stdout
+    assert not re.search(r"0x[0-9a-fA-F]{64}", markup)
+    assert "0xab12" in markup and ">Not checked</p>" in markup
+    row = markup[: markup.index("</dl>")]
+    assert sorted(CHECK_ORDER, key=lambda key: row.index(f">{key}</dt>")) == CHECK_ORDER
+    for label in ("Chain", "Block", "Published", "Evidence"):
+        assert f">{label}</dt>" in markup
 
 
 def test_the_hero_request_lines_are_the_recorded_calls():
-    # The hero record opens with the recorded request: the method its selector names and its target, shortened,
-    # transcribed from hero-overlay{,-unknown,-safe}-request.json (the calldata itself is never transcribed).
-    selectors = {"0x095ea7b3": "approve(address,uint256)"}
-    for name, record in recorded_replies().items():
-        request = json.loads(read(LANDING_SRC / "scripts" / record["fixture"].replace("-response.json", "-request.json")))
-        assert request["chainId"] == record["chain_id"], name
-        assert record["request"]["method"] == selectors[request["data"][:10]], name
-        assert record["request"]["to"] == f"{request['to'][:6]}…{request['to'][-4:]}", name
-        # approve(address,uint256): the spender is the first argument, the last 40 hex digits of its 32-byte word.
-        spender = "0x" + request["data"][34:74]
-        assert record["request"]["spender"] == f"{spender[:6]}…{spender[-4:]}", name
-    hero = " ".join(read(COMPONENTS / "HeroRecord.tsx").split())
-    assert "request={`${reply.request.method} · to ${reply.request.to}`}" in hero
-    # The signing card is an illustration of the recorded call, under a placeholder dApp, and says so.
-    assert "<dd>{reply.request.spender}</dd>" in hero and "<span>app.example</span>" in hero
-    assert "The signing card is an illustration: a placeholder dApp asking to sign the recorded call." in hero
+    # The visible screenshot is the same Ethereum unlimited USDC approval recorded by the one hero fixture.
+    fixture = json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-request.json"))
+    response = json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-response.json"))
+    story = read(COMPONENTS / "HeroRecord.tsx")
+    assert fixture["chainId"] == response["chain_id"] == 1
+    assert fixture["data"].startswith("0x095ea7b3")
+    assert "approves unlimited USDC spending on Ethereum" in story
+    assert "fetch(" not in story
 
 
 def test_the_hero_says_lines_are_the_recorded_replies():
-    # What the hero says on each verdict field is fields of the recorded reply, never a paraphrase: one sentence of
-    # plain_english (the first, or for an incomplete reply its last, since the first lists the coverage reasons the
-    # record prints), then risk_score, or each coverage key below 1 with its value, and the chain.
-    def js(number):
-        return str(int(number)) if float(number).is_integer() else str(number)
-
-    says = {}
-    for name, record in recorded_replies().items():
-        reply = json.loads(read(LANDING_SRC / "scripts" / record["fixture"]))
-        incomplete = reply["status"] != "ok" or reply.get("partial") is True or any(
-            float(value) < 1 for value in reply["coverage"].values()
-        )
-        sentences = re.split(r"(?<=\.) ", reply["plain_english"])
-        measure = (
-            [f"{key} {js(reply['coverage'][key])}" for key in CHECK_ORDER if reply["coverage"][key] < 1]
-            if incomplete
-            else [f"risk_score {js(reply['risk_score'])}"]
-        )
-        says[name] = (sentences[-1] if incomplete else sentences[0], " · ".join([*measure, f"chain {reply['chain_id']}"]))
-    assert says == {
-        "block": ("Do not proceed with this transaction.", "risk_score 100 · chain 1"),
-        "unknown": ("Review the missing data before proceeding.", "market 0 · honeypot 0.4 · chain 4663"),
-        "safe": ("No major risks detected.", "risk_score 6.4 · chain 42161"),
-    }
-    hero = " ".join(read(COMPONENTS / "HeroRecord.tsx").split())
-    for line in (
-        "const sentences = reply.plain_english.split(/(?<=\\.) /);",
-        "CHECK_ORDER.filter((key) => reply.coverage[key] < 1).map( (key) => `${key} ${reply.coverage[key]}`, )",
-        ": [`risk_score ${reply.risk_score}`];",
-        "sentence: incomplete ? sentences[sentences.length - 1] : sentences[0],",
-        "measure: [...measure, `chain ${reply.chain_id}`].join(\" · \"),",
-        "{says.sentence}",
-        "{says.measure}",
-    ):
-        assert line in hero, line
+    # The screenshot alt text retains the verdict and score shown in its captured API reply.
+    reply = json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-response.json"))
+    hero = read(COMPONENTS / "HeroRecord.tsx")
+    messages = json.loads(read(ROOT / "extension" / "locales" / "en" / "messages.json"))
+    assert reply["classification"] == "BLOCK_RECOMMENDED" and reply["risk_score"] == 100
+    assert f"The verdict badge reads {messages['classBlock']}" in hero
+    assert f"Safety: {100 - reply['risk_score']}/100" in hero
 
 
 def test_the_hero_commit_card_shows_a_live_record_never_the_recorded_request():
-    # The recorded replies were never published, so the hero's commit beat shows the newest registry record the
-    # shared feed already fetched, labelled as another token's live record; it sends no request and prints no block
-    # of its own.
-    hero = " ".join(read(COMPONENTS / "HeroRecord.tsx").split())
-    assert "useFeed()" in hero and "fetch(" not in hero
-    assert "{label} · live, not the request above" in hero
-    assert '"Newest confirmed registry record"' in hero
-    assert '"Registry record of the newest launch ShieldBot blocked"' in hero
-    assert "value(record?.observed_block)" in hero
-    assert 'record?.onchain_status === "confirmed"' in hero
+    # The hero no longer mixes recorded and live data; the latest live row is in Registry.
+    hero = read(COMPONENTS / "HeroRecord.tsx")
+    registry = read(COMPONENTS / "Registry.tsx")
+    feed = read(LANDING_SRC / "src" / "registryFeed.ts")
+    assert "useFeed()" not in hero and "fetch(" not in hero
+    assert "Recent registry records" in registry
+    assert "useFeed()" in registry and "recent.map" in registry
+    assert "/api/verdicts/recent?chain_id=4663&limit=" in feed
+    assert "live, not the request above" not in registry
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
-    assert "live, not the request above" in bundle
+    assert "Recent registry records" in bundle
 
 
 def media_blocks(css: str):
@@ -1407,57 +1413,36 @@ def animated_rules(css: str):
 
 
 def test_every_animation_runs_only_when_motion_is_allowed():
-    # Reduced motion shows every final frame at once: in the source CSS and in the built CSS, each animation
-    # declaration sits inside @media (prefers-reduced-motion: no-preference), so with reduce no element starts hidden
-    # or waits for a reading. Checking the source too catches a violation even while landing/ is stale.
+    # Only the loading-to-verdict story animates, and only when reduced motion is not requested.
     built = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.css"))
     source = read(LANDING_SRC / "src" / "index.css")
     for css in (built, source):
         rules = list(animated_rules(css))
-        assert len(rules) >= 10
+        assert len(rules) >= 2
         for selector, allowed in rules:
             assert allowed, selector
     assert "animation-duration: 0.01ms !important;" in source
-    # The pre-states that hide, clip, offset or hold something before it plays (a slot's clip, a transparent rule,
-    # a paused wait) exist only when motion is allowed too, so with reduce nothing starts hidden or frozen. The source
-    # only: the built CSS also holds Tailwind's static utilities (border-l-transparent).
-    for css in (source,):
-        stripped = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
-        held = [
-            (media, selector)
-            for media, selector, body in media_blocks(stripped)
-            if not selector.startswith("@keyframes") and not re.match(r"(from|to|\d)", selector)
-            and re.search(r"clip-path:|animation-play-state:|border(-left)?-color:\s*transparent", body)
-        ]
-        assert len(held) >= 4
-        for media, selector in held:
-            assert any("prefers-reduced-motion:no-preference" in m.replace(" ", "") for m in media), selector
-    # What keeps moving (the hero's replay, the strip's re-reading, the orbits) starts only through useAlive, which
-    # never turns on with reduced motion, and its Pause button is hidden there.
-    reading = read(LANDING_SRC / "src" / "reading.ts")
-    assert 'if (paused || matchMedia("(prefers-reduced-motion: reduce)").matches) {' in reading
-    assert "document.hidden" in reading and "new IntersectionObserver(" in reading
-    assert "motion-reduce:hidden" in read(COMPONENTS / "Button.tsx")
-    for name in ("HeroRecord.tsx", "OnChain.tsx", "Chains.tsx"):
-        component = read(COMPONENTS / name)
-        assert "useAlive<" in component and "<PauseButton paused={paused} setPaused={setPaused} />" in component, name
-    # The only animation that repeats is the orbit. The hero, the strip and the orbit each hold their frame
-    # (data-paused) whenever useAlive is off: paused, off screen or in a hidden tab, not only before the next replay.
-    for css in (built, source):
-        assert sorted(set(re.findall(r"animation:\s*([\w-]+)[^;}]*infinite", css))) == ["orbit-arm", "orbit-up"]
-    for name in ("HeroRecord.tsx", "OnChain.tsx", "Chains.tsx"):
-        assert 'data-paused={on ? undefined : ""}' in read(COMPONENTS / name), name
+    assert "@media (prefers-reduced-motion: no-preference)" in source
+    assert ".hero-loading {\n  display: none;" in source
+    assert ".hero-loading {\n    display: flex;" in source
+    assert "hero-commit" not in source
+    assert "PauseButton" not in read(COMPONENTS / "HeroRecord.tsx")
 
 
-def test_the_footer_legend_explains_the_registry_chip():
-    # The five firewall verdicts stay the legend; one sentence keys the neutral registry shape LOW and MEDIUM take.
-    footer = " ".join(read(COMPONENTS / "Footer.tsx").split())
-    text = "Registry records keep their own words: LOW, MEDIUM, HIGH, HONEYPOT, UNKNOWN. LOW and MEDIUM are drawn plain,"
-    assert text in footer
-    assert '<Badge verdict="registry">LOW</Badge>; the guard allows both while fresh.' in footer
-    assert "Object.values(labels).map(" in footer
-    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
-    assert text in bundle
+def test_the_hero_loading_frame_rests_hidden_after_its_animation():
+    # The loading frame animates with backwards fill, so when the animation ends it falls back to its resting
+    # style. That style must be hidden, or the loading dialog stays on top of the verdict for good.
+    source = read(LANDING_SRC / "src" / "index.css")
+    built = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.css"))
+    assert ".hero-loading {\n    display: flex;\n    opacity: 0;\n    animation: hero-loading" in source
+    assert ".hero-loading{display:flex;opacity:0;animation:hero-loading" in built
+
+def test_the_footer_health_chip_states_its_value_without_a_legend():
+    footer = read(COMPONENTS / "Footer.tsx")
+    assert '"API unavailable"' in footer
+    assert '"API checking"' in footer
+    assert "API up, ${health.supported_chains.length} chains" in footer
+    assert "Badge" not in footer and "legend" not in footer.lower()
 
 
 def test_stylesheets_hold_no_c1_control_characters():
@@ -1469,43 +1454,96 @@ def test_stylesheets_hold_no_c1_control_characters():
     for path in [source, *built]:
         bad = sorted({f"U+{ord(ch):04X}" for ch in read(path) if 0x80 <= ord(ch) <= 0x9F})
         assert not bad, f"{path.name} holds C1 control characters {bad}"
-    assert '.disclose[open] > summary::before { content: "' + chr(92) + '2212"; }' in read(source)
+    assert '.acc-panel[data-open="true"]' in read(source)
 
 
 def test_the_site_shows_the_bot_chain_registry():
-    # docs/DEPLOYMENTS.md records the BOT Chain (677) registry. Its address equals the Robinhood Chain one (the same
-    # owner deployed both at nonce 0), so an address alone proves nothing: each page must carry the row's own
-    # scan.botchain.ai link, the chain id and the deployment date, and the BOT Chain guard and guarded transfer, deployed
-    # on 29 October 2026, are recorded and claimed.
+    # Every BOT Chain contract row, including its own explorer address and deployment date, follows DEPLOYMENTS.md.
     deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
-    row = re.search(
-        r"^\| `ShieldBotVerdictRegistry` \| BOT Chain \(677\) \| \[`(0x[0-9a-fA-F]{40})`\]\((https://scan\.botchain\.ai/address/0x[0-9a-fA-F]{40})\) \| 2026-10-26 ",
-        deployments,
-        re.MULTILINE,
+    contract_names = (
+        "ShieldBotVerdictRegistry",
+        "ShieldBotVerdictGuard",
+        "ShieldBotGuardedTransfer",
     )
-    assert row, "docs/DEPLOYMENTS.md should record the BOT Chain registry"
-    address, url = row.groups()
-    assert url.endswith(address)
-    for name in ("ShieldBotVerdictGuard", "ShieldBotGuardedTransfer"):
-        assert re.search(rf"^\| `{name}` \| BOT Chain \(677\) \| .* \| 2026-10-29 ", deployments, re.MULTILINE), name
+    months = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+    bot_rows = {}
+    for name in contract_names:
+        row = re.search(
+            rf"^\| \x60{name}\x60 \| BOT Chain \(677\) \| \[\x60(0x[0-9a-fA-F]{{40}})\x60\]\((https://scan\.botchain\.ai/address/0x[0-9a-fA-F]{{40}})\) \| (\d{{4}}-\d{{2}}-\d{{2}}) ",
+            deployments,
+            re.MULTILINE,
+        )
+        assert row, f"docs/DEPLOYMENTS.md should record the BOT Chain {name}"
+        address, url, deployed = row.groups()
+        assert url.endswith(address)
+        deployed_date = date.fromisoformat(deployed)
+        bot_rows[name] = (
+            address,
+            url,
+            f"{deployed_date.day} {months[deployed_date.month - 1]} {deployed_date.year}",
+        )
+
+    registry = read(COMPONENTS / "Registry.tsx")
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
-    for name in ("OnChain.tsx", "Footer.tsx"):
-        source = " ".join(read(COMPONENTS / name).split())
-        assert f'href: "{url}",' in source, name
-        assert f'address: "{address}",' in source, name
-        assert "(677)" in source and "26 October 2026" in source, name
-    assert url in bundle, "landing bundle is stale: missing the BOT Chain registry link"
-    assert "Contracts · BOT Chain (677)" in read(COMPONENTS / "Footer.tsx")
+    contract_source = registry.split("const contracts: Contract[] = [", 1)[1].split("];", 1)[0]
+    contract_rows = re.findall(
+        r'\{\s*name: "([^"]+)"(.*?)\n  \},', contract_source, re.S
+    )
+    verification_note = "Source verified on the explorer. No Sourcify on 677."
+    for name, (address, url, deployed) in bot_rows.items():
+        row = next(
+            (
+                fields
+                for row_name, fields in contract_rows
+                if row_name == name and 'chain: "BOT Chain"' in fields
+            ),
+            None,
+        )
+        assert row, f"Registry.tsx should have the BOT Chain {name} row"
+        for field in (
+            f'address: "{address}"',
+            'chain: "BOT Chain"',
+            "chainId: 677",
+            f'deployed: "{deployed}"',
+            f'explorer: "{url}"',
+            verification_note,
+        ):
+            assert field in row, (name, field)
+        assert (
+            name in bundle
+            and address in bundle
+            and url in bundle
+            and deployed in bundle
+            and verification_note in bundle
+        ), name
+    assert 'chain: "BOT Chain"' in registry and 'chainId: 677' in registry
+    assert registry.count("sourcify: null") == 3
+    assert "Source verified on the explorer" in registry and "Source verified on the explorer" in bundle
+    assert "No Sourcify on 677" in registry and "No Sourcify on 677" in bundle
+    contract_links = registry[
+        registry.index("function ContractLinks"):registry.index("export default function Registry")
+    ]
+    assert "Source verified on the explorer" not in contract_links
+    assert "No Sourcify on 677" not in contract_links
+    assert "Not supported" not in registry
     assert "A guard and a guarded transfer that read it were deployed on BOT Chain on 29 October 2026." in " ".join(
-        read(COMPONENTS / "OnChain.tsx").split()
+        read(COMPONENTS / "FAQ.tsx").split()
     )
     about = " ".join(read(LANDING_SRC / "public" / "about.html").split())
-    assert f'<a href="{url}"' in about and "On BOT Chain (677) a verdict registry was deployed on 26 October 2026" in about
+    _, registry_url, _ = bot_rows["ShieldBotVerdictRegistry"]
+    assert f'<a href="{registry_url}"' in about and "On BOT Chain (677) a verdict registry was deployed on 26 October 2026" in about
     assert "A freshness guard and a guarded transfer contract that read it were deployed there on 29 October 2026" in about
-    # All three BOT Chain contracts were source verified on scan.botchain.ai on 29 October 2026.
-    assert "All three are source verified on the explorer." in " ".join(read(COMPONENTS / "OnChain.tsx").split())
     assert "The source of all three BOT Chain contracts is verified on BOT Chain's explorer" in about
     assert "cannot verify" not in about
+
+
+def test_coverage_scope_notes_and_launch_alert_command_stay_readable():
+    chains = read(COMPONENTS / "Chains.tsx")
+    how = read(COMPONENTS / "HowItWorks.tsx")
+    assert 'simulationScope: "supported pool routes only"' in chains
+    assert '"pools pairing the token with WETH on Uniswap V3, Uniswap V2 or SushiSwap"' in chains
+    assert '<span className="whitespace-nowrap">/launchalerts</span>' in chains
+    assert '<code className="whitespace-nowrap font-mono text-xs leading-5 text-ink">' in how
 
 
 def test_the_registry_figures_read_each_chain_from_the_stats_reply():
@@ -1515,15 +1553,15 @@ def test_the_registry_figures_read_each_chain_from_the_stats_reply():
     assert '"registry_records_confirmed_by_chain": registry_records_confirmed_by_chain,' in api
     stats = read(LANDING_SRC / "src" / "liveStats.ts")
     assert "registry_records_confirmed_by_chain: Record<string, number> | null;" in stats
-    mechanism = " ".join(read(COMPONENTS / "Mechanism.tsx").split())
-    assert 'stats?.registry_records_confirmed_by_chain?.["4663"] ?? stats?.registry_records_confirmed,' in mechanism
-    assert 'value={count(stats?.registry_records_confirmed_by_chain?.["677"])}' in mechanism
+    proof = " ".join(read(COMPONENTS / "Proof.tsx").split())
+    assert 'stats?.registry_records_confirmed_by_chain?.["4663"] ?? stats?.registry_records_confirmed,' in proof
+    assert 'value={count(stats?.registry_records_confirmed_by_chain?.["677"])}' in proof
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
     for label in (
         "Verdict records confirmed in the Robinhood Chain registry, all time",
         "Verdict records confirmed in the BOT Chain registry, all time",
     ):
-        assert label in mechanism and label in bundle, label
+        assert label in proof and label in bundle, label
     # The dashboard's BOT Chain tile reads the same key, an absent count is unknown, and it links the 677 explorer.
     dashboard = read(DASHBOARD_SRC)
     assert "const BOT_CHAIN = 677;" in dashboard

@@ -12,7 +12,7 @@ export interface ScanReply {
   evidence_url?: string | null;
 }
 
-export const labels: Record<string, { verdict: Verdict; text: string }> = {
+const labels: Record<string, { verdict: Verdict; text: string }> = {
   SAFE: { verdict: "safe", text: "SAFE" },
   CAUTION: { verdict: "caution", text: "CAUTION" },
   HIGH_RISK: { verdict: "high", text: "HIGH RISK" },

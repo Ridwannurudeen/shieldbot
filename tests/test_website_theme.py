@@ -75,7 +75,7 @@ def test_dark_is_the_default_and_light_is_an_attribute():
 
 
 def test_every_page_restores_the_theme_from_one_blocking_script():
-    # Expected red on the Opus branch until the Codex branch (static pages, /try, dashboard) is merged.
+    # The same early script restores the theme on the landing, static pages, /try and dashboard.
     pages = [
         *LANDING_PAGES,
         *(ROOT / "landing" / page.name for page in LANDING_PAGES),
@@ -101,8 +101,7 @@ def test_every_page_restores_the_theme_from_one_blocking_script():
 
 
 def test_the_token_copies_are_identical():
-    # A parse, never a byte comparison: whitespace in one copy cannot fail it. The dashboard clause is expected red on
-    # the Opus branch until the Codex branch is merged.
+    # A parse, never a byte comparison: whitespace in one copy cannot fail it.
     landing = token_blocks(read(INDEX_CSS), triplets)
     tokens_css = token_blocks(read(LANDING_SRC / "public" / "css" / "tokens.css"), hexes)
     assert tokens_css == landing
@@ -110,14 +109,14 @@ def test_the_token_copies_are_identical():
 
 
 def test_every_page_has_a_theme_toggle():
-    # The landing's switch is one component, mounted once in the nav. Expected red on the Opus branch for the static
-    # pages, /try and the dashboard until the Codex branch is merged.
+    # The landing's switch is one component, mounted in both responsive nav layouts.
     toggle = read(COMPONENTS / "ThemeToggle.tsx")
     assert (
         toggle.count('role="switch"') == 1
         and toggle.count('aria-label="Light theme"') == 1
     )
-    assert read(COMPONENTS / "Navbar.tsx").count("<ThemeToggle />") == 1
+    # The desktop navigation and mobile menu each have their own responsive toggle.
+    assert read(COMPONENTS / "Navbar.tsx").count("<ThemeToggle />") == 2
     for page in [
         *STATIC_PAGES,
         LANDING_SRC / "public" / "try" / "index.html",
@@ -129,7 +128,6 @@ def test_every_page_has_a_theme_toggle():
 
 
 def test_unknown_is_never_amber():
-    # Expected red on the Opus branch for /try (its --amber) until the Codex branch is merged.
     files = [
         LANDING_SRC / "public" / "try" / "index.html",
         DASHBOARD_SRC,
@@ -140,3 +138,58 @@ def test_unknown_is_never_amber():
         text = read(path).lower()
         for forbidden in ("#f59e0b", "amber", "#fbbf24", "orange"):
             assert forbidden not in text, (path.name, forbidden)
+
+
+def test_landing_layout_fixes_remain_in_the_source():
+    css = read(INDEX_CSS)
+    navbar = read(COMPONENTS / "Navbar.tsx")
+    section = read(COMPONENTS / "Section.tsx")
+    hero = read(COMPONENTS / "HeroRecord.tsx")
+    proof = read(COMPONENTS / "Proof.tsx")
+    footer = read(COMPONENTS / "Footer.tsx")
+    registry = read(COMPONENTS / "Registry.tsx")
+    chains = read(COMPONENTS / "Chains.tsx")
+
+    dark_chevron = re.search(r"\.try-select\s*\{([^}]*)\}", css).group(1)
+    light_chevron = re.search(
+        r':root\[data-theme="light"\] \.try-select\s*\{([^}]*)\}', css
+    ).group(1)
+    assert "background-image: url(\"data:image/svg+xml" in dark_chevron
+    assert "background-repeat: no-repeat" in dark_chevron
+    assert "background-position: right 10px center" in dark_chevron
+    assert "background-image: url(\"data:image/svg+xml" in light_chevron
+    assert "bg-ground/90 backdrop-blur" in navbar and "overflow-hidden bg-ground" in navbar
+    assert '"pt-20 pb-12 md:pt-20 md:pb-11"' in section
+    assert 'level === "h1" ? "mt-8 md:mt-6" : "mt-10 md:mt-12"' in section
+    assert 'className="relative rounded-md border border-hairline bg-ground-alt p-4"' in hero
+    assert 'className="relative mx-auto aspect-[365/620] w-full max-w-[365px] overflow-hidden rounded-md bg-ground-alt"' in hero
+    assert 'className="hero-loading absolute inset-0 flex items-center justify-center"' in hero
+    assert 'className="hero-verdict absolute inset-0 overflow-hidden rounded-md"' in hero
+    assert "hero-loading-image" not in css and "hero-loading-backdrop" not in css
+    assert "hero-loading-backdrop" not in hero and "mix-blend-mode" not in css
+    assert '<dl>\n        <Figure' in proof and "<dt " in proof and "<dd " in proof
+    assert "sm:grid-cols-[auto_minmax(0,1fr)]" in proof
+    assert 'role="status"' in footer and '{message &&' not in footer
+    assert 'border-y border-hairline md:hidden"' in registry
+    assert 'className="hidden overflow-x-auto md:block"' in registry
+    assert 'className="lg:hidden"' in registry and 'className="hidden lg:block"' in registry
+    assert "min-w-[900px]" not in registry
+    assert "flex flex-nowrap" in registry and "whitespace-nowrap" in registry
+    assert 'aria-labelledby="registry-records-heading"' in registry
+    assert 'aria-labelledby="deployed-contracts-heading"' in registry
+    assert '<span className="whitespace-nowrap">/launchalerts</span>' in chains
+
+
+def test_proof_uses_real_figure_terms_and_one_source_link_for_stats():
+    proof = read(COMPONENTS / "Proof.tsx")
+    metrics = proof[proof.index("function Metrics"):proof.index("function simulationSteps")]
+    source_time = read(COMPONENTS / "SourceTime.tsx")
+
+    assert metrics.count("<Figure") == 4
+    assert metrics.count("<SourceTime") == 1
+    assert "<dt className=" in proof and "<dd className=" in proof
+    assert "Launch data unavailable" not in proof
+    assert "{launch && (steps ?" in proof
+    assert source_time.count('aria-label={`Source fetched at ${time} UTC`}') == 1
+    for component in ("Proof.tsx", "Registry.tsx", "Chains.tsx"):
+        assert 'import SourceTime from "./SourceTime";' in read(COMPONENTS / component)

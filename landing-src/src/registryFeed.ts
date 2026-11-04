@@ -1,15 +1,14 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
-// The why-unknown record, the worked example and the recent-records strip read one shared feed:
+// The worked example and registry section read one shared feed:
 // - GET /api/verdicts/recent?chain_id=4663&limit=3, the registry's confirmed records, newest first. Until that
-//   route is deployed it answers 404, and the strip falls back to the newest blocked launches below.
+//   route is deployed it answers 404, and the table falls back to the newest blocked launches below.
 // - GET /api/launches/4663?outcome=blocked&limit=3, the newest launches ShieldBot blocked. The worked example
 //   quotes the first one's sell simulation.
 // - GET /api/verdict/4663/{address}, one at a time and once per address (the API allows 10 requests in 5 seconds
-//   and 30 a minute per visitor): the record a section asks for by address (useRecord), the first launch's
-//   record, and in the fallback each other launch's record, only once the strip nears the viewport
-//   (loadRecentRecords).
-// The first two and the first launch's record are fetched when the page loads.
+//   and 30 a minute per visitor): the first launch's record, and in the fallback each other launch's record once
+//   the registry table nears the viewport (loadRecentRecords).
+// The recent list, launches and first launch's record are fetched when the page loads.
 // undefined while loading, null when a route did not answer in 10 seconds; nothing is filled in.
 // When the last component reading the feed unmounts, its requests are aborted and the feed is cleared, so a
 // later reader fetches it again.
@@ -48,19 +47,23 @@ export interface Launch {
 }
 
 export interface Feed {
-  // The records the strip lists, from the new route, or "fallback" when that route answered 404.
+  // The records the table lists, from the new route, or "fallback" when that route answered 404.
   recent: RegistryRecord[] | "fallback" | null | undefined;
   launches: Launch[] | null | undefined;
   // Per token address: undefined while loading, null when /api/verdict did not answer.
   records: Record<string, RegistryRecord | null | undefined>;
-  fetchedAt: Date | null;
+  recentFetchedAt: Date | null;
+  launchesFetchedAt: Date | null;
+  recordFetchedAt: Record<string, Date | null>;
 }
 
 const EMPTY: Feed = {
   recent: undefined,
   launches: undefined,
   records: {},
-  fetchedAt: null,
+  recentFetchedAt: null,
+  launchesFetchedAt: null,
+  recordFetchedAt: {},
 };
 
 // One page-load fetch of the feed and its requests that have not reached their deadline.
@@ -70,7 +73,7 @@ interface Run {
   asked: Set<string>;
   queue: string[];
   draining: boolean;
-  // In the fallback, the other launches whose records the strip lists; null until the launches answered.
+  // In the fallback, the other launches whose records the table lists; null until the launches answered.
   rest: string[] | null;
   restWanted: boolean;
 }
@@ -90,12 +93,15 @@ function setRecord(
   current: Run,
   address: string,
   record: RegistryRecord | null | undefined,
+  fetchedAt: Date | null,
 ) {
-  update(current, { records: { ...feed.records, [address]: record } });
+  update(current, {
+    records: { ...feed.records, [address]: record },
+    recordFetchedAt: { ...feed.recordFetchedAt, [address]: fetchedAt },
+  });
 }
 
-// A request that has not finished in 10 seconds is abandoned and its route reads as not answering, as in
-// WhyUnknown.tsx. Aborting after the reply has been read does nothing.
+// A request that has not finished in 10 seconds is abandoned and its route reads as not answering.
 function request(current: Run, path: string): Promise<Response> {
   const controller = new AbortController();
   const entry = {
@@ -127,7 +133,7 @@ async function loadRecent(current: Run): Promise<boolean> {
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const body = (await response.json()) as { records: RegistryRecord[] };
-    update(current, { recent: body.records, fetchedAt: new Date() });
+    update(current, { recent: body.records, recentFetchedAt: new Date() });
   } catch {
     update(current, { recent: null });
   }
@@ -140,7 +146,7 @@ async function loadLaunches(current: Run): Promise<Launch[]> {
       current,
       `/api/launches/4663?outcome=blocked&limit=${LIMIT}`,
     );
-    update(current, { launches: body.launches, fetchedAt: new Date() });
+    update(current, { launches: body.launches, launchesFetchedAt: new Date() });
     return body.launches;
   } catch {
     update(current, { launches: null });
@@ -149,15 +155,16 @@ async function loadLaunches(current: Run): Promise<Launch[]> {
 }
 
 async function loadRecord(current: Run, address: string) {
-  setRecord(current, address, undefined);
+  setRecord(current, address, undefined, null);
   try {
     setRecord(
       current,
       address,
       await getJson<RegistryRecord>(current, `/api/verdict/4663/${address}`),
+      new Date(),
     );
   } catch {
-    setRecord(current, address, null);
+    setRecord(current, address, null, null);
   }
 }
 
@@ -223,16 +230,7 @@ export function useFeed(): Feed {
   return useSyncExternalStore(subscribe, () => feed);
 }
 
-// One address's record through the feed: undefined while loading, null when the route did not answer.
-export function useRecord(address: string) {
-  const { records } = useFeed();
-  useEffect(() => {
-    if (run) want(run, [address]);
-  }, [address]);
-  return records[address];
-}
-
-// The strip's other records, asked for once it nears the viewport; in the fallback only.
+// The table's other records, asked for once it nears the viewport; in the fallback only.
 export function loadRecentRecords() {
   if (!run || run.restWanted) return;
   run.restWanted = true;
