@@ -128,6 +128,7 @@
 @media (prefers-reduced-motion: no-preference) {
   .hero-loading {
     display: block;
+    opacity: 0;
     animation: hero-loading 3300ms ease-out backwards;
   }
 

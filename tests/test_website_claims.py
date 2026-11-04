@@ -1428,6 +1428,14 @@ def test_every_animation_runs_only_when_motion_is_allowed():
     assert "PauseButton" not in read(COMPONENTS / "HeroRecord.tsx")
 
 
+def test_the_hero_loading_frame_rests_hidden_after_its_animation():
+    # The loading frame animates with backwards fill, so when the animation ends it falls back to its resting
+    # style. That style must be hidden, or the loading dialog stays on top of the verdict for good.
+    source = read(LANDING_SRC / "src" / "index.css")
+    built = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.css"))
+    assert ".hero-loading {\n    display: block;\n    opacity: 0;\n    animation: hero-loading" in source
+    assert ".hero-loading{display:block;opacity:0;animation:hero-loading" in built
+
 def test_the_footer_health_chip_states_its_value_without_a_legend():
     footer = read(COMPONENTS / "Footer.tsx")
     assert '"API unavailable"' in footer
