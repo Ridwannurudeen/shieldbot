@@ -98,9 +98,9 @@ export default function Chains() {
         <table className="w-full table-fixed text-left text-xs sm:text-sm">
           <colgroup>
             <col className="w-[23%] sm:w-[22%]" />
-            <col className="w-[27%] sm:w-[26%]" />
+            <col className="w-[26%] sm:w-[26%]" />
             <col className="w-[28%] sm:w-[28%]" />
-            <col className="w-[22%] sm:w-[24%]" />
+            <col className="w-[23%] sm:w-[24%]" />
           </colgroup>
           <caption className="caption-bottom pt-4 text-left text-xs leading-5 text-secondary">
             <MempoolCaption live={live} />

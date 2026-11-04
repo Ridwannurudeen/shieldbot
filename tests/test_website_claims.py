@@ -8,6 +8,7 @@ fail when a source changes without the site, or when the committed builds fall b
 import gzip
 import json
 import re
+from datetime import date
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -310,6 +311,10 @@ def test_approval_scans_are_described_as_erc20_only():
     # chain for the ERC-20 Approval event only: NFT approvals (ApprovalForAll) are never scanned.
     rescue = read(ROOT / "services" / "rescue_service.py")
     assert rescue.count("APPROVAL_FOR_ALL_TOPIC") == 1, "rescue_service.py now uses ApprovalForAll: update the site"
+    how = read(COMPONENTS / "HowItWorks.tsx")
+    statement = "Lists risky ERC-20 allowances. It never revokes them."
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert statement in how and statement in bundle
     for name, text in landing_texts().items():
         prose = " ".join(text.split())
         for match in re.finditer(r"\btoken approvals\b", prose):
@@ -733,7 +738,7 @@ def test_landing_uses_the_approved_section_map_and_shared_shell():
                    ("registry", "Registry.tsx"), ("coverage", "Chains.tsx"), ("faq", "FAQ.tsx"),
                ))
     section = read(COMPONENTS / "Section.tsx")
-    assert 'className={level === "h1" ? "pt-20 pb-16 md:py-24" : "py-16 md:py-24"}' in section
+    assert '"pt-20 pb-12 md:pt-20 md:pb-11"' in section
     assert "eyebrow" not in section.lower() and "subtitle" not in section.lower()
     assert "Contract scans run on all" not in read(COMPONENTS / "Chains.tsx")
     assert "The Chrome Web Store serves extension 3.4.0" not in read(COMPONENTS / "Chains.tsx")
@@ -910,7 +915,6 @@ def test_hero_demo_shows_documented_examples_and_makes_no_request():
     story = read(COMPONENTS / "HeroRecord.tsx")
     assert story.count('src="/hero-overlay.webp"') == 1
     assert "Recorded reply," in story
-    assert "hero-overlay-unknown.webp" not in story and "hero-overlay-safe.webp" not in story
     for name in ("HeroRecord.tsx", "VerdictRecord.tsx", "CheckRow.tsx"):
         for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
             assert forbidden not in read(COMPONENTS / name), (name, forbidden)
@@ -949,6 +953,15 @@ def test_guard_example_matches_the_deployment_and_submission_records():
         "Permission is not a safety guarantee: the guard accepts MEDIUM risk. "
         "Permission lasts only while a subject is actively watched and republished."
     )
+    assert 'href={`https://robin.etherscan.io/address/${VIRTUAL}`}' in registry
+    virtual_constant = re.search(
+        rf'([A-Za-z_$][\w$]*)="{re.escape(address)}"', bundle, re.IGNORECASE
+    )
+    assert virtual_constant
+    assert (
+        f'href:`https://robin.etherscan.io/address/${{{virtual_constant.group(1)}}}`'
+        in bundle
+    )
     assert address.casefold() in registry.casefold()
     assert address.casefold() in bundle.casefold()
     for text in (
@@ -968,6 +981,7 @@ def test_registry_records_link_each_onchain_transaction():
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
     for text in ("https://robin.etherscan.io/tx/", "record.tx_hash", "tx {short(record.tx_hash)}"):
         assert text in registry, text
+    assert 'aria-label={`Transaction ${record.tx_hash}`}' in registry
     assert "https://robin.etherscan.io/tx/" in bundle
     assert "tx " in bundle
 
@@ -1131,8 +1145,6 @@ def test_try_it_uses_a_verdict_record_without_repeated_hero_captures():
     assert 'import VerdictRecord from "./VerdictRecord";' in try_it
     assert "<VerdictRecord" in try_it
     assert "evidenceHash={reply.evidence_hash}" in try_it
-    assert "hero-overlay-safe.webp" not in try_it
-    assert "hero-overlay-unknown.webp" not in try_it
     assert "reasons={reply.coverage_reasons}" in try_it
     assert "reply.evidence_url" in try_it
     for kind in ("idle", "invalid", "loading", "result", "bad-request", "rate-limited", "unavailable"):
@@ -1359,8 +1371,6 @@ def test_the_hero_says_lines_are_the_recorded_replies():
     assert reply["classification"] == "BLOCK_RECOMMENDED" and reply["risk_score"] == 100
     assert f"The verdict badge reads {messages['classBlock']}" in hero
     assert f"Safety: {100 - reply['risk_score']}/100" in hero
-    assert 'src="/hero-overlay-unknown.webp"' not in hero
-    assert 'src="/hero-overlay-safe.webp"' not in hero
 
 
 def test_the_hero_commit_card_shows_a_live_record_never_the_recorded_request():
@@ -1450,27 +1460,62 @@ def test_the_site_shows_the_bot_chain_registry():
     bot_rows = {}
     for name in contract_names:
         row = re.search(
-            rf"^\| \x60{name}\x60 \| BOT Chain \(677\) \| \[\x60(0x[0-9a-fA-F]{{40}})\x60\]\((https://scan\.botchain\.ai/address/0x[0-9a-fA-F]{{40}})\) \| (2026-10-\d{{2}}) ",
+            rf"^\| \x60{name}\x60 \| BOT Chain \(677\) \| \[\x60(0x[0-9a-fA-F]{{40}})\x60\]\((https://scan\.botchain\.ai/address/0x[0-9a-fA-F]{{40}})\) \| (\d{{4}}-\d{{2}}-\d{{2}}) ",
             deployments,
             re.MULTILINE,
         )
         assert row, f"docs/DEPLOYMENTS.md should record the BOT Chain {name}"
         address, url, deployed = row.groups()
         assert url.endswith(address)
-        year, month, day = (int(part) for part in deployed.split("-"))
-        bot_rows[name] = (address, url, f"{day} {months[month - 1]} {year}")
+        deployed_date = date.fromisoformat(deployed)
+        bot_rows[name] = (
+            address,
+            url,
+            f"{deployed_date.day} {months[deployed_date.month - 1]} {deployed_date.year}",
+        )
 
     registry = read(COMPONENTS / "Registry.tsx")
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    contract_source = registry.split("const contracts: Contract[] = [", 1)[1].split("];", 1)[0]
+    contract_rows = re.findall(
+        r'\{\s*name: "([^"]+)"(.*?)\n  \},', contract_source, re.S
+    )
+    verification_note = "Source verified on the explorer. No Sourcify on 677."
     for name, (address, url, deployed) in bot_rows.items():
-        assert f'address: "{address}"' in registry
-        assert f'explorer: "{url}"' in registry
-        assert f'deployed: "{deployed}"' in registry
-        assert name in registry and address in bundle and url in bundle, name
+        row = next(
+            (
+                fields
+                for row_name, fields in contract_rows
+                if row_name == name and 'chain: "BOT Chain"' in fields
+            ),
+            None,
+        )
+        assert row, f"Registry.tsx should have the BOT Chain {name} row"
+        for field in (
+            f'address: "{address}"',
+            'chain: "BOT Chain"',
+            "chainId: 677",
+            f'deployed: "{deployed}"',
+            f'explorer: "{url}"',
+            verification_note,
+        ):
+            assert field in row, (name, field)
+        assert (
+            name in bundle
+            and address in bundle
+            and url in bundle
+            and deployed in bundle
+            and verification_note in bundle
+        ), name
     assert 'chain: "BOT Chain"' in registry and 'chainId: 677' in registry
     assert registry.count("sourcify: null") == 3
     assert "Source verified on the explorer" in registry and "Source verified on the explorer" in bundle
     assert "No Sourcify on 677" in registry and "No Sourcify on 677" in bundle
+    contract_links = registry[
+        registry.index("function ContractLinks"):registry.index("export default function Registry")
+    ]
+    assert "Source verified on the explorer" not in contract_links
+    assert "No Sourcify on 677" not in contract_links
     assert "Not supported" not in registry
     assert "A guard and a guarded transfer that read it were deployed on BOT Chain on 29 October 2026." in " ".join(
         read(COMPONENTS / "FAQ.tsx").split()

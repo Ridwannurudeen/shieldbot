@@ -159,13 +159,21 @@ def test_landing_layout_fixes_remain_in_the_source():
     assert "background-position: right 10px center" in dark_chevron
     assert "background-image: url(\"data:image/svg+xml" in light_chevron
     assert "bg-ground/90 backdrop-blur" in navbar and "overflow-hidden bg-ground" in navbar
-    assert 'level === "h1" ? "pt-20 pb-16 md:py-24"' in section
+    assert '"pt-20 pb-12 md:pt-20 md:pb-11"' in section
+    assert 'level === "h1" ? "mt-8 md:mt-6" : "mt-10 md:mt-12"' in section
     assert 'className="relative rounded-md border border-hairline bg-ground-alt p-4"' in hero
-    assert 'className="hero-verdict relative overflow-hidden rounded-md bg-paper"' in hero
+    assert 'className="relative h-[620px] overflow-hidden rounded-md bg-ground-alt"' in hero
+    assert 'className="hero-loading absolute inset-0 flex items-center justify-center"' in hero
+    assert 'className="hero-verdict absolute inset-0 overflow-hidden rounded-md"' in hero
+    assert "hero-loading-image" in css
+    assert "hero-loading-backdrop" in css
     assert '<dl>\n        <Figure' in proof and "<dt " in proof and "<dd " in proof
     assert "sm:grid-cols-[auto_minmax(0,1fr)]" in proof
     assert 'role="status"' in footer and '{message &&' not in footer
-    assert 'className="sm:hidden"' in registry and 'className="hidden overflow-x-auto sm:block"' in registry
+    assert 'sm:hidden"' in registry
+    assert 'className="hidden overflow-x-auto sm:block"' in registry
+    assert 'className="lg:hidden"' in registry and 'className="hidden lg:block"' in registry
+    assert "min-w-[900px]" not in registry
     assert "flex flex-nowrap" in registry and "whitespace-nowrap" in registry
     assert 'aria-labelledby="registry-records-heading"' in registry
     assert 'aria-labelledby="deployed-contracts-heading"' in registry

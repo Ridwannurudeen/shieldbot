@@ -60,6 +60,7 @@ const contracts: Contract[] = [
     chain: "BOT Chain",
     chainId: 677,
     deployed: "26 October 2026",
+    note: "Source verified on the explorer. No Sourcify on 677.",
     explorer: "https://scan.botchain.ai/address/0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138",
     sourcify: null,
   },
@@ -69,6 +70,7 @@ const contracts: Contract[] = [
     chain: "BOT Chain",
     chainId: 677,
     deployed: "29 October 2026",
+    note: "Source verified on the explorer. No Sourcify on 677.",
     explorer: "https://scan.botchain.ai/address/0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e",
     sourcify: null,
   },
@@ -78,6 +80,7 @@ const contracts: Contract[] = [
     chain: "BOT Chain",
     chainId: 677,
     deployed: "29 October 2026",
+    note: "Source verified on the explorer. No Sourcify on 677.",
     explorer: "https://scan.botchain.ai/address/0x336254bA85406D9af39357101b688E2B757751b3",
     sourcify: null,
   },
@@ -189,7 +192,64 @@ function RecentRecords() {
           No record has been published yet
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <>
+          <ul className="divide-y divide-hairline border-y border-hairline sm:hidden">
+            {rows.map(({ subject, record }) => {
+              const verdict = record
+                ? registryChip(record.verdict, record.verdict_code)
+                : null;
+              return (
+                <li key={subject} className="py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <a
+                      href={`${API}/api/verdict/4663/${subject}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="min-w-0 break-all font-mono text-sm text-ink underline decoration-hairline-strong underline-offset-4"
+                      aria-label={`Registry record for ${subject}`}
+                    >
+                      {short(subject)}
+                    </a>
+                    {verdict ? (
+                      <Badge verdict={verdict.verdict}>{verdict.label}</Badge>
+                    ) : (
+                      <span>{record === undefined ? "Loading" : "Unavailable"}</span>
+                    )}
+                  </div>
+                  <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs leading-5">
+                    <dt className="text-secondary">Status</dt>
+                    <dd className="min-w-0 break-words text-ink">
+                      {record?.onchain_status ?? "Unavailable"}
+                    </dd>
+                    <dt className="text-secondary">Block</dt>
+                    <dd className="min-w-0 break-all font-mono text-ink">
+                      {record?.observed_block ?? "Unavailable"}
+                    </dd>
+                    <dt className="text-secondary">Evidence</dt>
+                    <dd className="min-w-0 break-all font-mono text-ink">
+                      {record?.evidence_hash ? short(record.evidence_hash) : "Unavailable"}
+                    </dd>
+                  </dl>
+                  {record?.tx_hash ? (
+                    <a
+                      href={`https://robin.etherscan.io/tx/${record.tx_hash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex min-h-11 items-center font-mono text-xs text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
+                      aria-label={`Transaction ${record.tx_hash}`}
+                    >
+                      tx {short(record.tx_hash)}
+                    </a>
+                  ) : (
+                    <span className="mt-2 inline-flex min-h-11 items-center font-mono text-xs text-secondary">
+                      tx unavailable
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <div className="hidden overflow-x-auto sm:block">
           <table
             aria-labelledby="registry-records-heading"
             className="w-full table-fixed text-left text-xs sm:text-sm"
@@ -265,7 +325,8 @@ function RecentRecords() {
               })}
             </tbody>
           </table>
-        </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -277,16 +338,16 @@ function ContractLinks({
   contract: Contract;
 }) {
   return (
-    <div className="flex flex-nowrap items-center gap-3 text-xs">
+    <div className="flex flex-nowrap items-center gap-2 text-xs">
       <a
         href={contract.explorer}
         target="_blank"
         rel="noopener noreferrer"
         className="inline-flex min-h-11 shrink-0 items-center whitespace-nowrap text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
       >
-        {contract.chainId === 677 ? "Source verified on the explorer" : "Explorer"}
+        Explorer
       </a>
-      {contract.sourcify ? (
+      {contract.sourcify && (
         <a
           href={contract.sourcify}
           target="_blank"
@@ -295,10 +356,6 @@ function ContractLinks({
         >
           Sourcify
         </a>
-      ) : (
-        <span className="shrink-0 whitespace-nowrap text-secondary">
-          No Sourcify on 677
-        </span>
       )}
     </div>
   );
@@ -317,41 +374,41 @@ export default function Registry() {
           >
             Deployed contracts
           </h3>
-          <div className="sm:hidden">
+          <div className="lg:hidden">
             <ul className="divide-y divide-hairline border-y border-hairline">
               {contracts.map((contract) => (
                 <li
                   key={`${contract.chainId}-${contract.name}`}
-                  className="space-y-1 py-4"
+                  className="space-y-2 py-4"
                 >
                   <h4 className="text-sm font-medium text-ink">{contract.name}</h4>
+                  <p className="break-all font-mono text-xs text-ink">
+                    {contract.address}
+                  </p>
+                  <p className="text-xs text-secondary">
+                    {contract.chain} ({contract.chainId}) · {contract.deployed}
+                  </p>
+                  <ContractLinks contract={contract} />
                   {contract.note && (
                     <p className="text-xs leading-5 text-secondary">
                       {contract.note}
                     </p>
                   )}
-                  <p className="break-all font-mono text-xs text-ink">
-                    {contract.address}
-                  </p>
-                  <p className="whitespace-nowrap text-xs text-secondary">
-                    {contract.chain} ({contract.chainId}) · {contract.deployed}
-                  </p>
-                  <ContractLinks contract={contract} />
                 </li>
               ))}
             </ul>
           </div>
-          <div className="hidden overflow-x-auto sm:block">
+          <div className="hidden lg:block">
             <table
               aria-labelledby="deployed-contracts-heading"
-              className="w-full min-w-[900px] table-fixed text-left text-xs sm:text-sm"
+              className="w-full table-fixed text-left text-xs sm:text-sm"
             >
               <colgroup>
-                <col className="w-[22%]" />
-                <col className="w-[29%]" />
+                <col className="w-[27%]" />
+                <col className="w-[25%]" />
                 <col className="w-[16%]" />
-                <col className="w-[13%]" />
-                <col className="w-[20%]" />
+                <col className="w-[16%]" />
+                <col className="w-[16%]" />
               </colgroup>
               <thead>
                 <tr className="border-y border-hairline text-[11px] uppercase tracking-wide text-secondary">
@@ -369,7 +426,7 @@ export default function Registry() {
                     className="border-b border-hairline align-top"
                   >
                     <th scope="row" className="py-3 pr-2 text-left font-medium text-ink">
-                      <span className="block whitespace-nowrap">{contract.name}</span>
+                      <span className="block">{contract.name}</span>
                       {contract.note && (
                         <span className="mt-1 block whitespace-normal text-xs font-normal leading-5 text-secondary">
                           {contract.note}
@@ -379,13 +436,13 @@ export default function Registry() {
                     <td className="break-all px-1 py-3 font-mono text-xs text-ink sm:px-2">
                       {contract.address}
                     </td>
-                    <td className="whitespace-nowrap px-1 py-3 text-ink sm:px-2">
+                    <td className="px-1 py-3 text-ink sm:px-2">
                       {contract.chain}
                       <span className="mt-1 block font-mono text-xs text-secondary">
                         {contract.chainId}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-1 py-3 text-secondary sm:px-2">
+                    <td className="px-1 py-3 text-secondary sm:px-2">
                       {contract.deployed}
                     </td>
                     <td className="py-3 pl-1 sm:pl-2">

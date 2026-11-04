@@ -160,6 +160,29 @@
   }
 }
 
+.hero-loading-image {
+  mix-blend-mode: multiply;
+}
+
+.hero-loading-backdrop {
+  background-image: url("/hero-overlay-loading.webp");
+  background-position: center;
+  background-size: cover;
+  filter: blur(20px);
+  mix-blend-mode: multiply;
+  opacity: 0.45;
+}
+
+:root:not([data-theme="light"]) .hero-loading-image {
+  filter: invert(1);
+  mix-blend-mode: screen;
+}
+
+:root:not([data-theme="light"]) .hero-loading-backdrop {
+  filter: invert(1) blur(20px);
+  mix-blend-mode: screen;
+}
+
 @layer components {
   /* The chevron is the secondary text colour of each theme; a data URI cannot inherit currentColor, so one per theme. */
   .try-select {
