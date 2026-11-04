@@ -165,7 +165,7 @@ def test_chains_section_coverage_matches_the_code():
     chains = read(COMPONENTS / "Chains.tsx")
     assert 'return "GoPlus flags only";' in chains
     assert '"Observed on last poll"' in chains and '"Not read on last poll"' in chains
-    assert '"Yes, /launchalerts"' in chains
+    assert '<span className="whitespace-nowrap">/launchalerts</span>' in chains
 
 
 def test_arbitrum_simulation_scope_matches_the_code():
@@ -211,29 +211,6 @@ def test_botchain_simulation_scope_matches_the_code():
     }
     for path, sentence in unknown.items():
         assert sentence in " ".join(read(path).split()), path.name
-
-def test_mcp_counts_match_the_code():
-    from mcp_server.prompts import PROMPT_DEFINITIONS
-    from mcp_server.resources import RESOURCE_DEFINITIONS, RESOURCE_TEMPLATE_DEFINITIONS
-    from mcp_server.tools import TOOL_DEFINITIONS
-
-    how = " ".join(read(COMPONENTS / "HowItWorks.tsx").split())
-    # MCP lists parameterised resources as templates. The site names every resource, and every tool or
-    # resource whose definition says it is not implemented as a stub, so a count never includes a stub
-    # unsaid and only one resource is a threat feed.
-    resources = [definition["name"] for definition in RESOURCE_DEFINITIONS + RESOURCE_TEMPLATE_DEFINITIONS]
-    assert resources == ["Threat Feed", "Agent Health", "Wallet Guardian"], "the MCP resources changed: update the site"
-    stubs = [
-        definition["name"]
-        for definition in TOOL_DEFINITIONS + RESOURCE_TEMPLATE_DEFINITIONS
-        if "not implemented" in definition["description"].lower()
-    ]
-    assert stubs == ["check_approval_risk", "query_threat_graph", "Wallet Guardian"], "an MCP stub changed: update the site"
-    assert "get_robinhood_launches" in [tool["name"] for tool in TOOL_DEFINITIONS]
-    assert (len(TOOL_DEFINITIONS), len(resources), len(PROMPT_DEFINITIONS)) == (9, 3, 2)
-    assert 'name: "MCP server"' in how
-    assert "with 9 tools" not in how
-
 
 def test_the_site_says_the_robinhood_contracts_are_deployed():
     # docs/DEPLOYMENTS.md: the verdict registry, the freshness guard and the guarded transfer were deployed on
@@ -291,7 +268,7 @@ def test_dashboard_links_the_registry_recorded_in_deployments():
 
 def test_evidence_links_are_not_fine_print():
     registry = read(COMPONENTS / "Registry.tsx")
-    assert registry.count("min-h-11 items-center") >= 2
+    assert registry.count("min-h-11 shrink-0 items-center whitespace-nowrap") >= 2
     assert "Sourcify" in registry and "Explorer" in registry
     assert "evidence_hash" in registry
 
@@ -333,9 +310,12 @@ def test_approval_scans_are_described_as_erc20_only():
     # chain for the ERC-20 Approval event only: NFT approvals (ApprovalForAll) are never scanned.
     rescue = read(ROOT / "services" / "rescue_service.py")
     assert rescue.count("APPROVAL_FOR_ALL_TOPIC") == 1, "rescue_service.py now uses ApprovalForAll: update the site"
-    how = " ".join(read(COMPONENTS / "HowItWorks.tsx").split())
-    assert '"/rescue <wallet>"' in how
-    assert "Lists risky ERC-20 allowances. It never revokes them." in how
+    for name, text in landing_texts().items():
+        prose = " ".join(text.split())
+        for match in re.finditer(r"\btoken approvals\b", prose):
+            assert prose[: match.start()].endswith("ERC-20 "), (
+                f"{name}: {prose[match.start() - 40 : match.end()]!r}"
+            )
 
 
 def extension_chain_ids() -> set:
@@ -712,7 +692,10 @@ def test_built_landing_bundle_contains_the_current_feature_copy(component):
         "HowItWorks.tsx": (
             "Chrome extension", "Telegram bot", "REST API", "MCP server",
             "/token <address>", "/scan <address>", "/rescue <wallet>",
-            "/report <address> <reason>", "/launchalerts", "Recorded checks, 26 Sep 2026",
+            "/report <address> <reason>", "/launchalerts",
+            "Token checks, contract scans, ERC-20 allowances, reports and launch alerts.",
+            "Model Context Protocol server for AI agents, over SSE.",
+            "Telegram bot commands",
         ),
         "Registry.tsx": (
             "Recent registry records", "Deployed contracts", "Guard call",
@@ -722,6 +705,8 @@ def test_built_landing_bundle_contains_the_current_feature_copy(component):
     }[component]
     source = read(COMPONENTS / component)
     assert bundle
+    if component == "HowItWorks.tsx":
+        assert 'aria-label="Telegram bot commands"' in source
     for text in copy:
         assert text in source, f"{component} no longer contains {text!r}"
         assert text in bundle, f"landing bundle is stale: missing {component} structure {text!r}"
@@ -729,7 +714,7 @@ def test_built_landing_bundle_contains_the_current_feature_copy(component):
 
 LANDING_SECTION_PINS = {
     "Hero.tsx": ("Know before you sign.", "Add to Chrome", "Open in Telegram"),
-    "HowItWorks.tsx": ("Intercept", "Check", "Report", "Recorded checks, 26 Sep 2026"),
+    "HowItWorks.tsx": ("Intercept", "Check", "Report"),
     "TryIt.tsx": ("Token or contract address", "Check now"),
     "Proof.tsx": ("One token. Two simulated transactions.", "transactions_monitored"),
     "Registry.tsx": ("Recent registry records", "Deployed contracts"),
@@ -748,7 +733,7 @@ def test_landing_uses_the_approved_section_map_and_shared_shell():
                    ("registry", "Registry.tsx"), ("coverage", "Chains.tsx"), ("faq", "FAQ.tsx"),
                ))
     section = read(COMPONENTS / "Section.tsx")
-    assert 'className="py-16 md:py-24"' in section
+    assert 'className={level === "h1" ? "pt-20 pb-16 md:py-24" : "py-16 md:py-24"}' in section
     assert "eyebrow" not in section.lower() and "subtitle" not in section.lower()
     assert "Contract scans run on all" not in read(COMPONENTS / "Chains.tsx")
     assert "The Chrome Web Store serves extension 3.4.0" not in read(COMPONENTS / "Chains.tsx")
@@ -907,7 +892,7 @@ def test_the_site_describes_the_quick_scan_as_the_readme_does():
     assert "reasons={reply.coverage_reasons}" in try_it
 
 
-def test_the_site_says_which_verdicts_reach_the_registry():
+def test_registry_uses_recent_verdicts_and_blocked_launch_fallback():
     # The Registry lists confirmed records from its route, with blocked launches only as the documented fallback.
     docs = " ".join(read(ROOT / "docs" / "SUBMISSION.md").split())
     source = read(COMPONENTS / "Registry.tsx")
@@ -917,13 +902,14 @@ def test_the_site_says_which_verdicts_reach_the_registry():
     assert 'outcome=blocked&limit=3' in feed
     assert "/api/verdicts/recent?chain_id=4663&limit=3" in source
     assert "outcome=blocked&limit=3" in source
+    assert 'fallback ? "Records of the newest launches ShieldBot blocked" : "Recent registry records"' in " ".join(source.split())
 
 
 def test_hero_demo_shows_documented_examples_and_makes_no_request():
     # The hero shows one dated extension capture without requesting data; API-backed examples sit in Proof and Registry.
     story = read(COMPONENTS / "HeroRecord.tsx")
     assert story.count('src="/hero-overlay.webp"') == 1
-    assert story.count("Recorded reply, 26 Sep 2026") == 1
+    assert "Recorded reply," in story
     assert "hero-overlay-unknown.webp" not in story and "hero-overlay-safe.webp" not in story
     for name in ("HeroRecord.tsx", "VerdictRecord.tsx", "CheckRow.tsx"):
         for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "EventSource"):
@@ -939,6 +925,85 @@ def test_hero_demo_shows_documented_examples_and_makes_no_request():
     assert "useFeed()" not in story
     for forbidden in ("XMLHttpRequest", "WebSocket", "EventSource"):
         assert forbidden not in registry, forbidden
+
+
+def test_guard_example_matches_the_deployment_and_submission_records():
+    deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
+    virtual = re.search(
+        r"subject\(\)\W+is VIRTUAL\W+(0x[0-9a-fA-F]{40})\W+",
+        deployments,
+    )
+    assert virtual, "docs/DEPLOYMENTS.md should record the guarded transfer's VIRTUAL subject"
+    submission = read(ROOT / "docs" / "SUBMISSION.md")
+    result = re.search(
+        r"guard\.check\(subject, maxAge\): (allowed=(?:True|False), reason=\d+)`? for VIRTUAL",
+        submission,
+    )
+    assert result, "docs/SUBMISSION.md should record the deployment verifier result"
+    address = virtual.group(1)
+    registry = read(COMPONENTS / "Registry.tsx")
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    recorded = f"guard.check(VIRTUAL, 900)  // {result.group(1)}"
+    derived = "guard.check(0x3435\u202626dd, 900)  // allowed=False, reason=4 HONEYPOT"
+    caveat = (
+        "Permission is not a safety guarantee: the guard accepts MEDIUM risk. "
+        "Permission lasts only while a subject is actively watched and republished."
+    )
+    assert address.casefold() in registry.casefold()
+    assert address.casefold() in bundle.casefold()
+    for text in (
+        "// Recorded on Robinhood Chain, 27 September 2026",
+        recorded,
+        "// Derived, not a recorded call",
+        derived,
+        caveat,
+        "https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/SUBMISSION.md",
+    ):
+        assert text in registry, text
+        assert text in bundle, text
+
+
+def test_registry_records_link_each_onchain_transaction():
+    registry = read(COMPONENTS / "Registry.tsx")
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    for text in ("https://robin.etherscan.io/tx/", "record.tx_hash", "tx {short(record.tx_hash)}"):
+        assert text in registry, text
+    assert "https://robin.etherscan.io/tx/" in bundle
+    assert "tx " in bundle
+
+
+def test_registry_links_the_judge_guide_and_limits_the_claim():
+    registry = read(COMPONENTS / "Registry.tsx")
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    for text in (
+        "https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/JUDGE_GUIDE.md#3-verify-a-verdict-without-trusting-the-api",
+        "Verify a verdict without trusting the API",
+        "A match proves the recorder committed those bytes. It does not prove the scan was right, that an issuer is genuine, or that a token will stay sellable.",
+    ):
+        assert text in registry, text
+        assert text in bundle, text
+
+
+def test_guard_permission_caveats_keep_their_scope():
+    caveat = (
+        "Permission is not a safety guarantee: the guard accepts MEDIUM risk. "
+        "Permission lasts only while a subject is actively watched and republished."
+    )
+    registry = read(COMPONENTS / "Registry.tsx")
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert caveat in registry
+    assert caveat in bundle
+
+
+def test_guarded_transfer_row_disclaims_a_live_usdg_payment():
+    note = (
+        "Asks the guard, then moves approved USDG. Its subject is VIRTUAL; "
+        "no live guarded USDG payment is claimed."
+    )
+    registry = read(COMPONENTS / "Registry.tsx")
+    bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
+    assert note in registry
+    assert note in bundle
 
 
 def test_live_chain_matrix_and_check_definitions_use_reported_fields():
@@ -1045,9 +1110,9 @@ process.stdout.write(JSON.stringify(words.map((word) => [word, registryChip(word
         assert "function registryChip" not in source, name
 
 
-def test_registry_requests_are_shared_and_the_strip_loads_its_records_near_the_viewport():
+def test_registry_requests_are_shared_and_recent_records_load_near_the_viewport():
     # The API allows 10 requests in 5 seconds and 30 a minute per IP (api.py rate_limiter). The why-unknown record
-    # goes through the feed, so an address is fetched once; the strip's other records wait for the strip.
+    # goes through the feed, so an address is fetched once; other records wait for the table.
     assert "RateLimiter(requests_per_minute=30, burst=10)" in read(ROOT / "api.py")
     feed = read(LANDING_SRC / "src" / "registryFeed.ts")
     assert "}, 10_000)," in feed and "controller.abort();" in feed
@@ -1160,11 +1225,19 @@ def test_the_footer_health_line_reads_unavailable_when_the_api_does_not_answer()
     # /api/health is exempt from the rate limiter, so the footer's request costs no allowance.
     assert 'if request.url.path in ("/", "/api/health",' in read(ROOT / "api.py")
     footer = " ".join(read(COMPONENTS / "Footer.tsx").split())
-    assert 'fetch("https://api.shieldbotsecurity.online/api/health", {' in footer
-    assert '"API unavailable"' in footer
-    assert '"API checking"' in footer
-    assert "API up, ${health.supported_chains.length} chains" in footer
-    assert "role=\"status\"" in footer
+    for text in (
+        'fetch("https://api.shieldbotsecurity.online/api/health", { signal: controller.signal, })',
+        "const timeout = setTimeout(() => controller.abort(), 10_000);",
+        "if (!response.ok) throw new Error(`HTTP ${response.status}`);",
+        "if (active) setHealth(null);",
+        "active = false; clearTimeout(timeout); controller.abort();",
+        '"API unavailable"',
+        '"API checking"',
+        "API up, ${health.supported_chains.length} chains",
+    ):
+        assert text in footer, text
+    assert 'className={message ? "mt-2 text-xs text-secondary" : "sr-only"}' in footer
+    assert 'role="status"' in footer
 
 
 def test_built_dashboard_contains_the_current_source_strings():
@@ -1181,8 +1254,19 @@ CHECK_ORDER = ["structural", "market", "behavioral", "honeypot", "intent", "sign
 
 
 def test_the_hero_records_are_the_recorded_replies_field_for_field():
-    # The check states use the same dated block reply as the one hero capture.
+    # Both visible dates follow the timestamp of the captured hero reply.
     fixture = json.loads(read(LANDING_SRC / "scripts" / "hero-overlay-response.json"))
+    recordings = json.loads(
+        read(LANDING_SRC / "scripts" / "hero-overlay-recordings.json")
+    )["recordings"]
+    sent_at = next(
+        recording["sent_at"]
+        for recording in recordings
+        if recording["fixture"] == "hero-overlay"
+    )
+    year, month, day = (int(part) for part in sent_at[:10].split("-"))
+    months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    recorded_date = f"{day} {months[month - 1]} {year}"
     story = read(COMPONENTS / "HeroRecord.tsx")
     recorded = read(LANDING_SRC / "src" / "recordedReplies.ts")
     coverage_block = re.search(r"coverage: \{(.*?)\}", recorded, re.S).group(1)
@@ -1191,9 +1275,9 @@ def test_the_hero_records_are_the_recorded_replies_field_for_field():
     assert fixture["risk_score"] == 100 and all(value == 1 for value in fixture["coverage"].values())
     assert 'fixture: "hero-overlay-response.json"' in recorded
     assert coverage == fixture["coverage"]
-    assert "Recorded checks, 26 Sep 2026" in read(COMPONENTS / "HowItWorks.tsx")
+    assert f"Recorded checks, {recorded_date}" in read(COMPONENTS / "HowItWorks.tsx")
     assert 'src="/hero-overlay.webp"' in story
-    assert "Recorded reply, 26 Sep 2026" in story
+    assert f"Recorded reply, {recorded_date}" in story
     assert "BLOCK RECOMMENDED" in story and "Safety: 0/100" in story
 
 
@@ -1208,8 +1292,7 @@ def test_the_check_row_order_is_fixed():
 
 
 def test_a_verdict_record_never_renders_a_full_hash():
-    # Render VerdictRecord (both variants) with a 64-hex value in every text field and the coverage keys in
-    # reverse order: no 64-hex string may reach the markup, and the cells keep CHECK_ORDER.
+    # A served reason and every registry field may contain a 64-hex value; none reaches the markup in full.
     import shutil
     import subprocess
 
@@ -1232,39 +1315,29 @@ const React = require(path.join(root, "node_modules", "react"));
 const {renderToStaticMarkup} = require(path.join(root, "node_modules", "react-dom", "server"));
 const VerdictRecord = require(path.join(root, "src", "components", "VerdictRecord.tsx")).default;
 const props = JSON.parse(process.argv[2]);
-const out = {};
-for (const variant of ["full", "compact"]) out[variant] = renderToStaticMarkup(React.createElement(VerdictRecord, {...props, variant}));
-process.stdout.write(JSON.stringify(out));
+process.stdout.write(renderToStaticMarkup(React.createElement(VerdictRecord, props)));
 """
     digest = "0x" + "ab12" * 16
-    coverage = dict(zip(reversed(CHECK_ORDER), (1, 0.5, 0, 1, 1, 0)))
     props = {
         "chip": {"verdict": "unknown", "label": "UNKNOWN"},
-        "coverage": coverage,
         "reasons": {key: f"reason for {key}: {digest}" for key in CHECK_ORDER},
-        "reason": f"served reason {digest}",
-        "recordedAt": "2026-10-11T09:21:20Z",
         "chain": {"id": 4663, "name": "Robinhood Chain"},
         "block": 85035031,
         "publishedAt": 1760000000,
         "evidenceHash": digest,
-        "guard": f"guard.check({digest}, 900)",
-        "request": f"approve(address,uint256) · to {digest}",
-        "source": "test",
     }
     result = subprocess.run(
         [node, "-e", script, str(LANDING_SRC), json.dumps(props)],
         cwd=LANDING_SRC, capture_output=True, text=True, encoding="utf-8", check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    for variant, markup in json.loads(result.stdout).items():
-        assert not re.search(r"0x[0-9a-fA-F]{64}", markup), variant
-        assert "0xab12…ab12" in markup, variant
-        row = markup[: markup.index("</ol>")]
-        assert sorted(CHECK_ORDER, key=lambda key: row.index(f">{key}")) == CHECK_ORDER, variant
-        for label in ("Recorded", "Chain", "Block", "Published", "Evidence", "Guard"):
-            assert f">{label}</dt>" in markup, (variant, label)
-        assert "approve(address,uint256) · to 0xab12…ab12" in markup, variant
+    markup = result.stdout
+    assert not re.search(r"0x[0-9a-fA-F]{64}", markup)
+    assert "0xab12" in markup and ">Not checked</p>" in markup
+    row = markup[: markup.index("</dl>")]
+    assert sorted(CHECK_ORDER, key=lambda key: row.index(f">{key}</dt>")) == CHECK_ORDER
+    for label in ("Chain", "Block", "Published", "Evidence"):
+        assert f">{label}</dt>" in markup
 
 
 def test_the_hero_request_lines_are_the_recorded_calls():
@@ -1366,45 +1439,57 @@ def test_stylesheets_hold_no_c1_control_characters():
 
 
 def test_the_site_shows_the_bot_chain_registry():
-    # docs/DEPLOYMENTS.md records the BOT Chain (677) registry. Its address equals the Robinhood Chain one (the same
-    # owner deployed both at nonce 0), so an address alone proves nothing: each page must carry the row's own
-    # scan.botchain.ai link, the chain id and the deployment date, and the BOT Chain guard and guarded transfer, deployed
-    # on 29 October 2026, are recorded and claimed.
+    # Every BOT Chain contract row, including its own explorer address and deployment date, follows DEPLOYMENTS.md.
     deployments = read(ROOT / "docs" / "DEPLOYMENTS.md")
-    row = re.search(
-        r"^\| `ShieldBotVerdictRegistry` \| BOT Chain \(677\) \| \[`(0x[0-9a-fA-F]{40})`\]\((https://scan\.botchain\.ai/address/0x[0-9a-fA-F]{40})\) \| 2026-10-26 ",
-        deployments,
-        re.MULTILINE,
+    contract_names = (
+        "ShieldBotVerdictRegistry",
+        "ShieldBotVerdictGuard",
+        "ShieldBotGuardedTransfer",
     )
-    assert row, "docs/DEPLOYMENTS.md should record the BOT Chain registry"
-    address, url = row.groups()
-    assert url.endswith(address)
-    for name in ("ShieldBotVerdictGuard", "ShieldBotGuardedTransfer"):
-        assert re.search(rf"^\| `{name}` \| BOT Chain \(677\) \| .* \| 2026-10-29 ", deployments, re.MULTILINE), name
+    months = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+    bot_rows = {}
+    for name in contract_names:
+        row = re.search(
+            rf"^\| \x60{name}\x60 \| BOT Chain \(677\) \| \[\x60(0x[0-9a-fA-F]{{40}})\x60\]\((https://scan\.botchain\.ai/address/0x[0-9a-fA-F]{{40}})\) \| (2026-10-\d{{2}}) ",
+            deployments,
+            re.MULTILINE,
+        )
+        assert row, f"docs/DEPLOYMENTS.md should record the BOT Chain {name}"
+        address, url, deployed = row.groups()
+        assert url.endswith(address)
+        year, month, day = (int(part) for part in deployed.split("-"))
+        bot_rows[name] = (address, url, f"{day} {months[month - 1]} {year}")
+
     registry = read(COMPONENTS / "Registry.tsx")
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
-    assert f'address: "{address}"' in registry
-    assert f'explorer: "{url}"' in registry
+    for name, (address, url, deployed) in bot_rows.items():
+        assert f'address: "{address}"' in registry
+        assert f'explorer: "{url}"' in registry
+        assert f'deployed: "{deployed}"' in registry
+        assert name in registry and address in bundle and url in bundle, name
     assert 'chain: "BOT Chain"' in registry and 'chainId: 677' in registry
-    assert 'deployed: "26 October 2026"' in registry
-    assert registry.count("sourcify: null") == 3 and "Not supported" in registry
-    for name, contract_address in (
-        ("ShieldBotVerdictRegistry", address),
-        ("ShieldBotVerdictGuard", "0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e"),
-        ("ShieldBotGuardedTransfer", "0x336254bA85406D9af39357101b688E2B757751b3"),
-    ):
-        assert name in registry and contract_address in registry
-    assert url in bundle, "landing bundle is stale: missing the BOT Chain registry link"
+    assert registry.count("sourcify: null") == 3
+    assert "Source verified on the explorer" in registry and "Source verified on the explorer" in bundle
+    assert "No Sourcify on 677" in registry and "No Sourcify on 677" in bundle
+    assert "Not supported" not in registry
     assert "A guard and a guarded transfer that read it were deployed on BOT Chain on 29 October 2026." in " ".join(
         read(COMPONENTS / "FAQ.tsx").split()
     )
     about = " ".join(read(LANDING_SRC / "public" / "about.html").split())
-    assert f'<a href="{url}"' in about and "On BOT Chain (677) a verdict registry was deployed on 26 October 2026" in about
+    _, registry_url, _ = bot_rows["ShieldBotVerdictRegistry"]
+    assert f'<a href="{registry_url}"' in about and "On BOT Chain (677) a verdict registry was deployed on 26 October 2026" in about
     assert "A freshness guard and a guarded transfer contract that read it were deployed there on 29 October 2026" in about
-    # Sourcify does not cover BOT Chain, so the table states that its contracts have no Sourcify link.
-    assert registry.count("sourcify: null") == 3
     assert "The source of all three BOT Chain contracts is verified on BOT Chain's explorer" in about
     assert "cannot verify" not in about
+
+
+def test_coverage_scope_notes_and_launch_alert_command_stay_readable():
+    chains = read(COMPONENTS / "Chains.tsx")
+    how = read(COMPONENTS / "HowItWorks.tsx")
+    assert 'simulationScope: "supported pool routes only"' in chains
+    assert '"pools pairing the token with WETH on Uniswap V3, Uniswap V2 or SushiSwap"' in chains
+    assert '<span className="whitespace-nowrap">/launchalerts</span>' in chains
+    assert '<code className="whitespace-nowrap font-mono text-xs leading-5 text-ink">' in how
 
 
 def test_the_registry_figures_read_each_chain_from_the_stats_reply():

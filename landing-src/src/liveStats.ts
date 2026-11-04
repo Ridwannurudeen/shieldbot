@@ -16,14 +16,14 @@ export interface Stats {
   registry_records_confirmed_by_chain: Record<string, number> | null;
 }
 
-export interface LiveStats {
-  stats: Stats | null | undefined;
-  fetchedAt: Date | null;
-}
+export type LiveStats =
+  | { stats: undefined; fetchedAt: null }
+  | { stats: null; fetchedAt: null }
+  | { stats: Stats; fetchedAt: Date };
 
 const EMPTY: LiveStats = { stats: undefined, fetchedAt: null };
 
-let state = EMPTY;
+let state: LiveStats = EMPTY;
 const listeners = new Set<() => void>();
 let controller: AbortController | null = null;
 

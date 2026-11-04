@@ -5,10 +5,27 @@ import Section from "./Section";
 import { loadRecentRecords, short, useFeed } from "../registryFeed";
 import type { RegistryRecord } from "../registryFeed";
 import { registryChip } from "../registryVerdict";
+import SourceTime from "./SourceTime";
 
 const API = "https://api.shieldbotsecurity.online";
+const VIRTUAL = "0xc6911796042b15d7fa4f6cde69e245ddcd3d9c31";
+const submissionUrl =
+  "https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/SUBMISSION.md";
+const judgeGuideUrl =
+  "https://github.com/Ridwannurudeen/shieldbot/blob/main/docs/JUDGE_GUIDE.md#3-verify-a-verdict-without-trusting-the-api";
 
-const contracts = [
+interface Contract {
+  name: string;
+  address: string;
+  chain: string;
+  chainId: number;
+  deployed: string;
+  note?: string;
+  explorer: string;
+  sourcify: string | null;
+}
+
+const contracts: Contract[] = [
   {
     name: "ShieldBotVerdictRegistry",
     address: "0xB7cfB87579f232dBa70CDC8Ba063AA7b500D5138",
@@ -33,6 +50,7 @@ const contracts = [
     chain: "Robinhood Chain",
     chainId: 4663,
     deployed: "27 September 2026",
+    note: "Asks the guard, then moves approved USDG. Its subject is VIRTUAL; no live guarded USDG payment is claimed.",
     explorer: "https://robin.etherscan.io/address/0x336254bA85406D9af39357101b688E2B757751b3",
     sourcify: "https://sourcify.dev/server/v2/contract/4663/0x336254bA85406D9af39357101b688E2B757751b3",
   },
@@ -73,11 +91,11 @@ const guardCall = `interface IShieldBotVerdictGuard {
 }
 
 address constant GUARD = 0x47fbF2cfcb98B02Ffbc50037A9A65072c58b129e;
-address constant VIRTUAL = 0xc6911796042b15d7fa4f6cde69e245ddcd3d9c31;
+address constant VIRTUAL = ${VIRTUAL};
 
 IShieldBotVerdictGuard(GUARD).requireAllowed(token, 900);
 
-// Recorded, 27 September 2026
+// Recorded on Robinhood Chain, 27 September 2026
 guard.check(VIRTUAL, 900)  // allowed=True, reason=0
 
 // Derived, not a recorded call
@@ -101,28 +119,6 @@ const integrations = [
 interface Row {
   subject: string;
   record: RegistryRecord | null | undefined;
-}
-
-function SourceTime({
-  href,
-  at,
-}: {
-  href: string;
-  at: Date | null;
-}) {
-  if (!at) return null;
-  const time = at.toISOString().slice(11, 16);
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="font-mono text-xs text-secondary underline decoration-hairline-strong underline-offset-4 hover:text-ink"
-      aria-label={`${href.slice(API.length)} fetched at ${time} UTC`}
-    >
-      {time} UTC
-    </a>
-  );
 }
 
 function RecentRecords() {
@@ -165,11 +161,16 @@ function RecentRecords() {
   const sourceUrl = fallback
     ? `${API}/api/launches/4663?outcome=blocked&limit=3`
     : `${API}/api/verdicts/recent?chain_id=4663&limit=3`;
+  const heading = fallback
+    ? "Records of the newest launches ShieldBot blocked"
+    : "Recent registry records";
 
   return (
     <div ref={table}>
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
-        <h3 className="text-lg font-medium text-ink">Recent registry records</h3>
+        <h3 id="registry-records-heading" className="text-lg font-medium text-ink">
+          {heading}
+        </h3>
         <SourceTime
           href={sourceUrl}
           at={fallback ? launchesFetchedAt : recentFetchedAt}
@@ -189,7 +190,10 @@ function RecentRecords() {
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-left text-xs sm:text-sm">
+          <table
+            aria-labelledby="registry-records-heading"
+            className="w-full table-fixed text-left text-xs sm:text-sm"
+          >
             <colgroup>
               <col className="w-[27%]" />
               <col className="w-[20%]" />
@@ -240,7 +244,21 @@ function RecentRecords() {
                       {record?.observed_block ?? "Unavailable"}
                     </td>
                     <td className="break-words py-3 pl-1 font-mono text-secondary sm:pl-2">
-                      {record?.evidence_hash ? short(record.evidence_hash) : "Unavailable"}
+                      <span className="block">
+                        {record?.evidence_hash ? short(record.evidence_hash) : "Unavailable"}
+                      </span>
+                      {record?.tx_hash ? (
+                        <a
+                          href={`https://robin.etherscan.io/tx/${record.tx_hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-11 items-center whitespace-nowrap text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
+                        >
+                          tx {short(record.tx_hash)}
+                        </a>
+                      ) : (
+                        <span className="block">tx unavailable</span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -253,6 +271,39 @@ function RecentRecords() {
   );
 }
 
+function ContractLinks({
+  contract,
+}: {
+  contract: Contract;
+}) {
+  return (
+    <div className="flex flex-nowrap items-center gap-3 text-xs">
+      <a
+        href={contract.explorer}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex min-h-11 shrink-0 items-center whitespace-nowrap text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
+      >
+        {contract.chainId === 677 ? "Source verified on the explorer" : "Explorer"}
+      </a>
+      {contract.sourcify ? (
+        <a
+          href={contract.sourcify}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex min-h-11 shrink-0 items-center whitespace-nowrap text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
+        >
+          Sourcify
+        </a>
+      ) : (
+        <span className="shrink-0 whitespace-nowrap text-secondary">
+          No Sourcify on 677
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function Registry() {
   return (
     <Section id="registry" title="Registry">
@@ -260,15 +311,47 @@ export default function Registry() {
         <RecentRecords />
 
         <div>
-          <h3 className="mb-4 text-lg font-medium text-ink">Deployed contracts</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed text-left text-xs sm:text-sm">
+          <h3
+            id="deployed-contracts-heading"
+            className="mb-4 text-lg font-medium text-ink"
+          >
+            Deployed contracts
+          </h3>
+          <div className="sm:hidden">
+            <ul className="divide-y divide-hairline border-y border-hairline">
+              {contracts.map((contract) => (
+                <li
+                  key={`${contract.chainId}-${contract.name}`}
+                  className="space-y-1 py-4"
+                >
+                  <h4 className="text-sm font-medium text-ink">{contract.name}</h4>
+                  {contract.note && (
+                    <p className="text-xs leading-5 text-secondary">
+                      {contract.note}
+                    </p>
+                  )}
+                  <p className="break-all font-mono text-xs text-ink">
+                    {contract.address}
+                  </p>
+                  <p className="whitespace-nowrap text-xs text-secondary">
+                    {contract.chain} ({contract.chainId}) · {contract.deployed}
+                  </p>
+                  <ContractLinks contract={contract} />
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="hidden overflow-x-auto sm:block">
+            <table
+              aria-labelledby="deployed-contracts-heading"
+              className="w-full min-w-[900px] table-fixed text-left text-xs sm:text-sm"
+            >
               <colgroup>
-                <col className="w-[27%] sm:w-[25%]" />
-                <col className="w-[30%] sm:w-[31%]" />
-                <col className="w-[17%] sm:w-[16%]" />
-                <col className="w-[14%] sm:w-[14%]" />
-                <col className="w-[12%] sm:w-[14%]" />
+                <col className="w-[22%]" />
+                <col className="w-[29%]" />
+                <col className="w-[16%]" />
+                <col className="w-[13%]" />
+                <col className="w-[20%]" />
               </colgroup>
               <thead>
                 <tr className="border-y border-hairline text-[11px] uppercase tracking-wide text-secondary">
@@ -285,48 +368,28 @@ export default function Registry() {
                     key={`${contract.chainId}-${contract.name}`}
                     className="border-b border-hairline align-top"
                   >
-                    <th scope="row" className="py-3 pr-2 text-left font-medium text-ink [overflow-wrap:anywhere]">
-                      {contract.name}
+                    <th scope="row" className="py-3 pr-2 text-left font-medium text-ink">
+                      <span className="block whitespace-nowrap">{contract.name}</span>
+                      {contract.note && (
+                        <span className="mt-1 block whitespace-normal text-xs font-normal leading-5 text-secondary">
+                          {contract.note}
+                        </span>
+                      )}
                     </th>
                     <td className="break-all px-1 py-3 font-mono text-xs text-ink sm:px-2">
                       {contract.address}
                     </td>
-                    <td className="break-words px-1 py-3 text-ink sm:px-2">
+                    <td className="whitespace-nowrap px-1 py-3 text-ink sm:px-2">
                       {contract.chain}
                       <span className="mt-1 block font-mono text-xs text-secondary">
                         {contract.chainId}
                       </span>
                     </td>
-                    <td className="break-words px-1 py-3 text-secondary sm:px-2">
+                    <td className="whitespace-nowrap px-1 py-3 text-secondary sm:px-2">
                       {contract.deployed}
                     </td>
                     <td className="py-3 pl-1 sm:pl-2">
-                      <ul className="grid gap-2">
-                        <li>
-                          <a
-                            href={contract.explorer}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex min-h-11 items-center text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
-                          >
-                            Explorer
-                          </a>
-                        </li>
-                        <li>
-                          {contract.sourcify ? (
-                            <a
-                              href={contract.sourcify}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex min-h-11 items-center text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
-                            >
-                              Sourcify
-                            </a>
-                          ) : (
-                            <span className="text-secondary">Not supported</span>
-                          )}
-                        </li>
-                      </ul>
+                      <ContractLinks contract={contract} />
                     </td>
                   </tr>
                 ))}
@@ -339,8 +402,26 @@ export default function Registry() {
           <div className="min-w-0">
             <h3 className="mb-4 text-lg font-medium text-ink">Guard call</h3>
             <CodeBlock code={guardCall} />
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              <a
+                href={`https://robin.etherscan.io/address/${VIRTUAL}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
+              >
+                VIRTUAL
+              </a>
+              <a
+                href={submissionUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
+              >
+                Recorded call: docs/SUBMISSION.md
+              </a>
+            </div>
             <p className="mt-3 text-sm leading-6 text-secondary">
-              Permission does not guarantee safety. The guard accepts MEDIUM risk.
+              Permission is not a safety guarantee: the guard accepts MEDIUM risk. Permission lasts only while a subject is actively watched and republished.
             </p>
           </div>
           <ul className="divide-y divide-hairline border-y border-hairline">
@@ -356,6 +437,19 @@ export default function Registry() {
                 </a>
               </li>
             ))}
+            <li className="py-4">
+              <a
+                href={judgeGuideUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
+              >
+                Verify a verdict without trusting the API
+              </a>
+              <p className="mt-1 text-sm leading-6 text-secondary">
+                A match proves the recorder committed those bytes. It does not prove the scan was right, that an issuer is genuine, or that a token will stay sellable.
+              </p>
+            </li>
           </ul>
         </div>
       </div>

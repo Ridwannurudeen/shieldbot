@@ -55,7 +55,7 @@ export default function Navbar() {
   return (
     <nav
       aria-label="Main"
-      className="fixed inset-x-0 top-0 z-50 border-b border-hairline bg-ground/95"
+      className="fixed top-0 inset-x-0 z-50 bg-ground/90 backdrop-blur border-b border-hairline"
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <a href="#top" className="flex min-h-11 items-center text-lg font-medium tracking-[-0.03em] text-ink">
@@ -88,7 +88,7 @@ export default function Navbar() {
         inert={!open}
         className={`grid transition-[grid-template-rows] duration-200 ease-out lg:hidden ${open ? "grid-rows-[1fr] border-t border-hairline" : "grid-rows-[0fr]"}`}
       >
-        <div className="overflow-hidden">
+        <div className="overflow-hidden bg-ground">
           <div className="mx-auto flex max-w-6xl flex-col px-4 py-3 sm:px-6">
             <NavLinks onClick={() => setOpen(false)} />
             <div className="flex items-center justify-between gap-4 border-t border-hairline pt-3">

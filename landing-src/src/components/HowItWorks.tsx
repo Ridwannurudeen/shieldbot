@@ -25,7 +25,7 @@ const surfaces = [
   {
     name: "Telegram bot",
     href: telegramUrl,
-    description: "Five commands for token checks, scans, ERC-20 allowances, reports and launch alerts.",
+    description: "Token checks, contract scans, ERC-20 allowances, reports and launch alerts.",
   },
   {
     name: "REST API",
@@ -35,7 +35,7 @@ const surfaces = [
   {
     name: "MCP server",
     href: mcpUrl,
-    description: "Server-sent events for AI agents.",
+    description: "Model Context Protocol server for AI agents, over SSE.",
   },
 ];
 
@@ -94,13 +94,16 @@ export default function HowItWorks() {
           ))}
         </dl>
 
-        <ul className="divide-y divide-hairline border-y border-hairline">
+        <ul
+          aria-label="Telegram bot commands"
+          className="divide-y divide-hairline border-y border-hairline"
+        >
           {commands.map(([command, description]) => (
             <li
               key={command}
               className="grid gap-1 py-3 sm:grid-cols-[minmax(170px,0.85fr)_minmax(0,1.15fr)] sm:gap-5"
             >
-              <code className="font-mono text-xs leading-5 text-ink [overflow-wrap:anywhere]">
+              <code className="whitespace-nowrap font-mono text-xs leading-5 text-ink">
                 {command}
               </code>
               <span className="text-sm leading-5 text-secondary">

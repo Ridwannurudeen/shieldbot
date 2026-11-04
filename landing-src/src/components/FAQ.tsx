@@ -50,54 +50,54 @@ const faqs = [
 ];
 
 // One column, read like a document: the heading, then the questions numbered down the page. One answer opens at a
-// time; the panel opens from 0fr to 1fr in 300 ms (index.css .acc-panel), so nothing measures height, and a closed
+// time; the panel opens from 0fr to 1fr in 250 ms (index.css .acc-panel), so nothing measures height, and a closed
 // answer is inert.
 export default function FAQ() {
   const [open, setOpen] = useState<number | null>(0);
 
   return (
     <Section id="faq" title="FAQ">
-          <ol className="max-w-4xl border-b border-hairline">
-            {faqs.map((faq, i) => {
-              const expanded = open === i;
-              return (
-                <li key={i} className="border-t border-hairline-strong">
-                  <h3>
-                    <button
-                      type="button"
-                      id={`faq-question-${i}`}
-                      onClick={() => setOpen(expanded ? null : i)}
-                      aria-expanded={expanded}
-                      aria-controls={`faq-answer-${i}`}
-                      className="group grid w-full grid-cols-[32px_minmax(0,1fr)_16px] items-baseline gap-x-3 py-5 text-left sm:grid-cols-[44px_minmax(0,1fr)_16px]"
-                    >
-                      <span className={`font-mono text-xs ${expanded ? "text-accent" : "text-secondary"}`}>
-                        {String(i + 1).padStart(2, "0")}
-                      </span>
-                      <span className="text-base font-medium leading-6 text-ink md:text-[17px]">{faq.q}</span>
-                      <Icon
-                        name="chevron"
-                        size={16}
-                        className={`self-center transition-transform duration-300 ease-out ${expanded ? "rotate-180 text-ink" : "text-secondary group-hover:text-ink"}`}
-                      />
-                    </button>
-                  </h3>
-                  <div
-                    id={`faq-answer-${i}`}
-                    role="region"
-                    aria-labelledby={`faq-question-${i}`}
-                    data-open={expanded}
-                    inert={!expanded}
-                    className="acc-panel"
+        <ol className="max-w-4xl border-b border-hairline">
+          {faqs.map((faq, i) => {
+            const expanded = open === i;
+            return (
+              <li key={i} className="border-t border-hairline-strong">
+                <h3>
+                  <button
+                    type="button"
+                    id={`faq-question-${i}`}
+                    onClick={() => setOpen(expanded ? null : i)}
+                    aria-expanded={expanded}
+                    aria-controls={`faq-answer-${i}`}
+                    className="group grid w-full grid-cols-[32px_minmax(0,1fr)_16px] items-baseline gap-x-3 py-5 text-left sm:grid-cols-[44px_minmax(0,1fr)_16px]"
                   >
-                    <div>
-                      <p className="max-w-[44em] pb-6 pl-[44px] pr-7 text-[15px] leading-relaxed text-secondary [overflow-wrap:anywhere] sm:pl-[56px]">{faq.a}</p>
-                    </div>
+                    <span className={`font-mono text-xs ${expanded ? "text-accent" : "text-secondary"}`}>
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <span className="text-base font-medium leading-6 text-ink md:text-[17px]">{faq.q}</span>
+                    <Icon
+                      name="chevron"
+                      size={16}
+                      className={`self-center transition-transform duration-300 ease-out ${expanded ? "rotate-180 text-ink" : "text-secondary group-hover:text-ink"}`}
+                    />
+                  </button>
+                </h3>
+                <div
+                  id={`faq-answer-${i}`}
+                  role="region"
+                  aria-labelledby={`faq-question-${i}`}
+                  data-open={expanded}
+                  inert={!expanded}
+                  className="acc-panel"
+                >
+                  <div>
+                    <p className="max-w-[44em] pb-6 pl-[44px] pr-7 text-[15px] leading-relaxed text-secondary [overflow-wrap:anywhere] sm:pl-[56px]">{faq.a}</p>
                   </div>
-                </li>
-              );
-            })}
-          </ol>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
     </Section>
   );
 }

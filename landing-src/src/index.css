@@ -125,11 +125,6 @@
   display: none;
 }
 
-.hero-verdict img {
-  object-fit: cover;
-  object-position: top;
-}
-
 @media (prefers-reduced-motion: no-preference) {
   .hero-loading {
     display: block;
@@ -166,6 +161,18 @@
 }
 
 @layer components {
+  /* The chevron is the secondary text colour of each theme; a data URI cannot inherit currentColor, so one per theme. */
+  .try-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23A3A39E' stroke-width='1.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 14px;
+  }
+
+  :root[data-theme="light"] .try-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%236B6B66' stroke-width='1.5'/%3E%3C/svg%3E");
+  }
+
   .acc-panel {
     display: grid;
     grid-template-rows: 0fr;

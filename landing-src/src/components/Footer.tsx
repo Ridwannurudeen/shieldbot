@@ -149,11 +149,12 @@ export default function Footer() {
           </p>
         </div>
 
-        {message && (
-          <p className="mt-2 text-xs text-secondary" role="status">
-            {message}
-          </p>
-        )}
+        <p
+          className={message ? "mt-2 text-xs text-secondary" : "sr-only"}
+          role="status"
+        >
+          {message}
+        </p>
 
         <p className="mt-7 border-t border-hairline pt-5 text-xs leading-5 text-secondary">
           © 2026 ShieldBot. ShieldBot does not issue, sell or endorse any token.

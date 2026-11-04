@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 // The worked example and registry section read one shared feed:
 // - GET /api/verdicts/recent?chain_id=4663&limit=3, the registry's confirmed records, newest first. Until that
-//   route is deployed it answers 404, and the strip falls back to the newest blocked launches below.
+//   route is deployed it answers 404, and the table falls back to the newest blocked launches below.
 // - GET /api/launches/4663?outcome=blocked&limit=3, the newest launches ShieldBot blocked. The worked example
 //   quotes the first one's sell simulation.
 // - GET /api/verdict/4663/{address}, one at a time and once per address (the API allows 10 requests in 5 seconds
@@ -47,7 +47,7 @@ export interface Launch {
 }
 
 export interface Feed {
-  // The records the strip lists, from the new route, or "fallback" when that route answered 404.
+  // The records the table lists, from the new route, or "fallback" when that route answered 404.
   recent: RegistryRecord[] | "fallback" | null | undefined;
   launches: Launch[] | null | undefined;
   // Per token address: undefined while loading, null when /api/verdict did not answer.
@@ -73,7 +73,7 @@ interface Run {
   asked: Set<string>;
   queue: string[];
   draining: boolean;
-  // In the fallback, the other launches whose records the strip lists; null until the launches answered.
+  // In the fallback, the other launches whose records the table lists; null until the launches answered.
   rest: string[] | null;
   restWanted: boolean;
 }
@@ -230,7 +230,7 @@ export function useFeed(): Feed {
   return useSyncExternalStore(subscribe, () => feed);
 }
 
-// The strip's other records, asked for once it nears the viewport; in the fallback only.
+// The table's other records, asked for once it nears the viewport; in the fallback only.
 export function loadRecentRecords() {
   if (!run || run.restWanted) return;
   run.restWanted = true;

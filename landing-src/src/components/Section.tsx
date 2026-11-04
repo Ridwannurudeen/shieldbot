@@ -18,7 +18,7 @@ export default function Section({
     <section
       id={id}
       aria-labelledby={titleId}
-      className="py-16 md:py-24"
+      className={level === "h1" ? "pt-20 pb-16 md:py-24" : "py-16 md:py-24"}
     >
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
         <Heading

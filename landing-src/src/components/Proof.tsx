@@ -3,6 +3,7 @@ import { registryChip } from "../registryVerdict";
 import { useStats, type Stats } from "../liveStats";
 import VerdictRecord from "./VerdictRecord";
 import Section from "./Section";
+import SourceTime from "./SourceTime";
 
 const API = "https://api.shieldbotsecurity.online";
 const launchesUrl = `${API}/api/launches/4663?outcome=blocked&limit=3`;
@@ -29,51 +30,23 @@ function list(names: string[]) {
     : (names[0] ?? "");
 }
 
-function SourceTime({
-  href,
-  at,
-}: {
-  href: string;
-  at: Date | null;
-}) {
-  if (!at) return null;
-  const time = at.toISOString().slice(11, 16);
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="mt-2 inline-flex min-h-11 items-center font-mono text-xs text-secondary underline decoration-hairline-strong underline-offset-4 hover:text-ink"
-      aria-label={`Source fetched at ${time} UTC`}
-    >
-      {time} UTC
-    </a>
-  );
-}
-
 function Figure({
   value,
   label,
   loading,
-  fetchedAt,
 }: {
   value: string | null;
   label: string;
   loading: boolean;
-  fetchedAt: Date | null;
 }) {
   return (
-    <div className="grid grid-cols-[minmax(88px,0.5fr)_minmax(0,1.5fr)] gap-x-5 border-b border-hairline py-5 sm:grid-cols-[minmax(110px,0.55fr)_minmax(0,1.45fr)]">
-      <p className="font-mono text-xl leading-7 text-ink tabular-nums sm:text-2xl">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-x-5 border-b border-hairline py-5 sm:grid-cols-[auto_minmax(0,1fr)]">
+      <dt className="row-start-2 min-w-0 text-sm leading-6 text-secondary sm:col-start-2 sm:row-start-1">
+        {label}
+      </dt>
+      <dd className="row-start-1 min-w-0 font-mono text-xl leading-7 text-ink tabular-nums sm:col-start-1 sm:row-start-1 sm:text-2xl">
         {value ?? (loading ? "Loading" : "Unavailable")}
-      </p>
-      <div>
-        <p className="text-sm leading-6 text-secondary">{label}</p>
-        <SourceTime
-          href={`${API}/api/stats`}
-          at={loading ? null : fetchedAt}
-        />
-      </div>
+      </dd>
     </div>
   );
 }
@@ -94,39 +67,42 @@ function Metrics({ stats, fetchedAt }: { stats: Stats | null | undefined; fetche
   );
 
   return (
-    <dl className="border-t border-hairline">
-      <Figure
-        loading={loading}
-        fetchedAt={fetchedAt}
-        value={count(stats?.transactions_monitored)}
-        label={`Pending transactions seen${since ? ` since ${since}` : ""}${mempoolChains ? ` on ${mempoolChains}` : ""}`}
+    <div className="border-t border-hairline">
+      <dl>
+        <Figure
+          loading={loading}
+          value={count(stats?.transactions_monitored)}
+          label={`Pending transactions seen${since ? ` since ${since}` : ""}${mempoolChains ? ` on ${mempoolChains}` : ""}`}
+        />
+        <Figure
+          loading={loading}
+          value={
+            share
+              ? `${count(share.scanned) ?? "Unavailable"} of ${count(share.launches) ?? "Unavailable"}`
+              : null
+          }
+          label={`Robinhood Chain launches in the last ${share?.window_hours ?? 24} hours with a scan outcome`}
+        />
+        <Figure
+          loading={loading}
+          value={count(
+            stats?.registry_records_confirmed_by_chain?.["4663"] ??
+              stats?.registry_records_confirmed,
+          )}
+          label="Verdict records confirmed in the Robinhood Chain registry, all time"
+        />
+        <Figure
+          loading={loading}
+          value={count(stats?.registry_records_confirmed_by_chain?.["677"])}
+          label="Verdict records confirmed in the BOT Chain registry, all time"
+        />
+      </dl>
+      <SourceTime
+        href={`${API}/api/stats`}
+        at={loading ? null : fetchedAt}
+        className="mt-2"
       />
-      <Figure
-        loading={loading}
-        fetchedAt={fetchedAt}
-        value={
-          share
-            ? `${count(share.scanned) ?? "Unavailable"} of ${count(share.launches) ?? "Unavailable"}`
-            : null
-        }
-        label={`Robinhood Chain launches in the last ${share?.window_hours ?? 24} hours with a scan outcome`}
-      />
-      <Figure
-        loading={loading}
-        fetchedAt={fetchedAt}
-        value={count(
-          stats?.registry_records_confirmed_by_chain?.["4663"] ??
-            stats?.registry_records_confirmed,
-        )}
-        label="Verdict records confirmed in the Robinhood Chain registry, all time"
-      />
-      <Figure
-        loading={loading}
-        fetchedAt={fetchedAt}
-        value={count(stats?.registry_records_confirmed_by_chain?.["677"])}
-        label="Verdict records confirmed in the BOT Chain registry, all time"
-      />
-    </dl>
+    </div>
   );
 }
 
@@ -167,12 +143,15 @@ function WorkedExample() {
           {launches === undefined ? "Loading" : "Unavailable"}
         </p>
       )}
-      <SourceTime
-        href={launchesUrl}
-        at={launchesFetchedAt}
-      />
+      {launch && (
+        <SourceTime
+          href={launchesUrl}
+          at={launchesFetchedAt}
+          className="mt-2"
+        />
+      )}
 
-      {steps ? (
+      {launch && (steps ? (
         <dl className="mt-5 divide-y divide-hairline border-y border-hairline">
           <div className="grid gap-2 py-4 sm:grid-cols-[minmax(170px,0.75fr)_minmax(0,1.25fr)] sm:gap-5">
             <dt className="text-sm font-medium text-ink">Simulated sell to the pool</dt>
@@ -191,9 +170,9 @@ function WorkedExample() {
         <p className="mt-5 text-sm text-secondary">
           {reason ? shortenHex(reason) : "Simulation details unavailable"}
         </p>
-      )}
+      ))}
 
-      {record ? (
+      {launch && (record ? (
         <div className="mt-6">
           <SourceTime href={recordUrl} at={recordFetchedAt[record.subject] ?? null} />
           <VerdictRecord
@@ -222,17 +201,9 @@ function WorkedExample() {
         </div>
       ) : (
         <p role="status" className="mt-5 text-sm text-secondary">
-          {record === undefined && launch
-            ? "Loading registry record"
-            : record === null && launch
-              ? "Registry record unavailable"
-                : launches === undefined
-                  ? "Loading registry record"
-                  : launches === null
-                    ? "Launch data unavailable"
-                  : "No registry record is available for this launch"}
+          {record === undefined ? "Loading registry record" : "Registry record unavailable"}
         </p>
-      )}
+      ))}
     </div>
   );
 }

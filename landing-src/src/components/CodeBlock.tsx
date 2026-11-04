@@ -3,10 +3,8 @@ import Icon from "./Icon";
 
 export default function CodeBlock({
   code,
-  label,
 }: {
   code: string;
-  label?: string;
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const resetTimer = useRef<number | undefined>(undefined);
@@ -26,8 +24,7 @@ export default function CodeBlock({
 
   return (
     <div className="rounded-md border border-hairline bg-ground-alt">
-      <div className="flex min-h-11 items-center justify-between gap-3 px-3">
-        {label ? <p className="text-xs text-secondary">{label}</p> : <span />}
+      <div className="flex min-h-11 items-center justify-end px-3">
         <button
           type="button"
           aria-label="Copy the code"

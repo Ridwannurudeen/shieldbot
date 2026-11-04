@@ -1,8 +1,8 @@
 export default function HeroRecord() {
   return (
     <figure className="mx-auto w-full max-w-[490px]">
-      <div className="hero-stage relative h-[560px] overflow-hidden rounded-md border border-hairline bg-ground-alt sm:h-[640px]">
-        <div className="hero-loading absolute inset-x-4 top-4 overflow-hidden rounded-md bg-paper">
+      <div className="relative rounded-md border border-hairline bg-ground-alt p-4">
+        <div className="hero-loading absolute inset-4 overflow-hidden rounded-md bg-paper">
           <img
             src="/hero-overlay-loading.webp"
             width={490}
@@ -11,7 +11,7 @@ export default function HeroRecord() {
             className="block h-auto w-full"
           />
         </div>
-        <div className="hero-verdict absolute inset-x-4 top-4 max-h-[420px] overflow-hidden rounded-md bg-paper">
+        <div className="hero-verdict relative overflow-hidden rounded-md bg-paper">
           <img
             src="/hero-overlay.webp"
             width={490}

@@ -1,5 +1,6 @@
-import { useStats, type Stats } from "../liveStats";
+import { useStats, type LiveStats, type Stats } from "../liveStats";
 import Section from "./Section";
+import SourceTime from "./SourceTime";
 
 interface Chain {
   chainId: number;
@@ -32,7 +33,7 @@ const chains: Chain[] = [
     simulation: "ShieldBot",
     mempool: false,
     launches: true,
-    simulationScope: "Supported pool routes only",
+    simulationScope: "supported pool routes only",
   },
   {
     chainId: 677,
@@ -62,40 +63,34 @@ function mempool(chain: Chain, stats: Stats | null | undefined) {
 }
 
 function launchScans(chain: Chain) {
-  return chain.launches ? "Yes, /launchalerts" : "No";
+  return chain.launches ? (
+    <>
+      Yes, <span className="whitespace-nowrap">/launchalerts</span>
+    </>
+  ) : (
+    "No"
+  );
 }
 
-function MempoolCaption({
-  stats,
-  fetchedAt,
-}: {
-  stats: Stats | null | undefined;
-  fetchedAt: Date | null;
-}) {
-  if (stats === undefined) return <>Mempool readings loading</>;
-  if (stats === null) return <>Mempool readings unavailable</>;
-  if (!stats.mempool_chains_observable) return <>Mempool readings unavailable</>;
-  if (!fetchedAt) return <>Mempool readings updated</>;
+function MempoolCaption({ live }: { live: LiveStats }) {
+  if (live.stats === undefined) return <>Mempool readings loading</>;
+  if (live.stats === null || !live.stats.mempool_chains_observable)
+    return <>Mempool readings unavailable</>;
 
-  const time = fetchedAt.toISOString().slice(11, 16);
   return (
     <>
       Mempool readings at{" "}
-      <a
+      <SourceTime
         href="https://api.shieldbotsecurity.online/api/stats"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-ink underline decoration-hairline-strong underline-offset-4"
-        aria-label={`GET /api/stats at ${time} UTC`}
-      >
-        {time} UTC
-      </a>
+        at={live.fetchedAt}
+      />
     </>
   );
 }
 
 export default function Chains() {
-  const { stats, fetchedAt } = useStats();
+  const live = useStats();
+  const { stats } = live;
 
   return (
     <Section id="coverage" title="Coverage">
@@ -108,7 +103,7 @@ export default function Chains() {
             <col className="w-[22%] sm:w-[24%]" />
           </colgroup>
           <caption className="caption-bottom pt-4 text-left text-xs leading-5 text-secondary">
-            <MempoolCaption stats={stats} fetchedAt={fetchedAt} />
+            <MempoolCaption live={live} />
           </caption>
           <thead>
             <tr className="border-y border-hairline text-[11px] uppercase tracking-wide text-secondary">
