@@ -588,6 +588,7 @@ def test_hero_story_shows_the_real_loading_dialog():
         "safety.html",
         "sitemap.xml",
         ".well-known/security.txt",
+        "css/pages.css",
         "js/plausible-init.js",
         "try/index.html",
         "try/harness.js",
@@ -858,11 +859,28 @@ def test_fonts_are_self_hosted_and_the_build_copies_them():
 
 
 def test_every_static_page_declares_its_geist_face():
+    # The static pages share one stylesheet, css/pages.css, which declares the Geist face from this origin's fonts:
+    # every page links it, source and built, and no line of a page or of the stylesheet is a stray patch line.
     for name in ("404.html", "about.html", "privacy.html", "terms.html", "security.html", "safety.html"):
         for page in (LANDING_SRC / "public" / name, ROOT / "landing" / name):
             html = read(page)
             assert not any(line.startswith("+") for line in html.splitlines()), page
-            assert re.search(r"^\s*@font-face\s*\{[^}]*Geist", html, re.MULTILINE), page
+            assert html.count('<link rel="stylesheet" href="/css/pages.css">') == 1, page
+    # A Geist face that loads a local /fonts/geist- file (the Arial based Geist Fallback face alone does not count),
+    # no @import, and every url(), however it is quoted, a file in public/fonts.
+    for sheet in (LANDING_SRC / "public" / "css" / "pages.css", ROOT / "landing" / "css" / "pages.css"):
+        css = read(sheet)
+        assert not any(line.startswith("+") for line in css.splitlines()), sheet
+        faces = re.findall(r"^\s*@font-face\s*\{([^}]*)\}", css, re.MULTILINE)
+        assert any(
+            re.search(r"font-family:\s*([\"']?)Geist\1\s*;", face) and re.search(r"url\(\s*[\"']?/fonts/geist-", face)
+            for face in faces
+        ), sheet
+        assert "@import" not in css.lower(), sheet
+        urls = [url.strip("\"'") for url in re.findall(r"url\(\s*([^)]*?)\s*\)", css, re.IGNORECASE)]
+        assert urls and all(
+            re.fullmatch(r"/fonts/[\w.-]+", url) and (LANDING_SRC / "public" / url[1:]).is_file() for url in urls
+        ), urls
 
 
 def test_the_site_ships_without_framer_motion():
