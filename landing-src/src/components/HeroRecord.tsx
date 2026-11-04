@@ -2,18 +2,14 @@ export default function HeroRecord() {
   return (
     <figure className="mx-auto w-full max-w-[490px]">
       <div className="relative rounded-md border border-hairline bg-ground-alt p-4">
-        <div className="relative h-[620px] overflow-hidden rounded-md bg-ground-alt">
+        <div className="relative mx-auto aspect-[365/620] w-full max-w-[365px] overflow-hidden rounded-md bg-ground-alt">
           <div className="hero-loading absolute inset-0 flex items-center justify-center">
-            <div
-              aria-hidden="true"
-              className="hero-loading-backdrop absolute inset-0"
-            />
             <img
               src="/hero-overlay-loading.webp"
               width={490}
               height={246}
               alt="The ShieldBot extension's dialog while it checks the request. It reads Analyzing transaction..."
-              className="hero-loading-image relative z-10 block h-auto w-full max-w-[365px]"
+              className="relative z-10 block h-auto w-full max-w-[365px]"
             />
           </div>
           <div className="hero-verdict absolute inset-0 overflow-hidden rounded-md">

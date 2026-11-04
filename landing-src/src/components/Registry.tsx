@@ -193,7 +193,7 @@ function RecentRecords() {
         </p>
       ) : (
         <>
-          <ul className="divide-y divide-hairline border-y border-hairline sm:hidden">
+          <ul className="divide-y divide-hairline border-y border-hairline md:hidden">
             {rows.map(({ subject, record }) => {
               const verdict = record
                 ? registryChip(record.verdict, record.verdict_code)
@@ -249,7 +249,7 @@ function RecentRecords() {
               );
             })}
           </ul>
-          <div className="hidden overflow-x-auto sm:block">
+          <div className="hidden overflow-x-auto md:block">
           <table
             aria-labelledby="registry-records-heading"
             className="w-full table-fixed text-left text-xs sm:text-sm"
