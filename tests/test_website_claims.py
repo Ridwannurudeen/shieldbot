@@ -598,6 +598,7 @@ def test_hero_story_shows_the_real_loading_dialog():
         "safety.html",
         "sitemap.xml",
         ".well-known/security.txt",
+        "css/pages.css",
         "js/plausible-init.js",
         "try/index.html",
         "try/harness.js",
@@ -852,11 +853,19 @@ def test_fonts_are_self_hosted_and_the_build_copies_them():
 
 
 def test_every_static_page_declares_its_geist_face():
+    # The static pages share one stylesheet, css/pages.css, which declares the Geist face from this origin's fonts:
+    # every page links it, source and built, and no line of a page or of the stylesheet is a stray patch line.
     for name in ("404.html", "about.html", "privacy.html", "terms.html", "security.html", "safety.html"):
         for page in (LANDING_SRC / "public" / name, ROOT / "landing" / name):
             html = read(page)
             assert not any(line.startswith("+") for line in html.splitlines()), page
-            assert re.search(r"^\s*@font-face\s*\{[^}]*Geist", html, re.MULTILINE), page
+            assert html.count('<link rel="stylesheet" href="/css/pages.css">') == 1, page
+    for sheet in (LANDING_SRC / "public" / "css" / "pages.css", ROOT / "landing" / "css" / "pages.css"):
+        css = read(sheet)
+        assert not any(line.startswith("+") for line in css.splitlines()), sheet
+        assert re.search(r"^\s*@font-face\s*\{[^}]*Geist", css, re.MULTILINE), sheet
+        fonts = re.findall(r'url\("([^"]+)"\)', css)
+        assert fonts and all((LANDING_SRC / "public" / font.lstrip("/")).is_file() for font in fonts), fonts
 
 
 def test_the_site_ships_without_framer_motion():
