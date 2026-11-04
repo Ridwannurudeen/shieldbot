@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-// GET /api/stats (api.py public_stats), fetched once when the page loads and read by Mechanism and the chain
+// GET /api/stats (api.py public_stats), fetched once when the page loads and read by Proof and the chain
 // matrix, so the page asks for it once. undefined while loading, null when it did not answer in 10 seconds or
 // answered with an error (a 429 included); nothing is filled in. When the last reader unmounts, the request is
 // aborted and the reply cleared, so a later reader fetches it again.

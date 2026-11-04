@@ -1,112 +1,115 @@
-import type { CSSProperties } from "react";
-import { CHECK_ORDER } from "./CheckRow";
-import { useReading } from "../reading";
+import CheckRow from "./CheckRow";
+import Section from "./Section";
+import { recordedReply } from "../recordedReplies";
 
-const steps: { num: string; title: string; desc: string }[] = [
+const chromeStoreUrl =
+  "https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk";
+const telegramUrl = "https://t.me/shieldbot_bnb_bot";
+const apiUrl = "https://api.shieldbotsecurity.online/docs";
+const mcpUrl = "https://github.com/Ridwannurudeen/shieldbot/tree/main/mcp_server";
+
+const commands = [
+  ["/token <address>", "Sellability checks and Unknown when a check cannot run."],
+  ["/scan <address>", "A contract risk report."],
+  ["/rescue <wallet>", "Lists risky ERC-20 allowances. It never revokes them."],
+  ["/report <address> <reason>", "Reports are counted, not reviewed."],
+  ["/launchalerts", "Robinhood Chain blocked launches and token impostors."],
+] as const;
+
+const surfaces = [
   {
-    num: "01",
-    title: "Intercept",
-    desc: "Catches transactions and signature requests before your wallet signs them.",
+    name: "Chrome extension",
+    href: chromeStoreUrl,
+    description: "Checks transactions and signatures before your wallet signs.",
   },
   {
-    num: "02",
-    title: "Check",
-    desc: "Decodes the call, scans the contract (code, market, reputation and, where the chain has one, a buy and sell simulation) and checks scam databases.",
+    name: "Telegram bot",
+    href: telegramUrl,
+    description: "Five commands for token checks, scans, ERC-20 allowances, reports and launch alerts.",
   },
   {
-    num: "03",
-    title: "Report",
-    desc: "Shows SAFE, CAUTION, HIGH RISK or BLOCK RECOMMENDED with the reasons, or UNKNOWN with the check that could not run. You cancel or sign; Strict mode holds BLOCK RECOMMENDED, UNKNOWN and any incomplete check.",
+    name: "REST API",
+    href: apiUrl,
+    description: "Contract scans for applications and agents.",
+  },
+  {
+    name: "MCP server",
+    href: mcpUrl,
+    description: "Server-sent events for AI agents.",
   },
 ];
 
-// The process track: the three steps along one rule on the paper ground, open (no accordion). On view the track
-// draws itself step by step (index.css): each segment of the rule draws, its node lights and its step rises from
-// 0.6; the last segment is the magenta one. One linked line under it names where ShieldBot runs.
 export default function HowItWorks() {
-  const track = useReading<HTMLOListElement>();
   return (
-    <section
-      id="how-it-works"
-      aria-labelledby="how-it-works-title"
-      className="border-b border-hairline bg-ground-alt py-16 md:py-24"
-    >
-      <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        <div className="max-w-3xl">
-          <p className="font-mono text-xs uppercase tracking-[0.08em] text-secondary">
-            How it works
+    <Section id="how" title="How it works">
+      <ol className="grid gap-8 border-y border-hairline py-6 md:grid-cols-3 md:gap-10 md:py-8">
+        <li className="min-w-0">
+          <h3 className="text-lg font-medium text-ink">Intercept</h3>
+          <p className="mt-2 text-sm leading-6 text-secondary">
+            Decodes a transaction before your wallet signs it.
           </p>
-          <h2
-            id="how-it-works-title"
-            className="mt-3 text-h2-sm md:text-h2 text-ink"
-          >
-            Three steps between you and a scam.
-          </h2>
-          <p className="mt-4 max-w-[36em] text-[17px] md:text-lg leading-relaxed text-secondary">
-            A check takes a few seconds, before the signature window opens.
+        </li>
+        <li className="min-w-0">
+          <h3 className="text-lg font-medium text-ink">Check</h3>
+          <p className="mt-2 text-sm leading-6 text-secondary">
+            Runs each check the chain supports.
           </p>
-        </div>
+        </li>
+        <li className="min-w-0">
+          <h3 className="text-lg font-medium text-ink">Report</h3>
+          <p className="mt-2 text-sm leading-6 text-secondary">
+            Shows the verdict and reason, or Unknown when a check cannot run.
+          </p>
+        </li>
+      </ol>
 
-        <ol
-          ref={track}
-          data-read="wait"
-          className="mt-12 grid grid-cols-1 md:mt-16 lg:grid-cols-3">
-          {steps.map((step, i) => {
-            const last = i === steps.length - 1;
-            return (
-              <li
-                key={step.num}
-                style={{ "--s": i } as CSSProperties}
-                className={`pt-step ${last ? "pt-last " : ""}relative min-w-0 border-l pl-6 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-8 ${last ? "border-accent" : "border-hairline-strong pb-10 lg:pb-0 lg:pr-10"}`}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`pt-node absolute -left-[5px] top-1.5 h-[9px] w-[9px] rounded-[2px] lg:-top-[5px] lg:left-0 ${last ? "bg-accent" : "border border-ink bg-ground-alt"}`}
-                />
-                <p className="font-mono text-xs tracking-[0.08em] text-secondary">
-                  {step.num}
-                </p>
-                <h3 className="mt-2 text-xl font-medium leading-7 tracking-[-0.01em] text-ink">
-                  {step.title}
-                </h3>
-                <p className="mt-2 max-w-[34em] text-[15px] leading-[23px] text-secondary">
-                  {step.desc}
-                </p>
-                {i === 1 && (
-                  <p className="mt-4 font-mono text-xs leading-[18px] text-secondary">
-                    {CHECK_ORDER.join(" · ")}
-                  </p>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-
-        <p className="mt-12 text-[15px] leading-relaxed text-secondary md:mt-16">
-          Runs as a{" "}
-          <a
-            href="https://chromewebstore.google.com/detail/shieldai-transaction-fire/abpcgobnpgbkpncodobphpenfpjlpmpk"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink"
-          >
-            Chrome extension
-          </a>
-          , a{" "}
-          <a href="https://t.me/shieldbot_bnb_bot" target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink">
-            Telegram bot
-          </a>
-          , a{" "}
-          <a href="https://api.shieldbotsecurity.online/docs" target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink">
-            REST API
-          </a>{" "}
-          and an{" "}
-          <a href="#agent-security" className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink">
-            MCP server
-          </a>{" "}
-          for agents.
-        </p>
+      <div className="mt-10">
+        <h3 className="mb-4 text-sm font-medium text-ink">
+          Recorded checks, 26 Sep 2026
+        </h3>
+        <CheckRow coverage={recordedReply.coverage} />
       </div>
-    </section>
+
+      <div className="mt-10 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-12">
+        <dl className="divide-y divide-hairline border-y border-hairline">
+          {surfaces.map((surface) => (
+            <div
+              key={surface.name}
+              className="grid gap-1 py-4 sm:grid-cols-[minmax(130px,0.7fr)_minmax(0,1.3fr)] sm:gap-6"
+            >
+              <dt>
+                <a
+                  href={surface.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
+                >
+                  {surface.name}
+                </a>
+              </dt>
+              <dd className="text-sm leading-6 text-secondary">
+                {surface.description}
+              </dd>
+            </div>
+          ))}
+        </dl>
+
+        <ul className="divide-y divide-hairline border-y border-hairline">
+          {commands.map(([command, description]) => (
+            <li
+              key={command}
+              className="grid gap-1 py-3 sm:grid-cols-[minmax(170px,0.85fr)_minmax(0,1.15fr)] sm:gap-5"
+            >
+              <code className="font-mono text-xs leading-5 text-ink [overflow-wrap:anywhere]">
+                {command}
+              </code>
+              <span className="text-sm leading-5 text-secondary">
+                {description}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Section>
   );
 }

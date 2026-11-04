@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Icon from "./Icon";
+import Section from "./Section";
 
 const faqs = [
   {
@@ -24,7 +25,7 @@ const faqs = [
   },
   {
     q: "How do I install ShieldBot, and what does it cost?",
-    a: "Install the extension from the Chrome Web Store. It is free and needs no account, and so is the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report.",
+    a: "Install the extension from the Chrome Web Store. It is free and needs no account, and so is the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report. The Chrome Web Store serves extension 3.4.0, which sends Robinhood Chain and BOT Chain requests to the API for analysis. Version 3.1.0 was tested with Rabby; 3.4.0 has not yet been tested with a wallet, and MetaMask testing is still outstanding.",
   },
   {
     q: "Does ShieldBot have a token?",
@@ -55,25 +56,8 @@ export default function FAQ() {
   const [open, setOpen] = useState<number | null>(0);
 
   return (
-    <section id="faq" aria-labelledby="faq-title" className="border-t border-hairline bg-ground py-16 md:py-24">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        <div className="max-w-[52rem]">
-          <p className="font-mono text-xs uppercase tracking-[0.08em] text-secondary">FAQ</p>
-          <h2 id="faq-title" className="mt-3 text-h2-sm md:text-h2 text-ink">
-            Questions people ask
-          </h2>
-          <p className="mt-4 text-[17px] md:text-lg leading-relaxed text-secondary">
-            Something else?{" "}
-            <a
-              href="mailto:support@shieldbotsecurity.online"
-              className="text-accent underline underline-offset-4 transition-colors duration-150 hover:text-ink"
-            >
-              Write to support
-            </a>
-            .
-          </p>
-
-          <ol className="mt-10 border-b border-hairline-strong md:mt-12">
+    <Section id="faq" title="FAQ">
+          <ol className="max-w-4xl border-b border-hairline">
             {faqs.map((faq, i) => {
               const expanded = open === i;
               return (
@@ -114,8 +98,6 @@ export default function FAQ() {
               );
             })}
           </ol>
-        </div>
-      </div>
-    </section>
+    </Section>
   );
 }

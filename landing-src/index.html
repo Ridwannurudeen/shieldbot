@@ -95,7 +95,7 @@
           "name": "How do I install ShieldBot, and what does it cost?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Install the extension from the Chrome Web Store. It is free and needs no account, and so is the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report."
+            "text": "Install the extension from the Chrome Web Store. It is free and needs no account, and so is the Telegram bot at t.me/shieldbot_bnb_bot: send a contract address to get a risk report. The Chrome Web Store serves extension 3.4.0, which sends Robinhood Chain and BOT Chain requests to the API for analysis. Version 3.1.0 was tested with Rabby; 3.4.0 has not yet been tested with a wallet, and MetaMask testing is still outstanding."
           }
         },
         {
@@ -104,6 +104,22 @@
           "acceptedAnswer": {
             "@type": "Answer",
             "text": "No. ShieldBot does not issue, sell, control or endorse any token. An earlier extension release used the BNB Chain token 0x4904c02efa081cb7685346968bac854cdf4e7777 as an access gate; that gate has been removed. Tokens using the ShieldBot name, including SBOT (named shieldbot, 0x8adba5e2f8ebe8a6f8d9f4c8151fba7ce2328900) and SHIELD (named shieldbot_, 0x7bf4c3cd40710b027282b6b85d86f75acfcbd0f1), two Robinhood Chain tokens paired with NVDA in pools opened on 15 September 2026, are not ShieldBot products."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does ShieldBot store my private keys or wallet data?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. ShieldBot never asks for, stores or sends your private keys or seed phrase. The extension sends the transaction details and the site's origin to the ShieldBot API so they can be checked."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What happens when ShieldBot detects a threat?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Before you sign, ShieldBot shows the verdict, a safety score and a plain-English explanation. On a known phishing site a warning banner appears. For a warning you choose to cancel or sign; Strict mode takes that choice away for Block Recommended and Unknown results and when the check could not run. The extension also refuses a request on its own when the check times out after 60 seconds, when your wallet's chain is unknown, unsupported or changes during the check (including a wallet_sendCalls batch with a call on another chain), when the request comes from a frame or popup the page can script, or when the site uses the older send or sendAsync methods."
           }
         },
         {

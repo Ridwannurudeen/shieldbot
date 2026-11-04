@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { verdictOf, type ScanReply } from "../firewallVerdict";
 import VerdictRecord from "./VerdictRecord";
+import Section from "./Section";
 
-// The try-it section, right after the hero: POST /api/scan, the quick contract scan (api.py). No key is
+// The try-it section: POST /api/scan, the quick contract scan (api.py). No key is
 // sent, so the API's per-IP limiter answers 429 when it is reached.
 const SCAN_URL = "https://api.shieldbotsecurity.online/api/scan";
 // The scan's own deadline is 25 seconds; give up a little after it.
@@ -84,7 +85,6 @@ function Result({ state }: { state: State }) {
         reasons={reply.coverage_reasons}
         chain={chain}
         evidenceHash={reply.evidence_hash}
-        variant="full"
       />
       {reply.evidence_url && (
         <a
@@ -144,22 +144,14 @@ export default function TryIt() {
   }
 
   return (
-    <section
-      id="try"
-      aria-labelledby="try-label"
-      className="border-b border-hairline bg-ground py-12 md:py-16"
-    >
-      <div className="max-w-6xl mx-auto px-4 sm:px-6">
+    <Section id="try" title="Try it">
         <form
           onSubmit={check}
-          aria-labelledby="try-label"
-          className="max-w-[520px]"
+          aria-label="Try a token check"
+          className="max-w-[620px]"
           noValidate
         >
-          <h2 id="try-label" className="text-base font-semibold text-ink">
-            Check a token or address
-          </h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,0.38fr)_minmax(0,1fr)]">
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,0.38fr)_minmax(0,1fr)]">
             <div>
               <label
                 htmlFor="try-chain"
@@ -234,12 +226,7 @@ export default function TryIt() {
           >
             <Result state={state} />
           </div>
-          <p className="mt-3 text-xs leading-[18px] text-secondary">
-            Quick check: no sell simulation, so a token reads Unknown here. The
-            extension runs the full check.
-          </p>
         </form>
-      </div>
-    </section>
+    </Section>
   );
 }

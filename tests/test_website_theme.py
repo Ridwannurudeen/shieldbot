@@ -110,14 +110,14 @@ def test_the_token_copies_are_identical():
 
 
 def test_every_page_has_a_theme_toggle():
-    # The landing's switch is one component, mounted once in the nav. Expected red on the Opus branch for the static
-    # pages, /try and the dashboard until the Codex branch is merged.
+    # The landing's switch is one component, mounted in both responsive nav layouts.
     toggle = read(COMPONENTS / "ThemeToggle.tsx")
     assert (
         toggle.count('role="switch"') == 1
         and toggle.count('aria-label="Light theme"') == 1
     )
-    assert read(COMPONENTS / "Navbar.tsx").count("<ThemeToggle />") == 1
+    # The desktop navigation and mobile menu each have their own responsive toggle.
+    assert read(COMPONENTS / "Navbar.tsx").count("<ThemeToggle />") == 2
     for page in [
         *STATIC_PAGES,
         LANDING_SRC / "public" / "try" / "index.html",

@@ -1,19 +1,11 @@
 import Navbar from "./components/Navbar";
 import Hero from "./components/Hero";
-import WhyShieldBot from "./components/WhyShieldBot";
-import TryIt from "./components/TryIt";
-import WhyUnknown from "./components/WhyUnknown";
-import Mechanism from "./components/Mechanism";
-import Chains from "./components/Chains";
 import HowItWorks from "./components/HowItWorks";
-import FeatureTabs from "./components/FeatureTabs";
-import WorkedExample from "./components/WorkedExample";
-import OnChain from "./components/OnChain";
-import AgentSecurity from "./components/AgentSecurity";
-import Telegram from "./components/Telegram";
-import StaySafe from "./components/StaySafe";
+import TryIt from "./components/TryIt";
+import Proof from "./components/Proof";
+import Registry from "./components/Registry";
+import Chains from "./components/Chains";
 import FAQ from "./components/FAQ";
-import CtaCard from "./components/CtaCard";
 import Footer from "./components/Footer";
 
 export default function App() {
@@ -28,20 +20,12 @@ export default function App() {
       <Navbar />
       <main id="main" tabIndex={-1} className="focus:outline-none">
         <Hero />
-        <WhyShieldBot />
-        <TryIt />
-        <WhyUnknown />
-        <Mechanism />
-        <WorkedExample />
-        <OnChain />
-        <Chains />
         <HowItWorks />
-        <FeatureTabs />
-        <AgentSecurity />
-        <Telegram />
-        <StaySafe />
+        <TryIt />
+        <Proof />
+        <Registry />
+        <Chains />
         <FAQ />
-        <CtaCard />
       </main>
       <Footer />
     </div>
