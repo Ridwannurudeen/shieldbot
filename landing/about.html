@@ -80,14 +80,12 @@
       <h1>How ShieldBot Protects Your Wallet</h1>
       </div>
 
-    <div class="callout">
-      ShieldBot operates at the transaction layer, not the URL layer. In the browser's page context, before your wallet receives the request, it intercepts transactions (<code>eth_sendTransaction</code>, <code>eth_signTransaction</code>), batches (<code>wallet_sendCalls</code>) and signature requests (<code>eth_signTypedData</code> and its <code>_v1</code>, <code>_v3</code> and <code>_v4</code> forms, <code>personal_sign</code> and <code>eth_sign</code>).
-    </div>
+    <p>ShieldBot operates at the transaction layer, not the URL layer. In the browser's page context, before your wallet receives the request, it intercepts transactions (<code>eth_sendTransaction</code>, <code>eth_signTransaction</code>), batches (<code>wallet_sendCalls</code>) and signature requests (<code>eth_signTypedData</code> and its <code>_v1</code>, <code>_v3</code> and <code>_v4</code> forms, <code>personal_sign</code> and <code>eth_sign</code>).</p>
 
     <h2>How Risk Is Rated</h2>
     <p>Every transaction receives a risk score before you sign it. Higher means riskier:</p>
     <table class="score-table">
-      <tr><th>Risk score</th><th>Verdict</th><th>What you see</th></tr>
+      <tr><th scope="col">Risk score</th><th scope="col">Verdict</th><th scope="col">What you see</th></tr>
       <tr><td>0 – 30</td><td><span class="badge safe">SAFE</span></td><td>The verdict and details; you can continue</td></tr>
       <tr><td>31 – 49</td><td><span class="badge caution"><span class="badge-glyph" aria-hidden="true">!</span>CAUTION</span></td><td>A warning; you choose to proceed or cancel</td></tr>
       <tr><td>50 – 70</td><td><span class="badge high"><span class="badge-glyph" aria-hidden="true">!</span>HIGH RISK</span></td><td>A strong warning with threat details</td></tr>

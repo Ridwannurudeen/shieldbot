@@ -82,7 +82,6 @@
 
     <div class="hero">
       <h1>Safety guide</h1>
-      <p>The usual wallet loss is not a break-in. It is a signature the owner gave to the wrong contract or site. This guide covers how that happens, how to lower the risk, and where ShieldBot helps. Nothing removes the risk; this lowers it.</p>
     </div>
 
     <h2>1. How drains happen</h2>
@@ -97,7 +96,7 @@
 
     <h3>setApprovalForAll</h3>
     <p>For NFTs, one call lets a contract move every item in a collection. A fake mint or claim button often asks for exactly this.</p>
-    <p class="helps"><strong>ShieldBot:</strong> the overlay shows the grant before you sign. <a href="/#telegram"><code>/rescue</code></a> does not list NFT approvals; use your wallet's approval settings or <a href="https://revoke.cash/" target="_blank" rel="noopener noreferrer">revoke.cash</a> for those.</p>
+    <p class="helps"><strong>ShieldBot:</strong> the overlay shows the grant before you sign. <a href="/#how"><code>/rescue</code></a> does not list NFT approvals; use your wallet's approval settings or <a href="https://revoke.cash/" target="_blank" rel="noopener noreferrer">revoke.cash</a> for those.</p>
 
     <h3>Fake front-ends and phishing links</h3>
     <p>A copy of a real site, reached from a search ad, a direct message or a look-alike domain, asks for a drain behind the real interface. Urgency is the tell: claim within 24 hours, verify now. So is a raw hash to sign (<code>eth_sign</code>), which can be a transaction.</p>
@@ -105,7 +104,7 @@
 
     <h3>Honeypot tokens</h3>
     <p>A token you can buy but not sell, or sell at a tax that takes most of the value. The chart looks healthy because nobody can exit.</p>
-    <p class="helps"><strong>ShieldBot:</strong> <a href="/#telegram"><code>/token</code></a> and the extension run a buy and sell simulation where the chain has one, GoPlus flags elsewhere. When the simulation cannot run, the answer is Unknown, not Safe.</p>
+    <p class="helps"><strong>ShieldBot:</strong> <a href="/#how"><code>/token</code></a> and the extension run a buy and sell simulation where the chain has one, GoPlus flags elsewhere. When the simulation cannot run, the answer is Unknown, not Safe.</p>
 
     <h3>Address poisoning</h3>
     <p>Someone sends dust from an address whose first and last characters match one you use, so you copy theirs from your history next time.</p>
@@ -133,10 +132,10 @@
 
     <h2>3. If you think you signed something bad</h2>
     <ol>
-      <li>Revoke first, in your wallet's approval settings or at <a href="https://revoke.cash/" target="_blank" rel="noopener noreferrer">revoke.cash</a>. Even after a loss, a revoke stops the next pull. <a href="/#telegram"><code>/rescue &lt;wallet&gt;</code></a> in Telegram counts ERC-20 allowances on a chain and lists the risky ones; it never revokes for you.</li>
+      <li>Revoke first, in your wallet's approval settings or at <a href="https://revoke.cash/" target="_blank" rel="noopener noreferrer">revoke.cash</a>. Even after a loss, a revoke stops the next pull. <a href="/#how"><code>/rescue &lt;wallet&gt;</code></a> in Telegram counts ERC-20 allowances on a chain and lists the risky ones; it never revokes for you.</li>
       <li>Move what is left to a fresh wallet with a new seed phrase. If you typed your seed phrase into a site, do this now; that wallet is gone.</li>
       <li>Do not sign anything offered as a refund or recovery; follow-up scams target the same people.</li>
-      <li>Report it: <a href="/#telegram"><code>/report &lt;address&gt; &lt;reason&gt;</code></a> in Telegram. Three independent reports mark the address as community-reported in scans. Tell the real project about the fake domain.</li>
+      <li>Report it: <a href="/#how"><code>/report &lt;address&gt; &lt;reason&gt;</code></a> in Telegram. Three independent reports mark the address as community-reported in scans. Tell the real project about the fake domain.</li>
     </ol>
 
     <h2>4. What ShieldBot does not do</h2>
@@ -146,10 +145,8 @@
       <li>The overlay sees requests only while installed; <code>/rescue</code> reads ERC-20 allowances from the chain and says when its history window left the scan incomplete.</li>
       <li>A verified spender can still be malicious; a site not on the phishing lists is not flagged.</li>
       <li>When a check times out or a source is down, the result is Unknown, never Safe.</li>
-      <li>On Robinhood Chain, <a href="/#on-chain">a guard contract allows only a fresh LOW or MEDIUM record; everything else is denied</a>. Permission is not a safety guarantee: the guard accepts MEDIUM risk.</li>
+      <li>On Robinhood Chain, <a href="/#registry">a guard contract allows only a fresh LOW or MEDIUM record; everything else is denied</a>. Permission is not a safety guarantee: the guard accepts MEDIUM risk.</li>
     </ul>
-
-    <p>Questions: <a href="mailto:support@shieldbotsecurity.online">support@shieldbotsecurity.online</a>.</p>
 
   </main>
 
