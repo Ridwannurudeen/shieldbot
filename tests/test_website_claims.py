@@ -981,7 +981,7 @@ def test_registry_records_link_each_onchain_transaction():
     bundle = "".join(read(path) for path in (ROOT / "landing" / "assets").glob("index-*.js"))
     for text in ("https://robin.etherscan.io/tx/", "record.tx_hash", "tx {short(record.tx_hash)}"):
         assert text in registry, text
-    assert 'aria-label={`Transaction ${record.tx_hash}`}' in registry
+    assert registry.count('aria-label={`Transaction ${record.tx_hash}`}') == 2  # the stacked records and the table
     assert registry.count("robin.etherscan.io/tx/${record.tx_hash}") == 2  # the stacked records and the table
     assert "https://robin.etherscan.io/tx/" in bundle
     assert "tx " in bundle

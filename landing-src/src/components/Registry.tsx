@@ -313,6 +313,7 @@ function RecentRecords() {
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex min-h-11 items-center whitespace-nowrap text-ink underline decoration-hairline-strong underline-offset-4 hover:text-accent"
+                          aria-label={`Transaction ${record.tx_hash}`}
                         >
                           tx {short(record.tx_hash)}
                         </a>

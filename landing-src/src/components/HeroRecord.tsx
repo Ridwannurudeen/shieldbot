@@ -9,7 +9,7 @@ export default function HeroRecord() {
               width={490}
               height={246}
               alt="The ShieldBot extension's dialog while it checks the request. It reads Analyzing transaction..."
-              className="relative z-10 block h-auto w-full max-w-[365px]"
+              className="block h-auto w-full max-w-[365px] rounded-md"
             />
           </div>
           <div className="hero-verdict absolute inset-0 overflow-hidden rounded-md">
