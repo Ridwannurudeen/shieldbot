@@ -860,12 +860,21 @@ def test_every_static_page_declares_its_geist_face():
             html = read(page)
             assert not any(line.startswith("+") for line in html.splitlines()), page
             assert html.count('<link rel="stylesheet" href="/css/pages.css">') == 1, page
+    # A Geist face that loads a local /fonts/geist- file (the Arial based Geist Fallback face alone does not count),
+    # no @import, and every url(), however it is quoted, a file in public/fonts.
     for sheet in (LANDING_SRC / "public" / "css" / "pages.css", ROOT / "landing" / "css" / "pages.css"):
         css = read(sheet)
         assert not any(line.startswith("+") for line in css.splitlines()), sheet
-        assert re.search(r"^\s*@font-face\s*\{[^}]*Geist", css, re.MULTILINE), sheet
-        fonts = re.findall(r'url\("([^"]+)"\)', css)
-        assert fonts and all((LANDING_SRC / "public" / font.lstrip("/")).is_file() for font in fonts), fonts
+        faces = re.findall(r"^\s*@font-face\s*\{([^}]*)\}", css, re.MULTILINE)
+        assert any(
+            re.search(r"font-family:\s*([\"']?)Geist\1\s*;", face) and re.search(r"url\(\s*[\"']?/fonts/geist-", face)
+            for face in faces
+        ), sheet
+        assert "@import" not in css.lower(), sheet
+        urls = [url.strip("\"'") for url in re.findall(r"url\(\s*([^)]*?)\s*\)", css, re.IGNORECASE)]
+        assert urls and all(
+            re.fullmatch(r"/fonts/[\w.-]+", url) and (LANDING_SRC / "public" / url[1:]).is_file() for url in urls
+        ), urls
 
 
 def test_the_site_ships_without_framer_motion():
