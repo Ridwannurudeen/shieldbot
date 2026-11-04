@@ -13,7 +13,7 @@ export default function ThemeToggle() {
       aria-label="Light theme"
       title="Light theme"
       onClick={() => setTheme(light ? "dark" : "light")}
-      className="inline-flex h-11 w-11 flex-none items-center justify-center rounded-md text-ink transition-colors duration-150 ease-out hover:bg-ground-alt"
+      className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-lg text-ink transition-colors duration-150 ease-out hover:bg-ground-alt"
     >
       <Icon name={light ? "moon" : "sun"} size={16} />
     </button>
