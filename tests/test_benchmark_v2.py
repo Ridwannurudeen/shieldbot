@@ -5,6 +5,7 @@ The recorded scores here are written by the tests for the tests; they are not me
 
 import asyncio
 import json
+from unittest.mock import AsyncMock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -391,6 +392,7 @@ def test_the_live_scorer_records_unknown_and_failed_scans_without_inventing_scor
         return ctx.address
 
     container = SimpleNamespace(
+        web3_client=SimpleNamespace(is_token_contract=AsyncMock(return_value=True)),
         registry=SimpleNamespace(run_all=run_all),
         risk_engine=SimpleNamespace(compute_from_results=lambda address: outputs[address]),
     )

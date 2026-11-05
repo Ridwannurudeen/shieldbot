@@ -118,6 +118,7 @@ async def test_bot_token_returns_still_running_unknown_at_the_request_deadline(m
     structural.analyze = AsyncMock(return_value=structural_result)
     registry.register(structural)
     registry.register(HoneypotAnalyzer(service))
+    bot_module.web3_client.is_token_contract = AsyncMock(return_value=True)
     bot_module.container.registry = registry
     bot_module._get_token_info_with_timeout = AsyncMock(return_value={})
     captured = []
@@ -184,6 +185,7 @@ async def test_bot_token_on_677_whose_simulator_never_finishes_is_still_running_
     structural.analyze = AsyncMock(return_value=structural_result)
     registry.register(structural)
     registry.register(HoneypotAnalyzer(HoneypotService(client)))
+    bot_module.web3_client.is_token_contract = AsyncMock(return_value=True)
     bot_module.container.registry = registry
     bot_module._get_token_info_with_timeout = AsyncMock(return_value={})
     captured = []
@@ -239,6 +241,7 @@ async def test_bot_contract_scan_passes_a_request_deadline_to_analyzers(monkeypa
     from core.analyzer import AnalysisContext
 
     registry = MagicMock(run_all=AsyncMock(return_value=[]))
+    bot_module.web3_client.is_token_contract = AsyncMock(return_value=True)
     bot_module.container.registry = registry
     bot_module._get_token_info_with_timeout = AsyncMock(return_value={})
     bot_module.risk_engine = MagicMock(compute_from_results=MagicMock(return_value={
@@ -279,6 +282,7 @@ async def test_scan_bot_prefix_runs_analyzers_and_reports_unknown_sellability(mo
         return [*results, await honeypot.analyze(context)]
 
     registry = SimpleNamespace(run_all=AsyncMock(side_effect=run_all))
+    bot_module.web3_client.is_token_contract = AsyncMock(return_value=True)
     bot_module.container.registry = registry
     bot_module.risk_engine = RiskEngine()
     bot_module._get_token_info_with_timeout = AsyncMock(return_value={})
