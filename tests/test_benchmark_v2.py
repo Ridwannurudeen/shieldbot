@@ -1148,8 +1148,9 @@ def test_a_behavioral_rerun_with_no_ethos_profile_uses_the_recorded_neutral_resp
 
     assert behavioral.score == 0
     assert behavioral.flags == []
-    assert behavioral.data == {**response, "counterparty": DRAINER}
+    assert behavioral.data == {"skipped": True, "reason": "no reputation profile"}
     assert document["rerun_unavailable"] == {"behavioral": 0}
+    assert document["records"][0]["score"] == 70
 
 
 def test_a_behavioral_rerun_keeps_an_unknown_ethos_response_unknown(
