@@ -2,16 +2,22 @@
 
 Usage:
     python -m eval.replay --inputs eval/data/live_inputs.json --output eval/data/replay_scores.json
+    python -m eval.replay --inputs eval/data/live_inputs.json --output eval/data/replay_scores.json \
+        --rerun intent,signature,behavioral
 """
 
 import argparse
+import asyncio
 import datetime
 import json
 import math
 import re
 import sys
 
-from core.analyzer import AnalyzerResult
+from analyzers.behavioral import BehavioralAnalyzer
+from analyzers.intent import IntentMismatchAnalyzer
+from analyzers.signature import SignaturePermitAnalyzer
+from core.analyzer import AnalysisContext, AnalyzerResult
 from core.config import Settings
 from core.container import ServiceContainer
 from eval.benchmark import FORMAT_INPUTS, FORMAT_SCORES, json_sha256
@@ -19,6 +25,8 @@ from eval.live_scorer import current_revision
 
 _ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 _REVISION = re.compile(r"[0-9a-f]{40}")
+# The transaction-only analyzers, which can be run again at the replaying revision without a provider.
+RERUNNABLE = ("intent", "signature", "behavioral")
 
 
 def load_inputs(path):
@@ -105,6 +113,39 @@ def current_engine_and_weights():
     }
 
 
+class _Offline:
+    """A service for a rerun analyzer: any use of it refuses the replay rather than reach a provider."""
+
+    def __init__(self, analyzer):
+        self._analyzer = analyzer
+
+    def __getattr__(self, attribute):
+        raise ValueError(
+            f"{self._analyzer} would make a network lookup ({attribute}) at this revision; "
+            "it cannot be rerun offline"
+        )
+
+
+def rerun_analyzers(names):
+    """The current revision's analyzers to run again, each wired to services that refuse any lookup."""
+    unknown = sorted(set(names) - set(RERUNNABLE))
+    if unknown:
+        raise ValueError(
+            "only "
+            + ", ".join(RERUNNABLE)
+            + " can be rerun offline, not "
+            + ", ".join(unknown)
+        )
+    build = {
+        "intent": lambda: IntentMismatchAnalyzer(
+            _Offline("intent"), _Offline("intent")
+        ),
+        "signature": lambda: SignaturePermitAnalyzer(_Offline("signature")),
+        "behavioral": lambda: BehavioralAnalyzer(_Offline("behavioral")),
+    }
+    return {name: build[name]() for name in names}
+
+
 def verify_analyzer_set(recorded_weights, current_weights):
     """Reject provider data from a different analyzer set before scoring it."""
     added = sorted(set(current_weights) - set(recorded_weights))
@@ -153,7 +194,19 @@ def normalize_weights(results):
     return results
 
 
-def replay_records(records, engine, current_weights):
+def rerun_results(record, results, analyzers, current_weights):
+    """Replace the recorded results of the rerun analyzers with what they return at this revision."""
+    ctx = AnalysisContext(address=record["address"], chain_id=record["chain_id"])
+    rerun = []
+    for result in results:
+        if result.name in analyzers:
+            result = asyncio.run(analyzers[result.name].analyze(ctx))
+            result.weight = current_weights[result.name]
+        rerun.append(result)
+    return rerun
+
+
+def replay_records(records, engine, current_weights, analyzers):
     """Score recorded analyzer inputs with the current RiskEngine revision."""
     scores = []
     for input_record in records:
@@ -169,7 +222,14 @@ def replay_records(records, engine, current_weights):
                 }
             )
             continue
-        results = normalize_weights(rebuild_results(input_record, current_weights))
+        results = normalize_weights(
+            rerun_results(
+                input_record,
+                rebuild_results(input_record, current_weights),
+                analyzers,
+                current_weights,
+            )
+        )
         risk_output = engine.compute_from_results(results)
         score = risk_output.get("rug_probability")
         record = {
@@ -197,9 +257,13 @@ def replay_records(records, engine, current_weights):
     return scores
 
 
-def replay(inputs_path, output_path, revision, dirty):
-    """Write current-revision scores from one immutable analyzer-input recording."""
+def replay(inputs_path, output_path, revision, dirty, rerun=()):
+    """Write current-revision scores from one immutable analyzer-input recording.
+
+    The analyzers named in ``rerun`` are run again at this revision instead of read from the recording.
+    """
     inputs = load_inputs(inputs_path)
+    analyzers = rerun_analyzers(rerun)
     engine, current_weights = current_engine_and_weights()
     recorded_weights = {
         analyzer["name"]: analyzer["weight"] for analyzer in inputs["analyzers"]
@@ -218,7 +282,10 @@ def replay(inputs_path, output_path, revision, dirty):
         "inputs_dirty": inputs["dirty"],
         "inputs_recorded_at": inputs["recorded_at"],
         "weight_changes": verify_analyzer_set(recorded_weights, current_weights),
-        "records": replay_records(inputs["records"], engine, current_weights),
+        "rerun": sorted(analyzers),
+        "records": replay_records(
+            inputs["records"], engine, current_weights, analyzers
+        ),
     }
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(document, f, indent=2)
@@ -235,9 +302,21 @@ def main(argv=None):
     parser.add_argument(
         "--output", required=True, help="Path to save the replayed scores"
     )
+    parser.add_argument(
+        "--rerun",
+        default="",
+        help="Comma-separated analyzers to run again at this revision: "
+        + ", ".join(RERUNNABLE),
+    )
     args = parser.parse_args(argv)
     revision, dirty = current_revision()
-    replay(args.inputs, args.output, revision, dirty)
+    replay(
+        args.inputs,
+        args.output,
+        revision,
+        dirty,
+        [name for name in args.rerun.split(",") if name],
+    )
     print(f"Scores saved to {args.output}")
     return 0
 

@@ -876,6 +876,205 @@ def test_replay_and_results_carry_inputs_provenance(tmp_path, monkeypatch):
     assert {key: results[key] for key in expected} == expected
 
 
+def one_complete_input(tmp_path):
+    dataset = write_dataset(tmp_path, [entry()])
+    inputs = write_inputs(
+        tmp_path,
+        dataset,
+        [
+            {
+                "chain_id": 1,
+                "address": DRAINER,
+                "status": "ok",
+                "reason": None,
+                "results": complete_analyzer_inputs(),
+            }
+        ],
+    )
+    weights = {
+        result["name"]: result["weight"] for result in complete_analyzer_inputs()
+    }
+    return dataset, inputs, weights
+
+
+def test_replay_reruns_the_named_analyzers_and_reads_the_rest_from_the_recording(
+    tmp_path, monkeypatch
+):
+    dataset, inputs, weights = one_complete_input(tmp_path)
+    seen = []
+
+    rerun_data = {
+        "intent": (100, {"status": "ok", "floor": 90}),
+        "signature": (0, {"skipped": True}),
+    }
+
+    class Rerun:
+        def __init__(self, name):
+            self.name = name
+
+        async def analyze(self, ctx):
+            seen.append((self.name, ctx.address, ctx.chain_id, ctx.extra))
+            score, data = rerun_data[self.name]
+            return AnalyzerResult(self.name, 99, score, data=dict(data))
+
+    monkeypatch.setattr(
+        replay,
+        "rerun_analyzers",
+        lambda names: {name: Rerun(name) for name in names},
+    )
+    engine = RiskEngine()
+    monkeypatch.setattr(
+        replay, "current_engine_and_weights", lambda: (engine, weights)
+    )
+    expected_results = [
+        AnalyzerResult(
+            "structural",
+            4,
+            100,
+            data={
+                "status": "ok",
+                "is_contract": True,
+                "is_verified": True,
+                "contract_age_days": 100,
+                "coverage": {"scam_database": True, "bytecode": True},
+                "scam_matches": [
+                    {"severity": "medium", "reason": "Community report"}
+                ],
+                "observed_at": 1_700_000_000,
+                "notes": ["Top holders checked"],
+            },
+        ),
+        AnalyzerResult(
+            "market",
+            2.5,
+            80,
+            data={
+                "status": "ok",
+                "liquidity_usd": 200000,
+                "observed_at": 1_700_000_001,
+                "notes": ["Market observed"],
+            },
+        ),
+        AnalyzerResult(
+            "behavioral", 2, 50, data={"status": "ok", "reputation_score": 80}
+        ),
+        AnalyzerResult(
+            "honeypot",
+            1.5,
+            0,
+            data={
+                "status": "ok",
+                "is_honeypot": False,
+                "can_sell": True,
+                "buy_tax": 0,
+                "sell_tax": 0,
+            },
+        ),
+        AnalyzerResult("intent", 1.5, 100, data={"status": "ok", "floor": 90}),
+        AnalyzerResult("signature", 1, 0, data={"skipped": True}),
+    ]
+    for result in expected_results:
+        result.weight = result.weight / 12.5
+    expected = engine.compute_from_results(expected_results)
+    scores_path = tmp_path / "scores.json"
+
+    recorded = replay.replay(inputs, tmp_path / "recorded.json", REVISION, False)
+    document = replay.replay(
+        inputs, scores_path, REVISION, False, ["intent", "signature"]
+    )
+
+    assert sorted(seen) == [
+        ("intent", DRAINER, 1, {}),
+        ("signature", DRAINER, 1, {}),
+    ]
+    assert document["rerun"] == ["intent", "signature"]
+    assert recorded["rerun"] == []
+    assert document["records"][0]["score"] == expected["rug_probability"]
+    assert document["records"][0]["risk_level"] == expected["risk_level"]
+    assert document["records"][0]["score"] != recorded["records"][0]["score"]
+    assert build_results(dataset, scores_path)["rerun"] == ["intent", "signature"]
+
+
+def test_a_rerun_analyzer_that_reaches_for_a_provider_refuses_the_replay(
+    tmp_path, monkeypatch
+):
+    _, inputs, weights = one_complete_input(tmp_path)
+
+    class LooksUp:
+        name = "behavioral"
+
+        def __init__(self, service):
+            self._service = service
+
+        async def analyze(self, ctx):
+            await self._service.fetch_wallet_reputation(ctx.address)
+
+    monkeypatch.setattr(
+        replay,
+        "rerun_analyzers",
+        lambda names: {"behavioral": LooksUp(replay._Offline("behavioral"))},
+    )
+    monkeypatch.setattr(
+        replay, "current_engine_and_weights", lambda: (RiskEngine(), weights)
+    )
+    output = tmp_path / "scores.json"
+
+    with pytest.raises(
+        ValueError,
+        match="behavioral would make a network lookup [(]fetch_wallet_reputation[)]",
+    ):
+        replay.replay(inputs, output, REVISION, False, ["behavioral"])
+    assert not output.exists()
+
+
+def test_the_current_analyzers_rerun_offline_only_where_they_make_no_lookup(
+    tmp_path, monkeypatch
+):
+    _, inputs, weights = one_complete_input(tmp_path)
+    monkeypatch.setattr(
+        replay, "current_engine_and_weights", lambda: (RiskEngine(), weights)
+    )
+
+    document = replay.replay(
+        inputs, tmp_path / "scores.json", REVISION, False, ["intent", "signature"]
+    )
+    assert document["records"][0]["status"] in ("ok", "unknown")
+
+    # Without a transaction this revision's behavioral analyzer still looks the address up on Ethos.
+    with pytest.raises(ValueError, match="behavioral would make a network lookup"):
+        replay.replay(
+            inputs, tmp_path / "behavioral.json", REVISION, False, ["behavioral"]
+        )
+
+
+def test_only_the_transaction_analyzers_can_be_rerun(tmp_path, monkeypatch):
+    _, inputs, weights = one_complete_input(tmp_path)
+    monkeypatch.setattr(
+        replay, "current_engine_and_weights", lambda: (RiskEngine(), weights)
+    )
+
+    with pytest.raises(ValueError, match="not honeypot"):
+        replay.replay(
+            inputs, tmp_path / "scores.json", REVISION, False, ["intent", "honeypot"]
+        )
+
+
+def test_the_replay_command_passes_the_rerun_list(monkeypatch):
+    calls = []
+    monkeypatch.setattr(replay, "current_revision", lambda: (REVISION, False))
+    monkeypatch.setattr(replay, "replay", lambda *args: calls.append(args))
+
+    replay.main(["--inputs", "in.json", "--output", "out.json"])
+    replay.main(
+        ["--inputs", "in.json", "--output", "out.json", "--rerun", "intent,behavioral"]
+    )
+
+    assert calls == [
+        ("in.json", "out.json", REVISION, False, []),
+        ("in.json", "out.json", REVISION, False, ["intent", "behavioral"]),
+    ]
+
+
 def test_input_recording_keeps_earlier_records_when_a_later_one_cannot_serialize(
     tmp_path, monkeypatch
 ):

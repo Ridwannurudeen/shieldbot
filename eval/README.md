@@ -240,6 +240,13 @@ A malicious label must rest on evidence that ShieldBot's score does not already 
    replay's own revision and time. This must use the baseline inputs recorded before engine changes, or a
    comparison would also measure provider drift.
 
+   `--rerun intent,signature,behavioral` runs those transaction-only analyzers again at the current revision,
+   on the same address and chain with no transaction, and reads every other analyzer from the recording, so a
+   change to what they return without a transaction is measured too. Their services are replaced by stubs that
+   refuse the replay if touched, so a rerun never reaches a provider: an analyzer that would look something up
+   at this revision fails the replay instead (behavioral does until it skips without a transaction). The
+   scores and results name the rerun analyzers in `rerun`.
+
 4. Compute the results, offline:
 
    ```bash
@@ -254,7 +261,7 @@ A malicious label must rest on evidence that ShieldBot's score does not already 
 
 The results file (`shieldbot-benchmark-results/2`) carries `scored_at` and `revision` from the scores,
 `dirty`, the dataset's path and hash, the scores' hash, the inputs hash/revision/dirty state/recorded time,
-the `weight_changes`, the `threshold`, an `overall` block, one block
+the `weight_changes`, the `rerun` analyzers, the `threshold`, an `overall` block, one block
 per class and one `details` row per entry. Hashes are SHA-256 of the JSON with sorted keys and no
 whitespace, so they do not depend on line endings.
 

@@ -199,6 +199,7 @@ def build_results(
         "inputs_dirty": scores["inputs_dirty"],
         "inputs_recorded_at": scores["inputs_recorded_at"],
         "weight_changes": scores.get("weight_changes", []),
+        "rerun": scores.get("rerun", []),
         "threshold": threshold,
         **benchmark_results(entries, scores["records"], threshold),
     }
