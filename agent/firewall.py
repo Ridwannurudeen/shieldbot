@@ -247,18 +247,15 @@ def create_agent_firewall_router(container) -> APIRouter:
                 is_token = False if has_code is False else await container.web3_client.is_token_contract(
                     to_addr, chain_id,
                 )
-                # Without the verification, intent marks every unknown selector's risk unknown. It
-                # runs beside the analyzers, and is settled first when intent will read it.
+                # Without the verification, intent marks every unknown selector's risk unknown. Intent
+                # reads it only for an unknown selector or a call paying native value, so it is looked
+                # up, and settled before the analyzers, only then: no lookup outlives the response.
                 verification = None
-                if is_contract is not False:
+                if is_contract is not False and reads_verification(tx.data, tx.value):
                     verification = asyncio.create_task(
                         _target_verification(container.web3_client, to_addr, chain_id, code)
                     )
-                    verification.add_done_callback(
-                        lambda task: task.exception() if not task.cancelled() else None
-                    )
-                    if reads_verification(tx.data, tx.value):
-                        await verification
+                    await verification
                 ctx = AnalysisContext(
                     address=to_addr,
                     chain_id=chain_id,

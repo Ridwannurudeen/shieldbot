@@ -390,6 +390,20 @@ def test_a_plain_call_still_reads_and_writes_the_targets_cache(client, mock_cont
     mock_container.db.upsert_contract_score.assert_awaited_once()
 
 
+def test_a_call_intent_does_not_judge_by_verification_looks_none_up(client, mock_container):
+    """Intent reads the verification only for an unknown selector or a call paying native value, so
+    no explorer lookup is started for any other call, and none outlives the response."""
+    resp = client.post("/api/agent/firewall", json={
+        "agent_id": "agent:1",
+        "transaction": {"from": "0xAgent", "to": "0xTarget", "data": APPROVE, "value": "0", "chain_id": 56},
+    }, headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    ctx = mock_container.registry.run_all.await_args.args[0]
+    assert ctx.extra["verification"] is None
+    assert ctx.extra["is_contract"] is True
+    mock_container.web3_client.is_verified_contract.assert_not_awaited()
+
+
 def test_an_address_with_no_code_is_a_wallet_and_no_token(client, mock_container):
     mock_container.web3_client.get_bytecode = AsyncMock(return_value="0x")
     resp = client.post("/api/agent/firewall", json={
