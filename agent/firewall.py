@@ -247,63 +247,37 @@ def create_agent_firewall_router(container) -> APIRouter:
                 is_token = False if has_code is False else await container.web3_client.is_token_contract(
                     to_addr, chain_id,
                 )
-                whitelisted = None
-                if value_wei > 0 and decoded.get("category") == "swap":
-                    adapter = container.web3_client._get_adapter(chain_id)
-                    whitelisted = container.calldata_decoder.is_whitelisted_target(
-                        to_addr, chain_id=chain_id, adapter=adapter,
-                    )
-                params = list(decoded.get("params", {}).values())
-                router_path = next((
-                    value for index, value in enumerate(params[:-1])
-                    if isinstance(value, list)
-                    and value
-                    and all(container.web3_client.is_valid_address(token) for token in value)
-                    and isinstance(params[index + 1], str)
-                    and params[index + 1].lower() == tx.sender.lower()
-                ), None) if whitelisted and value_wei > 0 and decoded.get("category") == "swap" else None
-                analysis_targets = list(dict.fromkeys(router_path)) if router_path else [to_addr]
-                router_answers = router_path is not None
+                whitelisted = container.calldata_decoder.is_whitelisted_target(
+                    to_addr, chain_id=chain_id, adapter=container.web3_client._get_adapter(chain_id),
+                )
                 # Without the verification, intent marks every unknown selector's risk unknown. Intent
                 # reads it only for an unknown selector or a call paying native value, so it is looked
                 # up, and settled before the analyzers, only then: no lookup outlives the response.
                 verification = None
-                if not router_answers and is_contract is not False and reads_verification(tx.data, tx.value):
+                if is_contract is not False and reads_verification(tx.data, tx.value) and (
+                    not whitelisted or decoded.get("category") == "unknown"
+                ):
                     verification = asyncio.create_task(
                         _target_verification(container.web3_client, to_addr, chain_id, code)
                     )
                     await verification
-                contexts = [AnalysisContext(
-                    address=target,
+                ctx = AnalysisContext(
+                    address=to_addr,
                     chain_id=chain_id,
                     from_address=tx.sender,
-                    is_token=True if router_answers else is_token,
+                    is_token=is_token,
                     extra={
                         "calldata": tx.data,
                         "value": tx.value,
                         "verification": verification,
-                        "is_contract": None if router_answers else is_contract,
-                        "whitelisted_router": whitelisted if router_answers else None,
+                        "is_contract": is_contract,
+                        "whitelisted_router": whitelisted,
                     },
-                ) for target in analysis_targets]
-
-                async def analyze_targets():
-                    results_by_target = await asyncio.gather(*(
-                        container.registry.run_all(target_ctx) for target_ctx in contexts
-                    ))
-                    risk_by_target = [
-                        container.risk_engine.compute_from_results(target_results, target_ctx.is_token)
-                        for target_results, target_ctx in zip(results_by_target, contexts)
-                    ]
-                    best_index = max(
-                        range(len(risk_by_target)),
-                        key=lambda index: risk_by_target[index].get("rug_probability", 0),
-                    )
-                    return results_by_target[best_index], risk_by_target[best_index]
+                )
 
                 if container.tenderly_simulator.is_enabled():
                     # Run analyzers + Tenderly in parallel
-                    analyzer_task = analyze_targets()
+                    analyzer_task = container.registry.run_all(ctx)
                     sim_task = container.tenderly_simulator.simulate_transaction(
                         from_address=tx.sender,
                         to_address=to_addr,
@@ -311,12 +285,11 @@ def create_agent_firewall_router(container) -> APIRouter:
                         value=tx.value,
                         chain_id=chain_id,
                     )
-                    analysis_result, sim_raw = await asyncio.gather(
+                    results, sim_raw = await asyncio.gather(
                         analyzer_task, sim_task, return_exceptions=True,
                     )
-                    if isinstance(analysis_result, Exception):
-                        raise analysis_result
-                    results, risk_output = analysis_result
+                    if isinstance(results, Exception):
+                        raise results
                     if isinstance(sim_raw, UnsupportedChainError):
                         raise sim_raw
                     if isinstance(sim_raw, Exception):
@@ -324,7 +297,11 @@ def create_agent_firewall_router(container) -> APIRouter:
                         sim_raw = None
                     simulation_result = sim_raw
                 else:
-                    results, risk_output = await analyze_targets()
+                    results = await container.registry.run_all(ctx)
+
+                risk_output = container.risk_engine.compute_from_results(
+                    results, is_token,
+                )
             except UnsupportedChainError:
                 raise
             except Exception as exc:

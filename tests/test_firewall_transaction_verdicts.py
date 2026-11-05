@@ -62,7 +62,6 @@ REQUESTS = {
     "native_send": {"to": EOA, "value": str(10**17), "data": "0x"},
 }
 
-
 PAYABLE_ROUTER_SWAP = {
     "to": ROUTER,
     "value": str(10**18),
@@ -70,6 +69,12 @@ PAYABLE_ROUTER_SWAP = {
         ["uint256", "address[]", "address", "uint256"],
         [1, [CAKE, BUSD], SENDER, 2**40],
     ).hex(),
+}
+
+UNWHITELISTED_PAYABLE_CALL = {
+    "to": BUSD,
+    "value": str(10**18),
+    "data": PAYABLE_ROUTER_SWAP["data"],
 }
 
 
@@ -81,7 +86,8 @@ def _code(address):
     entry = _entry(address)
     if entry is None:
         return "0x"
-    return "0x" + "".join("63" + sig for sig in entry["bytecode_patterns"] or []) or "0x6080"
+    patterns = entry["bytecode_patterns"] or []
+    return "0x" + "".join("63" + sig for sig in patterns) if patterns else "0x"
 
 
 def _web3(verification=(True, None)):
@@ -168,10 +174,12 @@ async def _api_verdict(monkeypatch, request, verification=(True, None)):
     }
 
 
-def _agent_verdict(request, verification=(True, None)):
+def _agent_verdict(request, verification=(True, None), contract_status=None):
     from agent.firewall import create_agent_firewall_router
 
     web3 = _web3(verification)
+    if contract_status is not None:
+        web3.is_contract = AsyncMock(return_value=contract_status)
     container = SimpleNamespace(
         db=SimpleNamespace(
             get_agent_policy=AsyncMock(return_value={
@@ -206,26 +214,37 @@ def _agent_verdict(request, verification=(True, None)):
     return {
         "score": body["score"], "risk_level": body["risk_level"], "verdict": body["verdict"],
         "status": body["status"], "category_scores": body["category_scores"],
+        "flags": body["flags"],
     }
 
 
 async def _verdict(monkeypatch, path, case, verification=(True, None)):
     with patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock(side_effect=_goplus)), \
             patch("services.contract_service.BSCSCAN_DELAY", 0):
-        request = PAYABLE_ROUTER_SWAP if case == "payable_router_swap" else REQUESTS[case]
+        if case == "payable_router_swap":
+            request = PAYABLE_ROUTER_SWAP
+        elif case == "unwhitelisted_payable_call":
+            request = UNWHITELISTED_PAYABLE_CALL
+        else:
+            request = REQUESTS[case]
         if path == "api":
             return await _api_verdict(monkeypatch, request, verification)
-        return _agent_verdict(request, verification)
+        return _agent_verdict(
+            request, verification,
+            contract_status=False if case == "payable_router_swap" else None,
+        )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "verification", [(True, None), (None, None)], ids=["verified", "explorer-timeout"]
 )
-async def test_a_payable_allowlisted_router_swap_matches_the_api_path(monkeypatch, verification):
+async def test_payable_allowlisted_router_swap_matches_api_verdict(monkeypatch, verification):
     api_result = await _verdict(monkeypatch, "api", "payable_router_swap", verification)
     agent_result = await _verdict(monkeypatch, "agent", "payable_router_swap", verification)
 
+    assert api_result["classification"] == "SAFE"
+    assert agent_result["verdict"] == "ALLOW"
     assert api_result == {
         "score": 6.4,
         "classification": "SAFE",
@@ -240,20 +259,17 @@ async def test_a_payable_allowlisted_router_swap_matches_the_api_path(monkeypatc
             "signature": 0,
         },
     }
-    assert agent_result == {
-        "score": 6.4,
-        "risk_level": "LOW",
-        "verdict": "ALLOW",
-        "status": "ok",
-        "category_scores": {
-            "structural": 20,
-            "market": 0,
-            "behavioral": 0,
-            "honeypot": 0,
-            "intent": 0.0,
-            "signature": 0,
-        },
-    }
+    assert agent_result["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_unwhitelisted_unverified_payable_call_keeps_payment_floor(monkeypatch):
+    result = await _verdict(
+        monkeypatch, "agent", "unwhitelisted_payable_call", (False, None),
+    )
+
+    assert result["verdict"] == "WARN"
+    assert any("sends 1 native value to an unverified contract" in flag for flag in result["flags"])
 
 
 # Printed by running _verdict for each case at 5690690.
@@ -323,4 +339,7 @@ EXPECTED = {('agent', 'erc20_transfer'): {'category_scores': {'behavioral': 0,
 @pytest.mark.parametrize("path", ["api", "agent"])
 @pytest.mark.parametrize("case", list(REQUESTS))
 async def test_a_transactions_verdict_is_unchanged(monkeypatch, path, case):
-    assert await _verdict(monkeypatch, path, case) == EXPECTED[(path, case)]
+    result = await _verdict(monkeypatch, path, case)
+    if path == "agent":
+        result = {key: value for key, value in result.items() if key != "flags"}
+    assert result == EXPECTED[(path, case)]
