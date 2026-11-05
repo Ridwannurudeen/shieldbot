@@ -364,7 +364,7 @@ async def test_recheck_rescans_and_logs_a_robinhood_pair_on_its_own_chain(hunter
 
     assert result == [ROBINHOOD_TOKEN]
     tools.scan_contract.assert_awaited_once_with(
-        ROBINHOOD_TOKEN, chain_id=4663, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS
+        ROBINHOOD_TOKEN, chain_id=4663, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS, is_token=True
     )
     db.update_tracked_pair_status.assert_awaited_once_with(ROBINHOOD_TOKEN, "blocked")
     assert db.insert_agent_finding.call_args.kwargs["chain_id"] == 4663
@@ -385,7 +385,7 @@ async def test_recheck_keeps_bsc_rows_on_bsc(hunter, tools, db):
 
     await hunter._recheck_warn_contracts("sweep-1")
 
-    tools.scan_contract.assert_awaited_once_with("0xtoken1", chain_id=56, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS)
+    tools.scan_contract.assert_awaited_once_with("0xtoken1", chain_id=56, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS, is_token=True)
     assert db.insert_agent_finding.call_args.kwargs["chain_id"] == 56
     tools.auto_watch_deployer.assert_awaited_once_with(
         "0xdeploy1", reason="auto: recheck upgrade 0xtoken1 (score=85)"
@@ -461,7 +461,7 @@ async def test_scan_new_pairs_discovers_then_scans_newest_launches_up_to_the_cap
     discovery = MagicMock()
     discovery.run = AsyncMock(side_effect=lambda: order.append("discover"))
 
-    async def scan(token, chain_id, deadline):
+    async def scan(token, chain_id, deadline, is_token):
         order.append(token)
         return scan_result(10)
 
@@ -473,7 +473,7 @@ async def test_scan_new_pairs_discovers_then_scans_newest_launches_up_to_the_cap
     newest = [launch(index)["token_address"] for index in reversed(range(count))]
     assert order == ["discover", *newest[:LAUNCH_SCANS_PER_SWEEP]]
     assert all(
-        call.kwargs == {"chain_id": 4663, "deadline": BACKGROUND_SCAN_DEADLINE_SECONDS}
+        call.kwargs == {"chain_id": 4663, "deadline": BACKGROUND_SCAN_DEADLINE_SECONDS, "is_token": True}
         for call in tools.scan_contract.await_args_list
     )
     remaining = await real_db.get_unscanned_launches(4663, limit=100)
@@ -530,7 +530,7 @@ async def test_scan_new_pairs_records_each_outcome_and_never_clears_an_incomplet
     await real_db.upsert_discovered_launches(4663, [launch(index) for index in range(len(outcomes))])
     by_token = {tokens[status]: outcome for status, outcome in outcomes.items()}
 
-    async def scan(token, chain_id, deadline):
+    async def scan(token, chain_id, deadline, is_token):
         if isinstance(by_token[token], Exception):
             raise by_token[token]
         return by_token[token]
@@ -563,7 +563,7 @@ async def test_scan_new_pairs_still_scans_known_launches_when_discovery_fails(to
     assert await hunter._scan_new_pairs("sweep-1") == []
 
     tools.scan_contract.assert_awaited_once_with(
-        launch(0)["token_address"], chain_id=4663, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS
+        launch(0)["token_address"], chain_id=4663, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS, is_token=True
     )
     assert await scan_statuses(real_db) == {launch(0)["token_address"]: "unknown"}
 
@@ -588,7 +588,7 @@ async def test_discovered_launch_is_rechecked_and_logged_on_robinhood_chain(tool
     tools.scan_contract = AsyncMock(return_value=scan_result(95))
     assert await hunter._recheck_warn_contracts("sweep-3") == [token]
 
-    tools.scan_contract.assert_awaited_once_with(token, chain_id=4663, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS)
+    tools.scan_contract.assert_awaited_once_with(token, chain_id=4663, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS, is_token=True)
     assert [row["chain_id"] for row in await real_db.get_tracked_pairs(status="blocked")] == [4663]
     findings = await real_db.get_agent_findings()
     assert [(f["address"], f["chain_id"], f["investigation_id"]) for f in findings] == [(token, 4663, "sweep-3")]

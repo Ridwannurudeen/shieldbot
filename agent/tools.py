@@ -16,6 +16,7 @@ from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.robinhood_assets import with_impostor_check
 
 logger = logging.getLogger(__name__)
+_IS_TOKEN_UNSET = object()
 
 _ADDRESS_RE = re.compile(r'^0x[a-fA-F0-9]{40}$')
 
@@ -34,7 +35,7 @@ class AgentTools:
         self._container = container
 
     async def scan_contract(
-        self, address: str, chain_id: int = 56, deadline: Optional[float] = None
+        self, address: str, chain_id: int = 56, deadline: Optional[float] = None, is_token=_IS_TOKEN_UNSET
     ) -> Dict:
         """Run all analyzers on a contract and return composite risk score.
 
@@ -44,7 +45,9 @@ class AgentTools:
         alongside the analyzers and within the same deadline.
         """
         address = _validate_address(address)
-        ctx = AnalysisContext(address=address, chain_id=chain_id)
+        if is_token is _IS_TOKEN_UNSET:
+            is_token = await self._container.web3_client.is_token_contract(address, chain_id=chain_id)
+        ctx = AnalysisContext(address=address, chain_id=chain_id, is_token=is_token)
         analysis = self._container.registry.run_all(ctx, deadline=deadline)
         impostor_check = None
         if chain_id == LAUNCH_CHAIN_ID:

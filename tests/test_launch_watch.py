@@ -164,7 +164,7 @@ async def test_a_launch_is_scanned_once_and_through_the_hunter_outcome_logic(db)
 
     assert scanned(watch) == [token(0)]
     assert watch.hunter.tools.scan_contract.await_args.kwargs == {
-        "chain_id": 4663, "deadline": BACKGROUND_SCAN_DEADLINE_SECONDS,
+        "chain_id": 4663, "deadline": BACKGROUND_SCAN_DEADLINE_SECONDS, "is_token": True,
     }
     rows = await db.get_tracked_pairs(status="watching")
     assert [(row["token_address"], row["chain_id"]) for row in rows] == [(token(0), 4663)]
@@ -189,7 +189,7 @@ async def test_queued_rechecks_alternate_with_launch_scans(db):
 
     assert scanned(watch) == [token(0), "0xrh1", token(1), "0xrh2", token(2)]
     assert all(
-        call.kwargs == {"chain_id": 4663, "deadline": BACKGROUND_SCAN_DEADLINE_SECONDS}
+        call.kwargs == {"chain_id": 4663, "deadline": BACKGROUND_SCAN_DEADLINE_SECONDS, "is_token": True}
         for call in watch.hunter.tools.scan_contract.await_args_list
     )
 
@@ -367,7 +367,7 @@ async def test_stopping_mid_scan_cancels_it_and_records_nothing(db):
     await db.upsert_discovered_launches(4663, [launch(0)])
     started = asyncio.Event()
 
-    async def hang(address, chain_id, deadline):
+    async def hang(address, chain_id, deadline, is_token):
         started.set()
         await asyncio.Event().wait()
 

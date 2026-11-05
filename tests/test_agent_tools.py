@@ -66,6 +66,7 @@ def mock_container():
     return SimpleNamespace(
         registry=registry,
         risk_engine=risk_engine,
+        web3_client=SimpleNamespace(is_token_contract=AsyncMock(return_value=False)),
         db=db,
         honeypot_service=honeypot_service,
         dex_service=dex_service,
@@ -90,6 +91,10 @@ async def test_scan_contract(tools, mock_container):
     assert isinstance(ctx_arg, AnalysisContext)
     assert ctx_arg.address == "0x1111111111111111111111111111111111111111"
     assert ctx_arg.chain_id == 56
+    assert ctx_arg.is_token is False
+    mock_container.web3_client.is_token_contract.assert_awaited_once_with(
+        "0x1111111111111111111111111111111111111111", chain_id=56
+    )
 
     # Risk engine should be called with the registry results
     mock_container.risk_engine.compute_from_results.assert_called_once()
@@ -102,6 +107,7 @@ async def test_scan_contract_custom_chain(tools, mock_container):
     await tools.scan_contract("0x1111111111111111111111111111111111111111", chain_id=1)
     ctx_arg = mock_container.registry.run_all.call_args[0][0]
     assert ctx_arg.chain_id == 1
+    assert ctx_arg.is_token is False
 
 
 # --- check_deployer ---

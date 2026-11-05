@@ -217,7 +217,7 @@ class Hunter:
         try:
             result = await self.tools.scan_contract(
                 subject["subject"], chain_id=LAUNCH_CHAIN_ID,
-                deadline=BACKGROUND_SCAN_DEADLINE_SECONDS,
+                deadline=BACKGROUND_SCAN_DEADLINE_SECONDS, is_token=True,
             )
             await self._record_impostor_check(LAUNCH_CHAIN_ID, subject["subject"], result)
             published = await self._publish_verdict(LAUNCH_CHAIN_ID, subject["subject"], result)
@@ -445,7 +445,7 @@ class Hunter:
             await self._reserve_scan(chain_id)
             await self.db.mark_tracked_pair_checked(pair["pair_address"])
             result = await self.tools.scan_contract(
-                pair["token_address"], chain_id=chain_id, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS
+                pair["token_address"], chain_id=chain_id, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS, is_token=True
             )
             await self._record_impostor_check(chain_id, pair["token_address"], result)
             risk_score = result.get("risk_score", result.get("rug_probability"))
@@ -555,7 +555,7 @@ class Hunter:
         await self._reserve_scan(LAUNCH_CHAIN_ID)
         try:
             result = await self.tools.scan_contract(
-                token, chain_id=LAUNCH_CHAIN_ID, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS
+                token, chain_id=LAUNCH_CHAIN_ID, deadline=BACKGROUND_SCAN_DEADLINE_SECONDS, is_token=True
             )
         except Exception as exc:
             logger.error(

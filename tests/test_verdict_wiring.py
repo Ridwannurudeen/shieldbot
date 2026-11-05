@@ -390,6 +390,7 @@ def bot_scan_functions():
     client = Web3Client.__new__(Web3Client)
     client._adapters = {56: MagicMock(), 4663: MagicMock()}
     client.get_token_info = AsyncMock(return_value={})
+    client.is_token_contract = AsyncMock(return_value=True)
     services = MagicMock()
     services.verdict_publishers = {4663: services.verdict_publisher, 677: MagicMock()}
     services.registry.run_all = AsyncMock(
@@ -402,6 +403,7 @@ def bot_scan_functions():
         "is_scan_incomplete": is_scan_incomplete,
         "with_impostor_check": with_impostor_check,
         "RUN_ALL_DEADLINE_SECONDS": RUN_ALL_DEADLINE_SECONDS,
+        "_IS_TOKEN_UNSET": object(),
         "TOKEN_INFO_TIMEOUT_SECONDS": RUN_ALL_DEADLINE_SECONDS,
         "FORENSIC_REPORT_TIMEOUT_SECONDS": 30.0,
         "UnsupportedChainError": UnsupportedChainError,
