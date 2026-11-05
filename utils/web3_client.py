@@ -93,10 +93,7 @@ class Web3Client:
         w3 = self.get_web3(chain_id)
 
         # The web3 calls are synchronous, so they run in the executor and never block the event loop.
-        def identify() -> bool:
-            contract = w3.eth.contract(
-                address=Web3.to_checksum_address(address), abi=self.erc20_abi,
-            )
+        def read_symbol(contract) -> bool:
             try:
                 contract.functions.symbol().call()
             except BadFunctionCallOutput:
@@ -105,22 +102,34 @@ class Web3Client:
                 if len(reply) == 0:
                     return False
                 raise
+            return True
+
+        async def identify() -> bool:
+            contract = w3.eth.contract(
+                address=Web3.to_checksum_address(address), abi=self.erc20_abi,
+            )
+            loop = asyncio.get_running_loop()
+            try:
+                return await loop.run_in_executor(None, read_symbol, contract)
             except ContractLogicError as error:
                 if isinstance(error, OffchainLookup):
                     raise
-                for probe in (contract.functions.totalSupply, contract.functions.decimals):
-                    try:
-                        probe().call()
-                    except ContractLogicError as probe_error:
-                        if isinstance(probe_error, OffchainLookup):
-                            raise
-                    else:
-                        return True
-                return False
-            return True
+            # The two probes are sent together, since on a slow RPC each costs a round trip, and are
+            # read in order: totalSupply() decides, and decimals() only when totalSupply() reverted.
+            probes = await asyncio.gather(
+                loop.run_in_executor(None, contract.functions.totalSupply().call),
+                loop.run_in_executor(None, contract.functions.decimals().call),
+                return_exceptions=True,
+            )
+            for probe in probes:
+                if not isinstance(probe, BaseException):
+                    return True
+                if not isinstance(probe, ContractLogicError) or isinstance(probe, OffchainLookup):
+                    raise probe
+            return False
 
         try:
-            return await asyncio.get_running_loop().run_in_executor(None, identify)
+            return await identify()
         except Exception as e:
             if isinstance(e, ContractLogicError) and not isinstance(e, OffchainLookup):
                 return False

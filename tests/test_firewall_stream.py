@@ -555,6 +555,42 @@ async def test_a_hanging_verification_does_not_hold_back_the_analyzers(stream_ap
 
 
 @pytest.mark.asyncio
+async def test_a_finished_verification_is_not_a_gap_at_the_request_deadline(stream_api, monkeypatch, mock_web3_client):
+    # An approval does not wait for verification; it finishes while an analyzer runs past the deadline.
+    api, services = stream_api
+    verified = asyncio.Event()
+
+    async def verification(*args, **kwargs):
+        verified.set()
+        return (True, None)
+
+    async def structural(ctx):
+        await verified.wait()
+        await asyncio.Event().wait()
+
+    async def no_evidence(response, *args, **kwargs):
+        return response
+
+    mock_web3_client.is_verified_contract = AsyncMock(side_effect=verification)
+    services.registry = registry(structural=structural)
+    monkeypatch.setattr(api, "FIREWALL_RESPONSE_RESERVE_SECONDS", 0.01)
+    monkeypatch.setattr(api, "_with_evidence", no_evidence)
+    approve = "0x095ea7b3" + "00" * 12 + "33" * 20 + "ff" * 32
+    request = api.FirewallRequest(**{**BODY, "data": approve})
+    assert not api.reads_verification(request.data, request.value)
+
+    response = await asyncio.wait_for(
+        api._firewall_response(request, plain_request(), deadline=time.monotonic() + 0.3), TIMEOUT,
+    )
+
+    assert verified.is_set()
+    assert response["risk_display"] == "Unknown (provider deadline reached)"
+    assert response["pending_sources"] == ["structural"]
+    assert "verification" not in response["coverage_reasons"]
+    assert "verification" not in response["coverage"]
+
+
+@pytest.mark.asyncio
 async def test_a_signature_request_has_nothing_to_show_before_its_final(stream_api, monkeypatch, mock_web3_client):
     api, _ = stream_api
     timer(monkeypatch, api, FIRST_VERDICT_SECONDS * SCALE)

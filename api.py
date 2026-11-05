@@ -1495,9 +1495,15 @@ async def _firewall_verdict(
                 verification = asyncio.create_task(_target_verification(to_addr, req.chainId, code))
                 if progress is not None:
                     progress.deadline_pending.add("verification")
-                verification.add_done_callback(
-                    lambda task: task.exception() if not task.cancelled() else None
-                )
+
+                # A finished lookup is no longer pending, so a deadline response does not report it.
+                def settled(task):
+                    if progress is not None:
+                        progress.deadline_pending.discard("verification")
+                    if not task.cancelled():
+                        task.exception()
+
+                verification.add_done_callback(settled)
                 if reads_verification(req.data, req.value):
                     await verification
                     if progress is not None:

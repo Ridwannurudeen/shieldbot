@@ -156,6 +156,57 @@ async def test_reverting_symbol_with_timed_out_total_supply_is_unknown(identific
 
 
 @pytest.mark.asyncio
+async def test_answering_total_supply_decides_whatever_decimals_does(identification_client):
+    w3 = identification_client.get_web3()
+    w3.eth.contract.return_value.functions.symbol.return_value.call.side_effect = ContractLogicError('execution reverted')
+    w3.eth.contract.return_value.functions.totalSupply.return_value.call.return_value = 1
+    w3.eth.contract.return_value.functions.decimals.return_value.call.side_effect = TimeoutError('RPC timeout')
+
+    assert await identification_client.is_token_contract(ADDRESS) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('total_supply, decimals', [
+    (OffchainLookup({'sender': ADDRESS, 'urls': [], 'callData': '0x'}, data='0x556f1830'), 18),
+    (ContractLogicError('execution reverted'), OffchainLookup({'sender': ADDRESS, 'urls': [], 'callData': '0x'}, data='0x556f1830')),
+    (ContractLogicError('execution reverted'), TimeoutError('RPC timeout')),
+])
+async def test_a_probe_that_is_not_a_plain_revert_leaves_identification_unknown(
+    identification_client, total_supply, decimals,
+):
+    w3 = identification_client.get_web3()
+    functions = w3.eth.contract.return_value.functions
+    functions.symbol.return_value.call.side_effect = ContractLogicError('execution reverted')
+    for function, outcome in ((functions.totalSupply, total_supply), (functions.decimals, decimals)):
+        if isinstance(outcome, BaseException):
+            function.return_value.call.side_effect = outcome
+        else:
+            function.return_value.call.return_value = outcome
+
+    assert await identification_client.is_token_contract(ADDRESS) is None
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_probes_run_at_the_same_time(identification_client):
+    # Each probe returns only once the other has started, so probes sent one after the other time out.
+    both_started = threading.Barrier(2, timeout=2)
+
+    def probe(*args, **kwargs):
+        both_started.wait()
+        raise ContractLogicError('execution reverted')
+
+    w3 = identification_client.get_web3()
+    functions = w3.eth.contract.return_value.functions
+    functions.symbol.return_value.call.side_effect = ContractLogicError('execution reverted')
+    functions.totalSupply.return_value.call.side_effect = probe
+    functions.decimals.return_value.call.side_effect = probe
+
+    assert await identification_client.is_token_contract(ADDRESS) is False
+    assert functions.totalSupply.return_value.call.call_count == 1
+    assert functions.decimals.return_value.call.call_count == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('reply, failure', [
     (b'\x12\x34', None),
     (None, None),
