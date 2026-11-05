@@ -200,6 +200,7 @@ def build_results(
         "inputs_recorded_at": scores["inputs_recorded_at"],
         "weight_changes": scores.get("weight_changes", []),
         "rerun": scores.get("rerun", []),
+        "rerun_unavailable": scores.get("rerun_unavailable", {}),
         "threshold": threshold,
         **benchmark_results(entries, scores["records"], threshold),
     }

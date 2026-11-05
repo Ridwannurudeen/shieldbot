@@ -242,10 +242,12 @@ A malicious label must rest on evidence that ShieldBot's score does not already 
 
    `--rerun intent,signature,behavioral` runs those transaction-only analyzers again at the current revision,
    on the same address and chain with no transaction, and reads every other analyzer from the recording, so a
-   change to what they return without a transaction is measured too. Their services are replaced by stubs that
-   refuse the replay if touched, so a rerun never reaches a provider: an analyzer that would look something up
-   at this revision fails the replay instead (behavioral does until it skips without a transaction). The
-   scores and results name the rerun analyzers in `rerun`.
+   change to what they return without a transaction is measured too. Their services are replaced by stubs, so
+   a rerun never reaches a provider. Intent's and signature's stubs refuse the replay if touched. Behavioral's
+   answers its Ethos lookup of the entry's address with the Ethos response recorded in that entry's behavioral
+   data, and refuses anything else; where the recorded behavioral result is an error or its data does not hold
+   the whole response, the recorded result is kept and counted in `rerun_unavailable`. The scores and results
+   name the rerun analyzers in `rerun` and carry `rerun_unavailable`.
 
 4. Compute the results, offline:
 
@@ -261,7 +263,7 @@ A malicious label must rest on evidence that ShieldBot's score does not already 
 
 The results file (`shieldbot-benchmark-results/2`) carries `scored_at` and `revision` from the scores,
 `dirty`, the dataset's path and hash, the scores' hash, the inputs hash/revision/dirty state/recorded time,
-the `weight_changes`, the `rerun` analyzers, the `threshold`, an `overall` block, one block
+the `weight_changes`, the `rerun` analyzers and `rerun_unavailable`, the `threshold`, an `overall` block, one block
 per class and one `details` row per entry. Hashes are SHA-256 of the JSON with sorted keys and no
 whitespace, so they do not depend on line endings.
 

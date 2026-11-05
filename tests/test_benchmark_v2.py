@@ -920,7 +920,7 @@ def test_replay_reruns_the_named_analyzers_and_reads_the_rest_from_the_recording
     monkeypatch.setattr(
         replay,
         "rerun_analyzers",
-        lambda names: {name: Rerun(name) for name in names},
+        lambda names: {name: lambda recorded, name=name: Rerun(name) for name in names},
     )
     engine = RiskEngine()
     monkeypatch.setattr(
@@ -988,11 +988,15 @@ def test_replay_reruns_the_named_analyzers_and_reads_the_rest_from_the_recording
         ("signature", DRAINER, 1, {}),
     ]
     assert document["rerun"] == ["intent", "signature"]
+    assert document["rerun_unavailable"] == {"intent": 0, "signature": 0}
     assert recorded["rerun"] == []
+    assert recorded["rerun_unavailable"] == {}
     assert document["records"][0]["score"] == expected["rug_probability"]
     assert document["records"][0]["risk_level"] == expected["risk_level"]
     assert document["records"][0]["score"] != recorded["records"][0]["score"]
-    assert build_results(dataset, scores_path)["rerun"] == ["intent", "signature"]
+    results = build_results(dataset, scores_path)
+    assert results["rerun"] == ["intent", "signature"]
+    assert results["rerun_unavailable"] == {"intent": 0, "signature": 0}
 
 
 def test_a_rerun_analyzer_that_reaches_for_a_provider_refuses_the_replay(
@@ -1012,7 +1016,7 @@ def test_a_rerun_analyzer_that_reaches_for_a_provider_refuses_the_replay(
     monkeypatch.setattr(
         replay,
         "rerun_analyzers",
-        lambda names: {"behavioral": LooksUp(replay._Offline("behavioral"))},
+        lambda names: {"behavioral": lambda recorded: LooksUp(replay._Offline("behavioral"))},
     )
     monkeypatch.setattr(
         replay, "current_engine_and_weights", lambda: (RiskEngine(), weights)
@@ -1027,24 +1031,176 @@ def test_a_rerun_analyzer_that_reaches_for_a_provider_refuses_the_replay(
     assert not output.exists()
 
 
-def test_the_current_analyzers_rerun_offline_only_where_they_make_no_lookup(
-    tmp_path, monkeypatch
-):
-    _, inputs, weights = one_complete_input(tmp_path)
+def test_the_current_analyzers_rerun_offline(tmp_path, monkeypatch):
+    dataset = write_dataset(tmp_path, [entry()])
+    inputs = write_inputs(
+        tmp_path, dataset, [behavioral_record({**ethos_response(), "counterparty": DRAINER}, score=0)]
+    )
+    weights = {
+        result["name"]: result["weight"] for result in complete_analyzer_inputs()
+    }
     monkeypatch.setattr(
         replay, "current_engine_and_weights", lambda: (RiskEngine(), weights)
     )
 
     document = replay.replay(
-        inputs, tmp_path / "scores.json", REVISION, False, ["intent", "signature"]
+        inputs, tmp_path / "scores.json", REVISION, False, list(replay.RERUNNABLE)
     )
-    assert document["records"][0]["status"] in ("ok", "unknown")
 
-    # Without a transaction this revision's behavioral analyzer still looks the address up on Ethos.
+    assert document["records"][0]["status"] in ("ok", "unknown")
+    assert document["rerun_unavailable"] == {
+        "behavioral": 0,
+        "intent": 0,
+        "signature": 0,
+    }
+
+
+def ethos_response(**changes):
+    """An EthosService.fetch_wallet_reputation response for an address with no Ethos profile."""
+    response = {
+        "observed_at": 1_700_000_004,
+        "reputation_score": 50,
+        "ethos_raw_score": None,
+        "trust_level": "unknown",
+        "scam_flags": [],
+        "linked_wallets": [],
+        "vouch_count": 0,
+        "review_stats": {},
+        "low_reputation_flag": False,
+        "severe_reputation_flag": False,
+    }
+    return {**response, **changes}
+
+
+def behavioral_record(data, score, flags=None, error=None):
+    results = [
+        analyzer_input("behavioral", result["weight"], score, data, flags, error)
+        if result["name"] == "behavioral"
+        else result
+        for result in complete_analyzer_inputs()
+    ]
+    return {
+        "chain_id": 1,
+        "address": DRAINER,
+        "status": "ok",
+        "reason": None,
+        "results": results,
+    }
+
+
+def replay_behavioral(tmp_path, monkeypatch, record):
+    """Replay one recorded entry with behavioral rerun; the behavioral result the engine scored, and the scores."""
+    dataset = write_dataset(tmp_path, [entry()])
+    inputs = write_inputs(tmp_path, dataset, [record])
+    weights = {
+        result["name"]: result["weight"] for result in complete_analyzer_inputs()
+    }
+    scored = []
+
+    class Capturing(RiskEngine):
+        def compute_from_results(self, results):
+            scored.extend(results)
+            return super().compute_from_results(results)
+
+    monkeypatch.setattr(
+        replay, "current_engine_and_weights", lambda: (Capturing(), weights)
+    )
+    document = replay.replay(
+        inputs, tmp_path / "scores.json", REVISION, False, ["behavioral"]
+    )
+    return next(result for result in scored if result.name == "behavioral"), document
+
+
+def test_a_behavioral_rerun_scores_the_recorded_ethos_profile_with_the_current_logic(
+    tmp_path, monkeypatch
+):
+    response = ethos_response(
+        reputation_score=7.1,
+        ethos_raw_score=200,
+        trust_level="very_low",
+        scam_flags=["Profile slashed on Ethos"],
+        vouch_count=1,
+        review_stats={"negative": 1},
+        low_reputation_flag=True,
+        severe_reputation_flag=True,
+    )
+    # Scored 0 with no flags, as a revision that ignored the profile would have recorded it.
+    record = behavioral_record({**response, "counterparty": DRAINER}, score=0)
+
+    behavioral, document = replay_behavioral(tmp_path, monkeypatch, record)
+
+    assert behavioral.score == 90
+    assert behavioral.flags == ["Severe reputation warning", "Ethos scam flags present"]
+    assert behavioral.data == {**response, "counterparty": DRAINER}
+    assert behavioral.error is None
+    assert document["rerun_unavailable"] == {"behavioral": 0}
+
+
+def test_a_behavioral_rerun_with_no_ethos_profile_uses_the_recorded_neutral_response(
+    tmp_path, monkeypatch
+):
+    response = ethos_response()
+    record = behavioral_record(
+        {**response, "counterparty": DRAINER}, score=50, flags=["Recorded flag"]
+    )
+
+    behavioral, document = replay_behavioral(tmp_path, monkeypatch, record)
+
+    assert behavioral.score == 0
+    assert behavioral.flags == []
+    assert behavioral.data == {**response, "counterparty": DRAINER}
+    assert document["rerun_unavailable"] == {"behavioral": 0}
+
+
+def test_a_behavioral_rerun_keeps_an_unknown_ethos_response_unknown(
+    tmp_path, monkeypatch
+):
+    response = ethos_response(status="unknown", reason="Ethos HTTP 503")
+    record = behavioral_record({**response, "counterparty": DRAINER}, score=0)
+
+    behavioral, document = replay_behavioral(tmp_path, monkeypatch, record)
+
+    assert behavioral.flags == ["Behavioral data unknown: Ethos HTTP 503"]
+    assert behavioral.data == {**response, "counterparty": DRAINER}
+    assert document["rerun_unavailable"] == {"behavioral": 0}
+
+
+@pytest.mark.parametrize(
+    ("data", "error"),
+    [
+        ({}, "behavioral analysis unavailable (TimeoutError)"),
+        ({"status": "ok", "reputation_score": 80}, None),
+        (ethos_response(), None),
+    ],
+    ids=["errored", "partial-response", "no-counterparty"],
+)
+def test_a_behavioral_result_the_recording_cannot_answer_is_kept_and_counted(
+    tmp_path, monkeypatch, data, error
+):
+    record = behavioral_record(
+        data, score=50, flags=["behavioral analysis unavailable"], error=error
+    )
+
+    behavioral, document = replay_behavioral(tmp_path, monkeypatch, record)
+
+    assert behavioral.score == 50
+    assert behavioral.flags == ["behavioral analysis unavailable"]
+    assert behavioral.data == data
+    assert behavioral.error == error
+    assert document["rerun_unavailable"] == {"behavioral": 1}
+    assert build_results(
+        write_dataset(tmp_path, [entry()]), tmp_path / "scores.json"
+    )["rerun_unavailable"] == {"behavioral": 1}
+
+
+def test_the_recorded_ethos_stand_in_answers_only_the_recorded_lookup():
+    stand_in = replay._RecordedEthos(DRAINER, ethos_response())
+
+    assert asyncio.run(stand_in.fetch_wallet_reputation("0x" + DRAINER[2:].upper())) == ethos_response()
+    with pytest.raises(ValueError, match="not the recorded"):
+        asyncio.run(stand_in.fetch_wallet_reputation(SAFE))
     with pytest.raises(ValueError, match="behavioral would make a network lookup"):
-        replay.replay(
-            inputs, tmp_path / "behavioral.json", REVISION, False, ["behavioral"]
-        )
+        stand_in.fetch_token_reputation
 
 
 def test_only_the_transaction_analyzers_can_be_rerun(tmp_path, monkeypatch):

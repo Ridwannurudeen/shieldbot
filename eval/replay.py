@@ -22,11 +22,14 @@ from core.config import Settings
 from core.container import ServiceContainer
 from eval.benchmark import FORMAT_INPUTS, FORMAT_SCORES, json_sha256
 from eval.live_scorer import current_revision
+from services.ethos_service import neutral_reputation
 
 _ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 _REVISION = re.compile(r"[0-9a-f]{40}")
 # The transaction-only analyzers, which can be run again at the replaying revision without a provider.
 RERUNNABLE = ("intent", "signature", "behavioral")
+# Every field EthosService.fetch_wallet_reputation returns; it adds status and reason when the data is unknown.
+_ETHOS_RESPONSE = tuple(neutral_reputation())
 
 
 def load_inputs(path):
@@ -126,8 +129,50 @@ class _Offline:
         )
 
 
+class _RecordedEthos(_Offline):
+    """Answers behavioral's Ethos lookup of the recorded address with the recorded response, and nothing else."""
+
+    def __init__(self, address, response):
+        super().__init__("behavioral")
+        self._address = address
+        self._response = response
+
+    async def fetch_wallet_reputation(self, address):
+        if address.lower() != self._address:
+            raise ValueError(
+                f"behavioral looked up {address}, not the recorded {self._address}; "
+                "it cannot be rerun offline"
+            )
+        return dict(self._response)
+
+
+def recorded_ethos_response(result):
+    """The Ethos response a recorded behavioral result was computed from, or None if it cannot be rebuilt.
+
+    The live run's behavioral data is that response plus the address it named in ``counterparty``.
+    """
+    data = result.data
+    if (
+        result.error is not None
+        or not isinstance(data.get("counterparty"), str)
+        or any(key not in data for key in _ETHOS_RESPONSE)
+    ):
+        return None
+    keys = _ETHOS_RESPONSE + tuple(key for key in ("status", "reason") if key in data)
+    return data["counterparty"].lower(), {key: data[key] for key in keys}
+
+
+def rerun_behavioral(recorded):
+    """The current behavioral analyzer answered by the entry's recorded Ethos response, or None."""
+    response = recorded_ethos_response(recorded)
+    if response is None:
+        return None
+    return BehavioralAnalyzer(_RecordedEthos(*response))
+
+
 def rerun_analyzers(names):
-    """The current revision's analyzers to run again, each wired to services that refuse any lookup."""
+    """For each analyzer to run again, a builder that takes the entry's recorded result and returns the
+    current revision's analyzer wired to offline services, or None when the recording cannot answer it."""
     unknown = sorted(set(names) - set(RERUNNABLE))
     if unknown:
         raise ValueError(
@@ -137,13 +182,13 @@ def rerun_analyzers(names):
             + ", ".join(unknown)
         )
     build = {
-        "intent": lambda: IntentMismatchAnalyzer(
+        "intent": lambda recorded: IntentMismatchAnalyzer(
             _Offline("intent"), _Offline("intent")
         ),
-        "signature": lambda: SignaturePermitAnalyzer(_Offline("signature")),
-        "behavioral": lambda: BehavioralAnalyzer(_Offline("behavioral")),
+        "signature": lambda recorded: SignaturePermitAnalyzer(_Offline("signature")),
+        "behavioral": rerun_behavioral,
     }
-    return {name: build[name]() for name in names}
+    return {name: build[name] for name in names}
 
 
 def verify_analyzer_set(recorded_weights, current_weights):
@@ -194,19 +239,26 @@ def normalize_weights(results):
     return results
 
 
-def rerun_results(record, results, analyzers, current_weights):
-    """Replace the recorded results of the rerun analyzers with what they return at this revision."""
+def rerun_results(record, results, analyzers, current_weights, unavailable):
+    """Replace the recorded results of the rerun analyzers with what they return at this revision.
+
+    A result the recording cannot answer is kept as recorded and counted in ``unavailable``.
+    """
     ctx = AnalysisContext(address=record["address"], chain_id=record["chain_id"])
     rerun = []
     for result in results:
         if result.name in analyzers:
-            result = asyncio.run(analyzers[result.name].analyze(ctx))
-            result.weight = current_weights[result.name]
+            analyzer = analyzers[result.name](result)
+            if analyzer is None:
+                unavailable[result.name] += 1
+            else:
+                result = asyncio.run(analyzer.analyze(ctx))
+                result.weight = current_weights[result.name]
         rerun.append(result)
     return rerun
 
 
-def replay_records(records, engine, current_weights, analyzers):
+def replay_records(records, engine, current_weights, analyzers, unavailable):
     """Score recorded analyzer inputs with the current RiskEngine revision."""
     scores = []
     for input_record in records:
@@ -228,6 +280,7 @@ def replay_records(records, engine, current_weights, analyzers):
                 rebuild_results(input_record, current_weights),
                 analyzers,
                 current_weights,
+                unavailable,
             )
         )
         risk_output = engine.compute_from_results(results)
@@ -260,7 +313,8 @@ def replay_records(records, engine, current_weights, analyzers):
 def replay(inputs_path, output_path, revision, dirty, rerun=()):
     """Write current-revision scores from one immutable analyzer-input recording.
 
-    The analyzers named in ``rerun`` are run again at this revision instead of read from the recording.
+    The analyzers named in ``rerun`` are run again at this revision instead of read from the recording,
+    except where the recording cannot answer them; those are counted in ``rerun_unavailable``.
     """
     inputs = load_inputs(inputs_path)
     analyzers = rerun_analyzers(rerun)
@@ -268,6 +322,11 @@ def replay(inputs_path, output_path, revision, dirty, rerun=()):
     recorded_weights = {
         analyzer["name"]: analyzer["weight"] for analyzer in inputs["analyzers"]
     }
+    weight_changes = verify_analyzer_set(recorded_weights, current_weights)
+    unavailable = {name: 0 for name in sorted(analyzers)}
+    records = replay_records(
+        inputs["records"], engine, current_weights, analyzers, unavailable
+    )
     document = {
         "format": FORMAT_SCORES,
         "revision": revision,
@@ -281,11 +340,10 @@ def replay(inputs_path, output_path, revision, dirty, rerun=()):
         "inputs_revision": inputs["revision"],
         "inputs_dirty": inputs["dirty"],
         "inputs_recorded_at": inputs["recorded_at"],
-        "weight_changes": verify_analyzer_set(recorded_weights, current_weights),
+        "weight_changes": weight_changes,
         "rerun": sorted(analyzers),
-        "records": replay_records(
-            inputs["records"], engine, current_weights, analyzers
-        ),
+        "rerun_unavailable": unavailable,
+        "records": records,
     }
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(document, f, indent=2)
