@@ -69,11 +69,12 @@ class SignaturePermitAnalyzer(Analyzer):
         typed_data = ctx.extra.get('typed_data')
         sign_method = ctx.extra.get('sign_method', '')
 
-        # No typed data — nothing to analyze
+        # No typed data (an address scan, or a transaction rather than a signature): nothing is measured,
+        # so nothing dilutes the mean.
         if not typed_data:
             return AnalyzerResult(
                 name=self.name, weight=self.weight, score=0,
-                flags=[], data={'sign_method': sign_method, 'has_typed_data': False},
+                flags=[], data={'skipped': True, 'sign_method': sign_method, 'has_typed_data': False},
             )
 
         score = 0.0
