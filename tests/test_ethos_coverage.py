@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-from analyzers.behavioral import BehavioralAnalyzer
+from analyzers.behavioral import BehavioralAnalyzer, behavioral_skip_reason
 from core.analyzer import AnalysisContext, AnalyzerResult
 from core.risk_engine import RiskEngine
 from services.ethos_service import EthosService
@@ -126,26 +126,10 @@ def _analyzer(data):
     return BehavioralAnalyzer(service)
 
 
-# A native send scores its recipient, so the lookup runs; a scan with no transaction makes none.
-NATIVE_SEND = AnalysisContext("0x" + "a" * 40, from_address=WALLET, extra={"calldata": "0x"})
-
-
-@pytest.mark.asyncio
-async def test_behavioral_analyzer_skips_a_scan_with_no_transaction_without_a_lookup():
-    service = SimpleNamespace(fetch_wallet_reputation=AsyncMock(return_value=dict(NEUTRAL)))
-    result = await BehavioralAnalyzer(service).analyze(AnalysisContext("0x" + "a" * 40, from_address=WALLET))
-    service.fetch_wallet_reputation.assert_not_awaited()
-    assert (result.score, result.flags) == (0, [])
-    assert result.data == {"skipped": True, "reason": "no transaction"}
-    risk = RiskEngine().compute_from_results([result])
-    assert risk["coverage"]["behavioral"] == 1
-    assert risk["not_applicable"] == {"behavioral": "no transaction"}
-
-
 @pytest.mark.asyncio
 async def test_behavioral_analyzer_flags_unknown_reputation():
     unknown = {**NEUTRAL, "status": "unknown", "reason": "Ethos HTTP 500"}
-    result = await _analyzer(unknown).analyze(NATIVE_SEND)
+    result = await _analyzer(unknown).analyze(AnalysisContext("0x" + "a" * 40, from_address=WALLET))
     assert result.score == 0
     assert result.flags == ["Behavioral data unknown: Ethos HTTP 500"]
     assert result.data is unknown
@@ -153,17 +137,64 @@ async def test_behavioral_analyzer_flags_unknown_reputation():
 
 @pytest.mark.asyncio
 async def test_behavioral_analyzer_success_is_unchanged():
-    data = {**NEUTRAL, "severe_reputation_flag": True, "scam_flags": ["Profile slashed on Ethos"]}
-    result = await _analyzer(data).analyze(NATIVE_SEND)
+    data = {
+        **NEUTRAL, "ethos_raw_score": 200, "severe_reputation_flag": True,
+        "scam_flags": ["Profile slashed on Ethos"],
+    }
+    result = await _analyzer(data).analyze(AnalysisContext("0x" + "a" * 40, from_address=WALLET))
     assert (result.score, result.flags) == (
         90,
         ["Severe reputation warning", "Ethos scam flags present"],
     )
 
 
+@pytest.mark.parametrize(
+    "data, reason",
+    [
+        (dict(NEUTRAL), "no reputation profile"),
+        ({**NEUTRAL, "ethos_raw_score": 1400}, None),
+        ({**NEUTRAL, "ethos_raw_score": 0}, None),
+        ({**NEUTRAL, "status": "unknown", "reason": "Ethos HTTP 500"}, None),
+        ({**NEUTRAL, "status": "unknown", "reason": "Ethos profile has no score"}, None),
+    ],
+)
+def test_only_an_address_with_no_ethos_profile_is_skipped(data, reason):
+    assert behavioral_skip_reason(data) == reason
+
+
+@pytest.mark.asyncio
+async def test_an_address_scan_with_no_profile_is_skipped_after_its_lookup():
+    analyzer, service = _counterparty_analyzer(dict(NEUTRAL))
+    result = await analyzer.analyze(AnalysisContext(TARGET, from_address=WALLET))
+    service.fetch_wallet_reputation.assert_awaited_once_with(TARGET)
+    assert (result.score, result.flags) == (0, [])
+    assert result.data == {"skipped": True, "reason": "no reputation profile"}
+    risk = RiskEngine().compute_from_results([result])
+    assert risk["coverage"]["behavioral"] == 1
+    assert risk["not_applicable"] == {"behavioral": "no reputation profile"}
+
+
+@pytest.mark.asyncio
+async def test_an_address_scan_with_a_profile_is_scored_as_before():
+    data = {**NEUTRAL, "reputation_score": 7.1, "ethos_raw_score": 200, "severe_reputation_flag": True}
+    analyzer, service = _counterparty_analyzer(data)
+    result = await analyzer.analyze(AnalysisContext(TARGET, from_address=WALLET))
+    service.fetch_wallet_reputation.assert_awaited_once_with(TARGET)
+    assert (result.score, result.flags) == (50, ["Severe reputation warning"])
+    assert result.data["counterparty"] == TARGET
+
+
+@pytest.mark.asyncio
+async def test_a_transaction_keeps_a_missing_profile_neutral_and_covered():
+    analyzer, _ = _counterparty_analyzer(dict(NEUTRAL))
+    result = await analyzer.analyze(_ctx("0x"))
+    assert "skipped" not in result.data
+    assert result.data == {**NEUTRAL, "counterparty": TARGET}
+
+
 async def _both_entry_points(ethos, is_token):
     behavioral = await _analyzer(ethos).analyze(
-        AnalysisContext("0x" + "a" * 40, from_address=WALLET, is_token=is_token, extra={"calldata": "0x"})
+        AnalysisContext("0x" + "a" * 40, from_address=WALLET, is_token=is_token)
     )
     if is_token:
         market = AnalyzerResult("market", 0.25, 0, data=MARKET)
@@ -345,15 +376,15 @@ async def test_native_send_scores_the_recipient_never_the_sender():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("calldata", [c for _, c in NOT_SCORED], ids=[n for n, _ in NOT_SCORED])
-async def test_other_calls_are_skipped_without_a_lookup(calldata):
+async def test_other_calls_are_neutral_and_covered_without_a_lookup(calldata):
     analyzer, service = _counterparty_analyzer(dict(NEUTRAL))
-    result = await analyzer.analyze(_ctx(calldata))
+    with patch("services.ethos_service.time.time", return_value=1000):
+        result = await analyzer.analyze(_ctx(calldata))
     service.fetch_wallet_reputation.assert_not_awaited()
-    assert result.data == {"skipped": True, "reason": "call names no counterparty"}
+    assert result.data == {**NEUTRAL, "counterparty": None, "status": "ok"}
     assert (result.score, result.flags) == (0, [])
     risk = RiskEngine().compute_from_results([result])
     assert risk["coverage"]["behavioral"] == 1
-    assert risk["not_applicable"] == {"behavioral": "call names no counterparty"}
 
 
 @pytest.mark.asyncio
@@ -370,11 +401,8 @@ async def test_token_transfer_to_a_severe_reputation_does_not_leak_into_the_toke
     ]
     with_transfer = RiskEngine().compute_from_results(results + [transfer])
     with_neutral = RiskEngine().compute_from_results(results + [neutral])
-    without_behavioral = RiskEngine().compute_from_results(results)
     assert transfer.score == 0
-    # The transfer is skipped, so it leaves the mean exactly as no behavioral result would.
-    assert with_transfer["rug_probability"] == without_behavioral["rug_probability"] == 10
-    assert with_neutral["rug_probability"] == 8
+    assert with_transfer["rug_probability"] == with_neutral["rug_probability"] == 8
 
 
 @pytest.mark.asyncio
@@ -436,7 +464,7 @@ def _reputation_line(ethos):
         ),
         (dict(NEUTRAL), "  Score: Unknown  |  Trust: Unknown"),
         ({}, "  Score: Unknown  |  Trust: Unknown"),
-        ({"skipped": True, "reason": "no transaction"}, "  Not applicable (no transaction)"),
+        ({"skipped": True, "reason": "no reputation profile"}, "  Not applicable (no reputation profile)"),
         (
             {**NEUTRAL, "reputation_score": 50.0, "ethos_raw_score": 1400, "trust_level": "medium"},
             "  Score: 50.0  |  Trust: medium",

@@ -57,13 +57,13 @@ def test_scored_and_unknown_categories_keep_their_existing_rendering():
 def test_a_skipped_behavioral_analyzer_reads_not_applicable_in_both_sections():
     risk = RiskEngine().compute_from_results([
         AnalyzerResult('structural', 0.4, 20, data={'is_contract': True, 'is_verified': True, 'contract_age_days': 400}),
-        AnalyzerResult('behavioral', 0.2, 0, data={'skipped': True, 'reason': 'no transaction'}),
+        AnalyzerResult('behavioral', 0.2, 0, data={'skipped': True, 'reason': 'no reputation profile'}),
     ])
-    report = format_full_report(risk, {}, {}, {'skipped': True, 'reason': 'no transaction'}, chain_id=56)
+    report = format_full_report(risk, {}, {}, {'skipped': True, 'reason': 'no reputation profile'}, chain_id=56)
 
-    assert '  Behavioral: Not applicable (no transaction)\n' in report
+    assert '  Behavioral: Not applicable (no reputation profile)\n' in report
     assert 'Behavioral: 0.0/100' not in report
-    assert 'Wallet Reputation (Ethos):*\n  Not applicable (no transaction)\n' in report
+    assert 'Wallet Reputation (Ethos):*\n  Not applicable (no reputation profile)\n' in report
 
 
 def _results(market_data):

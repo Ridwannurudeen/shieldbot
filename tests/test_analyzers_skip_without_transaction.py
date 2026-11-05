@@ -1,8 +1,10 @@
-"""A scan with no transaction measures no call, no signature and no counterparty.
+"""A scan with no transaction measures no call and no signature, and an address with no Ethos
+profile has no reputation to measure.
 
 Intent, signature and behavioral used to answer such a scan with a covered 0, which diluted the
 weighted mean below BLOCK_MIN: a contract the structural and market analyzers both scored 100 read
-Medium and legitimate. They now skip, and the same evidence reaches High.
+Medium and legitimate. They now skip (behavioral only when Ethos has no profile for the address),
+and the same evidence reaches High.
 """
 
 from types import SimpleNamespace
@@ -14,6 +16,7 @@ from analyzers import BehavioralAnalyzer, IntentMismatchAnalyzer, SignaturePermi
 from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult, has_transaction
 from core.registry import AnalyzerRegistry
 from core.risk_engine import RiskEngine
+from services.ethos_service import neutral_reputation
 
 TARGET = "0x" + "c" * 40
 CONTRACT = {
@@ -66,13 +69,13 @@ def test_has_transaction_reads_the_presence_of_an_input_not_its_content():
 
 
 @pytest.mark.asyncio
-async def test_an_address_scan_skips_the_three_and_looks_nothing_up():
-    ethos = SimpleNamespace(fetch_wallet_reputation=AsyncMock())
+async def test_an_address_scan_with_no_profile_skips_the_three():
+    ethos = SimpleNamespace(fetch_wallet_reputation=AsyncMock(return_value=neutral_reputation()))
     results = await _registry(ethos).run_all(AnalysisContext(TARGET))
-    ethos.fetch_wallet_reputation.assert_not_awaited()
+    ethos.fetch_wallet_reputation.assert_awaited_once_with(TARGET)
     by_name = {result.name: result for result in results}
-    for name in ("intent", "signature", "behavioral"):
-        assert by_name[name].data["skipped"] is True
+    for name, reason in (("intent", "no transaction"), ("signature", "no transaction"), ("behavioral", "no reputation profile")):
+        assert by_name[name].data == {"skipped": True, "reason": reason}
         assert by_name[name].score == 0
     risk = RiskEngine().compute_from_results(results)
     assert set(risk["not_applicable"]) == {"intent", "signature", "behavioral"}
@@ -82,7 +85,7 @@ async def test_an_address_scan_skips_the_three_and_looks_nothing_up():
 
 @pytest.mark.asyncio
 async def test_strong_evidence_on_an_address_scan_reaches_high_without_a_floor():
-    ethos = SimpleNamespace(fetch_wallet_reputation=AsyncMock())
+    ethos = SimpleNamespace(fetch_wallet_reputation=AsyncMock(return_value=neutral_reputation()))
     results = await _registry(ethos).run_all(AnalysisContext(TARGET))
     after = RiskEngine().compute_from_results(results)
     # Before: the three answered with a covered 0 and stayed in the mean.

@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Dict, List, Optional
 
-from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult, has_transaction
 from services.counterparty_service import UnavailableCounterparty, judge_spender
 from utils.web3_client import UnsupportedChainError
 
@@ -69,12 +69,19 @@ class SignaturePermitAnalyzer(Analyzer):
         typed_data = ctx.extra.get('typed_data')
         sign_method = ctx.extra.get('sign_method', '')
 
-        # No typed data (an address scan, or a transaction rather than a signature): nothing is measured,
-        # so nothing dilutes the mean.
+        # A scan of an address alone has no signature to judge: nothing is measured, so nothing dilutes
+        # the mean. A transaction without typed data stays a covered 0, as before.
+        if not has_transaction(ctx):
+            return AnalyzerResult(
+                name=self.name, weight=self.weight, score=0,
+                flags=[], data={'skipped': True, 'reason': 'no transaction'},
+            )
+
+        # No typed data — nothing to analyze
         if not typed_data:
             return AnalyzerResult(
                 name=self.name, weight=self.weight, score=0,
-                flags=[], data={'skipped': True, 'sign_method': sign_method, 'has_typed_data': False},
+                flags=[], data={'sign_method': sign_method, 'has_typed_data': False},
             )
 
         score = 0.0
