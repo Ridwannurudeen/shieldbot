@@ -63,6 +63,16 @@ REQUESTS = {
 }
 
 
+PAYABLE_ROUTER_SWAP = {
+    "to": ROUTER,
+    "value": str(10**18),
+    "data": "0x7ff36ab5" + encode(
+        ["uint256", "address[]", "address", "uint256"],
+        [1, [CAKE, BUSD], SENDER, 2**40],
+    ).hex(),
+}
+
+
 def _entry(address):
     return ENTRIES.get(address.lower())
 
@@ -74,7 +84,7 @@ def _code(address):
     return "0x" + "".join("63" + sig for sig in entry["bytecode_patterns"] or []) or "0x6080"
 
 
-def _web3():
+def _web3(verification=(True, None)):
     adapter = SimpleNamespace(
         get_whitelisted_routers=lambda: {ROUTER.lower(): "PancakeSwap V2 Router"},
         get_known_lockers=lambda: bsc.KNOWN_LOCKERS,
@@ -87,7 +97,7 @@ def _web3():
         get_bytecode=AsyncMock(side_effect=lambda address, chain_id=56: _code(address)),
         is_contract=AsyncMock(side_effect=lambda address, chain_id=56: _entry(address) is not None),
         is_token_contract=AsyncMock(side_effect=lambda address, chain_id=56: address.lower() in TOKENS),
-        is_verified_contract=AsyncMock(return_value=(True, None)),
+        is_verified_contract=AsyncMock(return_value=verification),
         get_contract_creation_info=AsyncMock(return_value={"age_days": 1000}),
         get_ownership_info=AsyncMock(
             side_effect=lambda address, chain_id=56: (_entry(address) or {}).get("ownership")
@@ -119,10 +129,10 @@ async def _goplus(address, chain_id=56):
     return entry["goplus"] if entry else {"status": "ok", "reason": None, "data": {}}
 
 
-async def _api_response(monkeypatch, request):
+async def _api_response(monkeypatch, request, verification=(True, None)):
     import api
 
-    web3 = _web3()
+    web3 = _web3(verification)
     services = SimpleNamespace(
         web3_client=web3,
         db=SimpleNamespace(
@@ -148,8 +158,8 @@ async def _api_response(monkeypatch, request):
     )
 
 
-async def _api_verdict(monkeypatch, request):
-    response = await _api_response(monkeypatch, request)
+async def _api_verdict(monkeypatch, request, verification=(True, None)):
+    response = await _api_response(monkeypatch, request, verification)
     shield = response["shield_score"]
     return {
         "score": response["risk_score"], "classification": response["classification"],
@@ -158,10 +168,10 @@ async def _api_verdict(monkeypatch, request):
     }
 
 
-def _agent_verdict(request):
+def _agent_verdict(request, verification=(True, None)):
     from agent.firewall import create_agent_firewall_router
 
-    web3 = _web3()
+    web3 = _web3(verification)
     container = SimpleNamespace(
         db=SimpleNamespace(
             get_agent_policy=AsyncMock(return_value={
@@ -199,12 +209,51 @@ def _agent_verdict(request):
     }
 
 
-async def _verdict(monkeypatch, path, case):
+async def _verdict(monkeypatch, path, case, verification=(True, None)):
     with patch.object(ScamDatabase, "fetch_token_security", new=AsyncMock(side_effect=_goplus)), \
             patch("services.contract_service.BSCSCAN_DELAY", 0):
+        request = PAYABLE_ROUTER_SWAP if case == "payable_router_swap" else REQUESTS[case]
         if path == "api":
-            return await _api_verdict(monkeypatch, REQUESTS[case])
-        return _agent_verdict(REQUESTS[case])
+            return await _api_verdict(monkeypatch, request, verification)
+        return _agent_verdict(request, verification)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "verification", [(True, None), (None, None)], ids=["verified", "explorer-timeout"]
+)
+async def test_a_payable_allowlisted_router_swap_matches_the_api_path(monkeypatch, verification):
+    api_result = await _verdict(monkeypatch, "api", "payable_router_swap", verification)
+    agent_result = await _verdict(monkeypatch, "agent", "payable_router_swap", verification)
+
+    assert api_result == {
+        "score": 6.4,
+        "classification": "SAFE",
+        "status": "ok",
+        "risk_level": "LOW",
+        "category_scores": {
+            "structural": 20,
+            "market": 0,
+            "behavioral": 0,
+            "honeypot": 0,
+            "intent": 0.0,
+            "signature": 0,
+        },
+    }
+    assert agent_result == {
+        "score": 6.4,
+        "risk_level": "LOW",
+        "verdict": "ALLOW",
+        "status": "ok",
+        "category_scores": {
+            "structural": 20,
+            "market": 0,
+            "behavioral": 0,
+            "honeypot": 0,
+            "intent": 0.0,
+            "signature": 0,
+        },
+    }
 
 
 # Printed by running _verdict for each case at 5690690.
