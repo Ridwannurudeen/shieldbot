@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { verdictOf, type ScanReply } from "../firewallVerdict";
 import VerdictRecord from "./VerdictRecord";
-import Section from "./Section";
 
-// The try-it section: POST /api/scan, the quick contract scan (api.py). No key is
+// The try-it section, right after the hero: POST /api/scan, the quick contract scan (api.py). No key is
 // sent, so the API's per-IP limiter answers 429 when it is reached.
 const SCAN_URL = "https://api.shieldbotsecurity.online/api/scan";
 // The scan's own deadline is 25 seconds; give up a little after it.
@@ -85,6 +84,7 @@ function Result({ state }: { state: State }) {
         reasons={reply.coverage_reasons}
         chain={chain}
         evidenceHash={reply.evidence_hash}
+        variant="full"
       />
       {reply.evidence_url && (
         <a
@@ -144,89 +144,102 @@ export default function TryIt() {
   }
 
   return (
-    <Section id="try" title="Try it">
-      <form
-        onSubmit={check}
-        aria-label="Try a token check"
-        className="max-w-[620px]"
-        noValidate
-      >
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,0.38fr)_minmax(0,1fr)]">
-          <div>
-            <label
-              htmlFor="try-chain"
-              className="mb-1.5 block text-sm font-medium text-ink"
-            >
-              Chain
-            </label>
-            <select
-              id="try-chain"
-              value={chainId}
-              onChange={(event) => setChainId(Number(event.target.value))}
-              className="try-select h-11 w-full cursor-pointer appearance-none rounded-md border border-secondary bg-ground pl-3 pr-8 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-            >
-              {chainOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label
-              htmlFor="try-address"
-              className="mb-1.5 block text-sm font-medium text-ink"
-            >
-              Token or contract address
-            </label>
-            <input
-              id="try-address"
-              type="text"
-              inputMode="text"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="0x..."
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
-              className="h-11 w-full rounded-md border border-secondary bg-ground px-3 font-mono text-sm text-ink placeholder:font-sans placeholder:text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-            />
-          </div>
-        </div>
-        <div className="mt-3 flex justify-end">
-          <button
-            type="submit"
-            disabled={state.kind === "loading"}
-            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-ink px-[18px] text-sm font-medium text-on-ink shadow-button transition-colors duration-150 hover:bg-ink/85 disabled:cursor-wait disabled:bg-secondary sm:w-auto"
-          >
-            Check now
-            <svg
-              viewBox="0 0 16 16"
-              width="16"
-              height="16"
-              aria-hidden="true"
-            >
-              <path
-                d="M3 8h10M9 4l4 4-4 4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-              />
-            </svg>
-          </button>
-        </div>
-        <div
-          aria-live="polite"
-          className={
-            state.kind === "idle"
-              ? ""
-              : state.kind === "result"
-                ? "mt-4"
-                : "mt-4 rounded-md border border-hairline bg-ground px-4 py-3.5"
-          }
+    <section
+      id="try"
+      aria-labelledby="try-label"
+      className="border-b border-hairline bg-ground py-12 md:py-16"
+    >
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
+        <form
+          onSubmit={check}
+          aria-labelledby="try-label"
+          className="max-w-[520px]"
+          noValidate
         >
-          <Result state={state} />
-        </div>
-      </form>
-    </Section>
+          <h2 id="try-label" className="text-base font-semibold text-ink">
+            Check a token or address
+          </h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,0.38fr)_minmax(0,1fr)]">
+            <div>
+              <label
+                htmlFor="try-chain"
+                className="mb-1.5 block text-sm font-medium text-ink"
+              >
+                Chain
+              </label>
+              <select
+                id="try-chain"
+                value={chainId}
+                onChange={(event) => setChainId(Number(event.target.value))}
+                className="try-select h-11 w-full cursor-pointer appearance-none rounded-md border border-secondary bg-ground pl-3 pr-8 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              >
+                {chainOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label
+                htmlFor="try-address"
+                className="mb-1.5 block text-sm font-medium text-ink"
+              >
+                Token or contract address
+              </label>
+              <input
+                id="try-address"
+                type="text"
+                inputMode="text"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="0x..."
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+                className="h-11 w-full rounded-md border border-secondary bg-ground px-3 font-mono text-sm text-ink placeholder:font-sans placeholder:text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex justify-end">
+            <button
+              type="submit"
+              disabled={state.kind === "loading"}
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-ink px-[18px] text-sm font-medium text-on-ink shadow-button transition-colors duration-150 hover:bg-ink/85 disabled:cursor-wait disabled:bg-secondary sm:w-auto"
+            >
+              Check now
+              <svg
+                viewBox="0 0 16 16"
+                width="16"
+                height="16"
+                aria-hidden="true"
+              >
+                <path
+                  d="M3 8h10M9 4l4 4-4 4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                />
+              </svg>
+            </button>
+          </div>
+          <div
+            aria-live="polite"
+            className={
+              state.kind === "idle"
+                ? ""
+                : state.kind === "result"
+                  ? "mt-4"
+                  : "mt-4 rounded-md border border-hairline bg-ground px-4 py-3.5"
+            }
+          >
+            <Result state={state} />
+          </div>
+          <p className="mt-3 text-xs leading-[18px] text-secondary">
+            Quick check: no sell simulation, so a token reads Unknown here. The
+            extension runs the full check.
+          </p>
+        </form>
+      </div>
+    </section>
   );
 }

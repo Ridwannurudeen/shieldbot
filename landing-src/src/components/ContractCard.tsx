@@ -1,0 +1,69 @@
+import { useRef, useState } from "react";
+import Icon from "./Icon";
+
+export default function ContractCard({
+  name,
+  role,
+  address,
+  links,
+}: {
+  name: string;
+  role: string;
+  address: string;
+  links: { label: string; href: string }[];
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimer = useRef<number | undefined>(undefined);
+  const short = `${address.slice(0, 6)}…${address.slice(-4)}`;
+
+  async function copyAddress() {
+    window.clearTimeout(resetTimer.current);
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopyState("copied");
+      resetTimer.current = window.setTimeout(() => setCopyState("idle"), 1500);
+    } catch {
+      setCopyState("failed");
+      resetTimer.current = window.setTimeout(() => setCopyState("idle"), 2000);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-hairline bg-ground p-6 shadow-sm">
+      <h3 className="font-mono text-sm font-medium text-ink">{name}</h3>
+      <p className="mt-2 text-sm text-ink">{role}</p>
+      <div className="mt-4 flex items-center gap-2 font-mono text-[13px] text-ink">
+        <span className="lg:hidden">{short}</span>
+        <span className="hidden lg:inline break-all">{address}</span>
+        <button
+          type="button"
+          aria-label="Copy the address"
+          onClick={copyAddress}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-secondary hover:bg-ground-alt hover:text-ink"
+        >
+          {copyState === "failed" ? (
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-ink"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 9v4M12 17h.01" /></svg>
+          ) : <Icon name={copyState === "copied" ? "check" : "copy"} size={16} />}
+        </button>
+        <span className="sr-only" aria-live="polite">
+          {copyState === "copied" ? "Address copied" : copyState === "failed" ? "Could not copy" : ""}
+        </span>
+      </div>
+      <p className="mt-3 text-[13px] text-secondary">Deployed 27 September 2026</p>
+      <div className="mt-2 flex flex-col">
+        {links.map((link) => (
+          <a
+            key={link.href}
+            className="inline-flex min-h-[44px] items-center gap-1.5 self-start text-sm font-medium text-accent underline underline-offset-4 hover:text-ink"
+            href={link.href}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {link.label}
+            <Icon name="external" size={16} />
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}

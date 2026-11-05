@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-// GET /api/stats (api.py public_stats), fetched once when the page loads and read by Proof and the chain
+// GET /api/stats (api.py public_stats), fetched once when the page loads and read by Mechanism and the chain
 // matrix, so the page asks for it once. undefined while loading, null when it did not answer in 10 seconds or
 // answered with an error (a 429 included); nothing is filled in. When the last reader unmounts, the request is
 // aborted and the reply cleared, so a later reader fetches it again.
@@ -16,14 +16,14 @@ export interface Stats {
   registry_records_confirmed_by_chain: Record<string, number> | null;
 }
 
-export type LiveStats =
-  | { stats: undefined; fetchedAt: null }
-  | { stats: null; fetchedAt: null }
-  | { stats: Stats; fetchedAt: Date };
+export interface LiveStats {
+  stats: Stats | null | undefined;
+  fetchedAt: Date | null;
+}
 
 const EMPTY: LiveStats = { stats: undefined, fetchedAt: null };
 
-let state: LiveStats = EMPTY;
+let state = EMPTY;
 const listeners = new Set<() => void>();
 let controller: AbortController | null = null;
 
