@@ -146,15 +146,23 @@ async def test_permit2_to_uniswap_safe():
 
 @pytest.mark.asyncio
 async def test_no_typed_data_score_zero(analyzer):
-    """No typed data should produce score 0."""
+    """A transaction without typed data is a covered 0."""
     ctx = AnalysisContext(
         address="0x" + "a" * 40,
         chain_id=1,
-        extra={},
+        extra={'calldata': '0x', 'typed_data': None},
     )
     result = await analyzer.analyze(ctx)
     assert result.score == 0
-    assert result.data['has_typed_data'] is False
+    assert result.data == {'sign_method': '', 'has_typed_data': False}
+
+
+@pytest.mark.asyncio
+async def test_an_address_scan_is_skipped(analyzer):
+    """A scan of an address alone has no signature to judge."""
+    result = await analyzer.analyze(AnalysisContext(address="0x" + "a" * 40, chain_id=1, extra={}))
+    assert result.score == 0
+    assert result.data == {'skipped': True, 'reason': 'no transaction'}
 
 
 @pytest.mark.asyncio

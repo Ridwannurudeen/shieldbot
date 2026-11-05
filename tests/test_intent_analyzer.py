@@ -73,8 +73,8 @@ async def test_value_with_approval_mismatch(analyzer):
 
 
 @pytest.mark.asyncio
-async def test_missing_calldata_graceful(analyzer):
-    """Missing calldata should not crash — score 0."""
+async def test_missing_calldata_is_skipped(analyzer):
+    """A scan with no transaction measures nothing: skipped, not a covered 0."""
     ctx = AnalysisContext(
         address="0x" + "a" * 40,
         chain_id=56,
@@ -82,7 +82,20 @@ async def test_missing_calldata_graceful(analyzer):
     )
     result = await analyzer.analyze(ctx)
     assert result.score == 0
-    assert result.data.get('intent') == 'native_transfer'
+    assert result.data == {'skipped': True, 'reason': 'no transaction'}
+
+
+@pytest.mark.asyncio
+async def test_empty_calldata_is_a_measured_native_transfer(analyzer):
+    """A firewall native send passes empty calldata: intent measured it, and it stays a covered 0."""
+    ctx = AnalysisContext(
+        address="0x" + "a" * 40,
+        chain_id=56,
+        extra={'calldata': '0x', 'value': '0'},
+    )
+    result = await analyzer.analyze(ctx)
+    assert result.score == 0
+    assert result.data == {'intent': 'native_transfer'}
 
 
 @pytest.mark.asyncio

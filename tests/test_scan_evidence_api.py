@@ -22,6 +22,7 @@ from core.analyzer import AnalyzerResult
 from core.database import SCAN_EVIDENCE_RETENTION_DAYS, Database
 from core.risk_engine import RiskEngine
 from services.contract_service import ContractService
+from utils.calldata_decoder import CalldataDecoder
 from utils.scam_db import ScamDatabase
 
 TARGET = "0x" + "ab" * 20
@@ -566,8 +567,13 @@ def test_a_cache_hit_on_a_row_the_agent_firewall_wrote_keeps_its_notes(evidence_
         ),
         registry=SimpleNamespace(run_all=AsyncMock(return_value=results)),
         risk_engine=RiskEngine(),
-        web3_client=SimpleNamespace(is_token_contract=AsyncMock(return_value=True)),
+        web3_client=SimpleNamespace(
+            is_token_contract=AsyncMock(return_value=True),
+            get_bytecode=AsyncMock(return_value="0x6080"),
+            is_verified_contract=AsyncMock(return_value=(True, None)),
+        ),
         tenderly_simulator=SimpleNamespace(is_enabled=lambda: False),
+        calldata_decoder=CalldataDecoder(),
     )
     agent_app = FastAPI()
     agent_app.include_router(create_agent_firewall_router(agent_services), prefix="/api/agent")

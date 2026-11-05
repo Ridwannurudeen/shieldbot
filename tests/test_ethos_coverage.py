@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-from analyzers.behavioral import BehavioralAnalyzer
+from analyzers.behavioral import BehavioralAnalyzer, behavioral_skip_reason
 from core.analyzer import AnalysisContext, AnalyzerResult
 from core.risk_engine import RiskEngine
 from services.ethos_service import EthosService
@@ -137,12 +137,59 @@ async def test_behavioral_analyzer_flags_unknown_reputation():
 
 @pytest.mark.asyncio
 async def test_behavioral_analyzer_success_is_unchanged():
-    data = {**NEUTRAL, "severe_reputation_flag": True, "scam_flags": ["Profile slashed on Ethos"]}
+    data = {
+        **NEUTRAL, "ethos_raw_score": 200, "severe_reputation_flag": True,
+        "scam_flags": ["Profile slashed on Ethos"],
+    }
     result = await _analyzer(data).analyze(AnalysisContext("0x" + "a" * 40, from_address=WALLET))
     assert (result.score, result.flags) == (
         90,
         ["Severe reputation warning", "Ethos scam flags present"],
     )
+
+
+@pytest.mark.parametrize(
+    "data, reason",
+    [
+        (dict(NEUTRAL), "no reputation profile"),
+        ({**NEUTRAL, "ethos_raw_score": 1400}, None),
+        ({**NEUTRAL, "ethos_raw_score": 0}, None),
+        ({**NEUTRAL, "status": "unknown", "reason": "Ethos HTTP 500"}, None),
+        ({**NEUTRAL, "status": "unknown", "reason": "Ethos profile has no score"}, None),
+    ],
+)
+def test_only_an_address_with_no_ethos_profile_is_skipped(data, reason):
+    assert behavioral_skip_reason(data) == reason
+
+
+@pytest.mark.asyncio
+async def test_an_address_scan_with_no_profile_is_skipped_after_its_lookup():
+    analyzer, service = _counterparty_analyzer(dict(NEUTRAL))
+    result = await analyzer.analyze(AnalysisContext(TARGET, from_address=WALLET))
+    service.fetch_wallet_reputation.assert_awaited_once_with(TARGET)
+    assert (result.score, result.flags) == (0, [])
+    assert result.data == {"skipped": True, "reason": "no reputation profile"}
+    risk = RiskEngine().compute_from_results([result])
+    assert risk["coverage"]["behavioral"] == 1
+    assert risk["not_applicable"] == {"behavioral": "no reputation profile"}
+
+
+@pytest.mark.asyncio
+async def test_an_address_scan_with_a_profile_is_scored_as_before():
+    data = {**NEUTRAL, "reputation_score": 7.1, "ethos_raw_score": 200, "severe_reputation_flag": True}
+    analyzer, service = _counterparty_analyzer(data)
+    result = await analyzer.analyze(AnalysisContext(TARGET, from_address=WALLET))
+    service.fetch_wallet_reputation.assert_awaited_once_with(TARGET)
+    assert (result.score, result.flags) == (50, ["Severe reputation warning"])
+    assert result.data["counterparty"] == TARGET
+
+
+@pytest.mark.asyncio
+async def test_a_transaction_keeps_a_missing_profile_neutral_and_covered():
+    analyzer, _ = _counterparty_analyzer(dict(NEUTRAL))
+    result = await analyzer.analyze(_ctx("0x"))
+    assert "skipped" not in result.data
+    assert result.data == {**NEUTRAL, "counterparty": TARGET}
 
 
 async def _both_entry_points(ethos, is_token):
@@ -417,6 +464,7 @@ def _reputation_line(ethos):
         ),
         (dict(NEUTRAL), "  Score: Unknown  |  Trust: Unknown"),
         ({}, "  Score: Unknown  |  Trust: Unknown"),
+        ({"skipped": True, "reason": "no reputation profile"}, "  Not applicable (no reputation profile)"),
         (
             {**NEUTRAL, "reputation_score": 50.0, "ethos_raw_score": 1400, "trust_level": "medium"},
             "  Score: 50.0  |  Trust: medium",

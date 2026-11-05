@@ -53,6 +53,8 @@ def full_client():
     container.web3_client.is_valid_address = MagicMock(return_value=True)
     container.web3_client.is_contract = AsyncMock(return_value=True)
     container.web3_client.is_token_contract = AsyncMock(return_value=True)
+    container.web3_client.get_bytecode = AsyncMock(return_value="0x6080")
+    container.web3_client.is_verified_contract = AsyncMock(return_value=(False, None))
 
     container.tenderly_simulator = MagicMock()
     container.tenderly_simulator.is_enabled = MagicMock(return_value=False)
@@ -144,3 +146,30 @@ def test_full_agent_lifecycle(full_client):
     # 5. History now has 2 entries
     resp = client.get("/api/agent/history?agent_id=lifecycle_agent", headers=headers)
     assert len(resp.json()) == 2
+
+
+def test_the_analyzers_receive_the_agents_transaction(full_client):
+    """The firewall makes autonomous BLOCK decisions on real transactions, so the analyzers must see
+    the calldata and value, the target's code kind and its verification, as on /api/firewall."""
+    client, container = full_client
+    headers = {"X-API-Key": "sb_testkey"}
+    client.post("/api/agent/register", json={
+        "agent_id": "tx_agent", "owner_address": "0xOwner",
+        "policy": {"auto_allow_below": 25, "auto_block_above": 70},
+    }, headers=headers)
+    calldata = "0xdeadbeef" + "0" * 64
+    resp = client.post("/api/agent/firewall", json={
+        "agent_id": "tx_agent",
+        "transaction": {"from": "0xAgentWallet", "to": "0xTarget", "data": calldata, "value": "0x10", "chain_id": 56},
+    }, headers=headers)
+    assert resp.status_code == 200
+
+    ctx = container.registry.run_all.await_args.args[0]
+    assert ctx.extra["calldata"] == calldata
+    assert ctx.extra["value"] == "0x10"
+    assert ctx.extra["is_contract"] is True
+    # An unknown selector paid with value is read against the verification, so it settled first.
+    assert ctx.extra["verification"].done()
+    assert ctx.extra["verification"].result() is False
+    container.web3_client.get_bytecode.assert_awaited_once_with("0xtarget", chain_id=56)
+    container.web3_client.is_verified_contract.assert_awaited_once_with("0xtarget", chain_id=56, code="0x6080")

@@ -11,10 +11,12 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.policy_engine import AgentPolicyEngine
+from analyzers.intent import reads_verification
 from core.analyzer import AnalysisContext
 from core.extension_formatter import format_extension_alert, is_scan_incomplete
 from core.policy import failed_sources
 from core.verdicts import UNKNOWN, stored_level
+from services.counterparty_service import code_kind
 from utils.chain_info import get_native_symbol
 from utils.web3_client import UnsupportedChainError
 
@@ -135,8 +137,19 @@ def create_agent_firewall_router(container) -> APIRouter:
         chain_id = tx.chain_id
         value_wei = _parse_value_wei(tx.value)
 
+        # The verdict cache holds one verdict per target, as /api/firewall's contract_scores does. An
+        # approval's, a claim's or a paying call's verdict also depends on this transaction (the spender,
+        # the value), so a cached verdict never answers one. An approval's verdict and another paying
+        # call's are not cached as the target's either; a claim's describes the target and is kept.
+        decoded = container.calldata_decoder.decode(tx.data)
+        paying = value_wei > 0 and decoded.get("selector") is not None
+        tx_specific = decoded.get("category") in ("approval", "claim") or paying
+        describes_target = not (
+            decoded.get("category") == "approval" or (paying and decoded.get("category") != "claim")
+        )
+
         # 1. Check Redis verdict cache
-        cached = await container.cache.get_verdict(to_addr, chain_id)
+        cached = None if tx_specific else await container.cache.get_verdict(to_addr, chain_id)
         if cached and cached.get("status") and cached.get("coverage"):
             cached = {**cached, "status": "unknown" if is_scan_incomplete(cached) else cached["status"]}
             # Still run policy check against cached score
@@ -204,7 +217,7 @@ def create_agent_firewall_router(container) -> APIRouter:
             }
 
         # 2. Check SQLite score cache
-        db_cached = await container.db.get_contract_score(
+        db_cached = None if tx_specific else await container.db.get_contract_score(
             to_addr, chain_id, max_age_seconds=300,
         )
 
@@ -225,14 +238,35 @@ def create_agent_firewall_router(container) -> APIRouter:
         else:
             # 3. Run analyzer pipeline + optional Tenderly simulation
             try:
-                is_token = await container.web3_client.is_token_contract(
+                # The target's code, read once, as /api/firewall reads it. A wallet (no code, or an
+                # EIP-7702 delegation) has no source to verify and takes payments with no contract to
+                # judge, and an address with no code is not a token.
+                code = await container.web3_client.get_bytecode(to_addr, chain_id=chain_id)
+                has_code, delegated = code_kind(code)
+                is_contract = None if has_code is None else has_code and not delegated
+                is_token = False if has_code is False else await container.web3_client.is_token_contract(
                     to_addr, chain_id,
                 )
+                # Without the verification, intent marks every unknown selector's risk unknown. Intent
+                # reads it only for an unknown selector or a call paying native value, so it is looked
+                # up, and settled before the analyzers, only then: no lookup outlives the response.
+                verification = None
+                if is_contract is not False and reads_verification(tx.data, tx.value):
+                    verification = asyncio.create_task(
+                        _target_verification(container.web3_client, to_addr, chain_id, code)
+                    )
+                    await verification
                 ctx = AnalysisContext(
                     address=to_addr,
                     chain_id=chain_id,
                     from_address=tx.sender,
                     is_token=is_token,
+                    extra={
+                        "calldata": tx.data,
+                        "value": tx.value,
+                        "verification": verification,
+                        "is_contract": is_contract,
+                    },
                 )
 
                 if container.tenderly_simulator.is_enabled():
@@ -319,19 +353,20 @@ def create_agent_firewall_router(container) -> APIRouter:
             }
             # The level follows the final score, the simulation floors included, wherever it is stored or returned.
             risk_output = {**risk_output, "risk_level": stored_level(risk_score, risk_output.get("risk_level", UNKNOWN))}
-            # Cache in DB
-            await container.db.upsert_contract_score(
-                address=to_addr, chain_id=chain_id,
-                risk_score=risk_score,
-                risk_level=risk_output.get("risk_level", "UNKNOWN"),
-                archetype=risk_output.get("risk_archetype"),
-                category_scores={**(risk_output.get("category_scores") or {}), "_scan_metadata": metadata},
-                flags=flags,
-                confidence=risk_output.get("confidence_level", risk_output.get("confidence")),
-            )
+            # Cache in DB, from verdicts that describe the target
+            if describes_target:
+                await container.db.upsert_contract_score(
+                    address=to_addr, chain_id=chain_id,
+                    risk_score=risk_score,
+                    risk_level=risk_output.get("risk_level", "UNKNOWN"),
+                    archetype=risk_output.get("risk_archetype"),
+                    category_scores={**(risk_output.get("category_scores") or {}), "_scan_metadata": metadata},
+                    flags=flags,
+                    confidence=risk_output.get("confidence_level", risk_output.get("confidence")),
+                )
 
-            # Auto-enrich threat graph (fire-and-forget)
-            if hasattr(container, "threat_graph"):
+            # Auto-enrich threat graph (fire-and-forget), from verdicts that describe the target
+            if hasattr(container, "threat_graph") and describes_target:
                 _fire_and_forget(
                     container.threat_graph.enrich_from_scan(
                         to_addr, chain_id, risk_output,
@@ -339,14 +374,15 @@ def create_agent_firewall_router(container) -> APIRouter:
                     label="threat_graph_enrich",
                 )
 
-        # Cache in Redis for next hit
-        await container.cache.set_verdict(to_addr, chain_id, {
-            "score": risk_score, "flags": flags,
-            "risk_level": risk_output.get("risk_level", "UNKNOWN"),
-            "category_scores": risk_output.get("category_scores", {}),
-            "confidence": risk_output.get("confidence_level", risk_output.get("confidence")),
-            **metadata,
-        })
+        # Cache in Redis for next hit, from verdicts that describe the target
+        if describes_target:
+            await container.cache.set_verdict(to_addr, chain_id, {
+                "score": risk_score, "flags": flags,
+                "risk_level": risk_output.get("risk_level", "UNKNOWN"),
+                "category_scores": risk_output.get("category_scores", {}),
+                "confidence": risk_output.get("confidence_level", risk_output.get("confidence")),
+                **metadata,
+            })
 
         # 4. Policy check
         daily_spend = await container.db.get_agent_daily_spend(req.agent_id)
@@ -517,6 +553,17 @@ def create_agent_firewall_router(container) -> APIRouter:
         )
 
     return router
+
+
+async def _target_verification(web3_client, address: str, chain_id: int, code: Optional[str]) -> Optional[bool]:
+    """Whether the target's source is verified; None when it could not be read."""
+    try:
+        result = await web3_client.is_verified_contract(address, chain_id=chain_id, code=code)
+    except UnsupportedChainError:
+        raise
+    except Exception:
+        return None
+    return result[0] if isinstance(result, tuple) else result
 
 
 def _parse_value_wei(value: str) -> int:
