@@ -19,11 +19,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": null,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 0
     },
     "confidence_level": 70,
@@ -237,11 +237,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 20
     },
     "confidence_level": 80,
@@ -259,7 +259,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 6.4,
+    "rug_probability": 10.0,
     "status": "ok"
    },
    "goplus": {
@@ -451,11 +451,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 20
     },
     "confidence_level": 80,
@@ -473,7 +473,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 6.4,
+    "rug_probability": 10.0,
     "status": "ok"
    },
    "goplus": {
@@ -667,11 +667,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 20
     },
     "confidence_level": 80,
@@ -689,7 +689,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 6.4,
+    "rug_probability": 10.0,
     "status": "ok"
    },
    "goplus": {
@@ -883,11 +883,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 20
     },
     "confidence_level": 80,
@@ -905,7 +905,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 6.4,
+    "rug_probability": 10.0,
     "status": "ok"
    },
    "goplus": {
@@ -1100,11 +1100,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": null,
-     "intent": 0,
+     "intent": 0.0,
      "market": null,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 0
     },
     "confidence_level": 30,
@@ -1210,11 +1210,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": null,
-     "intent": 0,
+     "intent": 0.0,
      "market": null,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 20
     },
     "confidence_level": 30,
@@ -1237,7 +1237,7 @@
     ],
     "risk_archetype": "unknown",
     "risk_level": "MEDIUM",
-    "rug_probability": 9.4,
+    "rug_probability": 20.0,
     "status": "unknown"
    },
    "goplus": {
@@ -1341,11 +1341,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 15
     },
     "confidence_level": 80,
@@ -1363,7 +1363,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 4.8,
+    "rug_probability": 7.5,
     "status": "ok"
    },
    "goplus": {
@@ -1541,11 +1541,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 15
     },
     "confidence_level": 80,
@@ -1563,7 +1563,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 4.8,
+    "rug_probability": 7.5,
     "status": "ok"
    },
    "goplus": {
@@ -1743,11 +1743,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 20
     },
     "confidence_level": 80,
@@ -1765,7 +1765,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 6.4,
+    "rug_probability": 10.0,
     "status": "ok"
    },
    "goplus": {
@@ -1972,11 +1972,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": null,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 20
     },
     "confidence_level": 80,
@@ -1997,7 +1997,7 @@
     ],
     "risk_archetype": "unknown",
     "risk_level": "MEDIUM",
-    "rug_probability": 8.0,
+    "rug_probability": 14.5,
     "status": "unknown"
    },
    "goplus": {
@@ -2172,11 +2172,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 0
     },
     "confidence_level": 80,
@@ -2385,11 +2385,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": null,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 15
     },
     "confidence_level": 80,
@@ -2410,7 +2410,7 @@
     ],
     "risk_archetype": "unknown",
     "risk_level": "MEDIUM",
-    "rug_probability": 6.0,
+    "rug_probability": 10.9,
     "status": "unknown"
    },
    "goplus": {
@@ -2601,11 +2601,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 0
     },
     "confidence_level": 80,
@@ -2817,11 +2817,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 15
     },
     "confidence_level": 80,
@@ -2839,7 +2839,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 4.8,
+    "rug_probability": 7.5,
     "status": "ok"
    },
    "goplus": {
@@ -3033,11 +3033,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 20
     },
     "confidence_level": 80,
@@ -3055,7 +3055,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 6.4,
+    "rug_probability": 10.0,
     "status": "ok"
    },
    "goplus": {
@@ -3230,11 +3230,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 0
     },
     "confidence_level": 80,
@@ -3436,11 +3436,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 15
     },
     "confidence_level": 80,
@@ -3458,7 +3458,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 4.8,
+    "rug_probability": 7.5,
     "status": "ok"
    },
    "goplus": {
@@ -3619,18 +3619,18 @@
    "chain_id": 8453,
    "changed_by_holder_signal": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 35
     },
     "critical_flags": [
      "Proxy/upgradeable contract",
      "Top 10 holders own 91.54% of supply (burn, locked, pool and locker addresses excluded)"
     ],
-    "rug_probability": 11.2
+    "rug_probability": 17.5
    },
    "description": "cbETH \u2014 Coinbase Wrapped Staked ETH on Base",
    "ethos": {
@@ -3647,11 +3647,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 15
     },
     "confidence_level": 80,
@@ -3669,7 +3669,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 4.8,
+    "rug_probability": 7.5,
     "status": "ok"
    },
    "goplus": {
@@ -3847,11 +3847,11 @@
    },
    "expected": {
     "category_scores": {
-     "behavioral": 0,
+     "behavioral": 0.0,
      "honeypot": 0,
-     "intent": 0,
+     "intent": 0.0,
      "market": 0,
-     "signature": 0,
+     "signature": 0.0,
      "structural": 15
     },
     "confidence_level": 80,
@@ -3869,7 +3869,7 @@
     ],
     "risk_archetype": "legitimate",
     "risk_level": "LOW",
-    "rug_probability": 4.8,
+    "rug_probability": 7.5,
     "status": "ok"
    },
    "goplus": {
