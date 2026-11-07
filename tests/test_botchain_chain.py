@@ -123,7 +123,8 @@ async def test_bot_token_returns_still_running_unknown_at_the_request_deadline(m
     bot_module._get_token_info_with_timeout = AsyncMock(return_value={})
     captured = []
 
-    def compute(results):
+    def compute(results, is_token=None):
+        assert is_token is True
         captured.extend(results)
         return {
             "status": "unknown", "risk_level": "unknown",
@@ -190,7 +191,8 @@ async def test_bot_token_on_677_whose_simulator_never_finishes_is_still_running_
     bot_module._get_token_info_with_timeout = AsyncMock(return_value={})
     captured = []
 
-    def compute(results):
+    def compute(results, is_token=None):
+        assert is_token is True
         captured.extend(results)
         return {
             "status": "unknown", "risk_level": "unknown",

@@ -903,7 +903,7 @@ async def test_slow_token_metadata_keeps_the_deterministic_report_and_verdict(
     await getattr(bot_module, handler)(update, ADDRESS, chain_id=8453)
 
     rendered = assert_literal(update.message.reply_text.await_args.args[0])
-    compute.assert_called_once_with([])
+    compute.assert_called_once_with([], is_token=None)
     assert f"Target: {ADDRESS}" in rendered
     assert "Token:" not in rendered
     assert "Risk Level: LOW" in rendered
@@ -932,7 +932,7 @@ async def test_slow_forensic_report_keeps_the_deterministic_verdict(bot_module, 
     await getattr(bot_module, handler)(update, ADDRESS, chain_id=8453)
 
     rendered = assert_literal(update.message.reply_text.await_args.args[0])
-    compute.assert_called_once_with([])
+    compute.assert_called_once_with([], is_token=None)
     ai.generate_forensic_report.assert_awaited_once()
     assert "Risk Level: LOW" in rendered
     assert "AI Analysis:" not in rendered

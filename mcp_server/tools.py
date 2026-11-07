@@ -4,8 +4,10 @@ Each tool has a name, description, JSON Schema input definition, and an
 async handler that delegates to the ServiceContainer.
 """
 
+import asyncio
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 from core.analyzer import AnalysisContext
@@ -265,7 +267,13 @@ async def handle_scan_contract(container, params: Dict, key_info: Dict) -> Dict:
     address = _validate_address(_require(params, "address"))
     chain_id = _require_chain_id(container, params)
 
-    is_token = await container.web3_client.is_token_contract(address, chain_id=chain_id)
+    try:
+        is_token = await asyncio.wait_for(
+            container.web3_client.is_token_contract(address, chain_id=chain_id),
+            timeout=4.0,
+        )
+    except asyncio.TimeoutError:
+        is_token = None
     ctx = AnalysisContext(address=address, chain_id=chain_id, is_token=is_token)
     results = await container.registry.run_all(ctx)
     score_data = container.risk_engine.compute_from_results(results, is_token=is_token)

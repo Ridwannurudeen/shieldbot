@@ -8,6 +8,9 @@ delegated to the underlying services in core/ and services/.
 import asyncio
 import logging
 import re
+import time
+
+import core.registry as analyzer_registry
 from typing import Dict, List, Optional
 
 from core.analyzer import AnalysisContext
@@ -45,10 +48,18 @@ class AgentTools:
         alongside the analyzers and within the same deadline.
         """
         address = _validate_address(address)
+        scan_deadline = time.monotonic() + (analyzer_registry.RUN_ALL_DEADLINE_SECONDS if deadline is None else deadline)
         if is_token is _IS_TOKEN_UNSET:
-            is_token = await self._container.web3_client.is_token_contract(address, chain_id=chain_id)
+            try:
+                is_token = await asyncio.wait_for(
+                    self._container.web3_client.is_token_contract(address, chain_id=chain_id),
+                    timeout=min(4.0, max(0.0, scan_deadline - time.monotonic())),
+                )
+            except asyncio.TimeoutError:
+                is_token = None
         ctx = AnalysisContext(address=address, chain_id=chain_id, is_token=is_token)
-        analysis = self._container.registry.run_all(ctx, deadline=deadline)
+        remaining = max(0.0, scan_deadline - time.monotonic())
+        analysis = self._container.registry.run_all(ctx, deadline=remaining)
         impostor_check = None
         if chain_id == LAUNCH_CHAIN_ID:
             check = self._container.robinhood_assets.check_onchain(

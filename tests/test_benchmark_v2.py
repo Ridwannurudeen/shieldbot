@@ -394,7 +394,7 @@ def test_the_live_scorer_records_unknown_and_failed_scans_without_inventing_scor
     container = SimpleNamespace(
         web3_client=SimpleNamespace(is_token_contract=AsyncMock(return_value=True)),
         registry=SimpleNamespace(run_all=run_all),
-        risk_engine=SimpleNamespace(compute_from_results=lambda address: outputs[address]),
+        risk_engine=SimpleNamespace(compute_from_results=lambda address, is_token=True: outputs[address]),
     )
     entries = [
         SimpleNamespace(

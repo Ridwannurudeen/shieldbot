@@ -1312,11 +1312,18 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56, is_tok
         try:
             from core.analyzer import AnalysisContext
 
+            deadline = time.monotonic() + RUN_ALL_DEADLINE_SECONDS
             if is_token is _IS_TOKEN_UNSET:
-                is_token = await web3_client.is_token_contract(address, chain_id=chain_id)
+                try:
+                    is_token = await asyncio.wait_for(
+                        web3_client.is_token_contract(address, chain_id=chain_id),
+                        timeout=min(4.0, max(0.0, deadline - time.monotonic())),
+                    )
+                except asyncio.TimeoutError:
+                    is_token = None
             ctx = AnalysisContext(
                 address=address, chain_id=chain_id, is_token=is_token,
-                extra={'deadline': time.monotonic() + RUN_ALL_DEADLINE_SECONDS},
+                extra={'deadline': deadline},
             )
             reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
@@ -1448,11 +1455,18 @@ async def check_token(update: Update, address: str, chain_id: int = 56, is_token
         try:
             from core.analyzer import AnalysisContext
 
+            deadline = time.monotonic() + RUN_ALL_DEADLINE_SECONDS
             if is_token is _IS_TOKEN_UNSET:
-                is_token = await web3_client.is_token_contract(address, chain_id=chain_id)
+                try:
+                    is_token = await asyncio.wait_for(
+                        web3_client.is_token_contract(address, chain_id=chain_id),
+                        timeout=min(4.0, max(0.0, deadline - time.monotonic())),
+                    )
+                except asyncio.TimeoutError:
+                    is_token = None
             ctx = AnalysisContext(
                 address=address, chain_id=chain_id, is_token=is_token,
-                extra={'deadline': time.monotonic() + RUN_ALL_DEADLINE_SECONDS},
+                extra={'deadline': deadline},
             )
             reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
