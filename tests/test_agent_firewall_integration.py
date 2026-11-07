@@ -60,6 +60,7 @@ def full_client():
     container.tenderly_simulator.is_enabled = MagicMock(return_value=False)
 
     container.calldata_decoder = MagicMock()
+    container.calldata_decoder.is_whitelisted_target = MagicMock(return_value=None)
     container.calldata_decoder.decode = MagicMock(return_value={
         "selector": "0x38ed1739", "function_name": "swapExactTokensForTokens",
         "category": "swap", "risk": "low", "params": {},

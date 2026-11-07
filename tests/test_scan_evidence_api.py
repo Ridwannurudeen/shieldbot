@@ -571,6 +571,7 @@ def test_a_cache_hit_on_a_row_the_agent_firewall_wrote_keeps_its_notes(evidence_
             is_token_contract=AsyncMock(return_value=True),
             get_bytecode=AsyncMock(return_value="0x6080"),
             is_verified_contract=AsyncMock(return_value=(True, None)),
+            _get_adapter=lambda chain_id: SimpleNamespace(get_whitelisted_routers=lambda: {}),
         ),
         tenderly_simulator=SimpleNamespace(is_enabled=lambda: False),
         calldata_decoder=CalldataDecoder(),
