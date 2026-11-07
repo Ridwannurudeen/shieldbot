@@ -180,3 +180,29 @@ async def test_get_cached_score(tools, mock_container):
     result = await tools.get_cached_score("0x1111111111111111111111111111111111111111")
     mock_container.db.get_contract_score.assert_awaited_once_with("0x1111111111111111111111111111111111111111", 56)
     assert result["risk_level"] == "LOW"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('is_token, archetype', [(False, 'legitimate'), (True, 'rug_pull')])
+async def test_scan_contract_passes_classification_to_token_only_archetypes(
+    tools, mock_container, is_token, archetype,
+):
+    from core.risk_engine import RiskEngine
+
+    mock_container.web3_client.is_token_contract.return_value = is_token
+    mock_container.registry.run_all.return_value = [
+        AnalyzerResult('structural', 0.4, 40, data={
+            'has_mint': True, 'has_proxy': True, 'ownership_renounced': False,
+            'is_contract': True, 'is_verified': True, 'contract_age_days': 100, 'status': 'ok',
+        }),
+        AnalyzerResult('market', 0.25, 0, data={'status': 'ok'}),
+        AnalyzerResult('behavioral', 0.2, 0, data={'status': 'ok'}),
+        AnalyzerResult('honeypot', 0.15, 0, data={
+            'is_honeypot': False, 'can_sell': True, 'buy_tax': 0, 'sell_tax': 0,
+        }),
+    ]
+    mock_container.risk_engine = RiskEngine()
+
+    result = await tools.scan_contract('0x1111111111111111111111111111111111111111')
+
+    assert result['risk_archetype'] == archetype

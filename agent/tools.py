@@ -57,7 +57,7 @@ class AgentTools:
             results, impostor_check = await asyncio.gather(analysis, check)
         else:
             results = await analysis
-        risk = self._container.risk_engine.compute_from_results(results)
+        risk = self._container.risk_engine.compute_from_results(results, is_token=is_token)
         # The honeypot analyzer's data rides along so a published verdict can cite the simulation behind it.
         honeypot = next((result.data for result in results if result.name == "honeypot"), None)
         scan = {**risk, "honeypot_data": honeypot}

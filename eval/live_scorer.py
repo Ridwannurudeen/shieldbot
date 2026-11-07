@@ -47,7 +47,7 @@ async def score_entries(entries, container):
             is_token = await container.web3_client.is_token_contract(addr, chain_id=chain_id)
             ctx = AnalysisContext(address=addr, chain_id=chain_id, is_token=is_token)
             results = await container.registry.run_all(ctx)
-            risk_output = container.risk_engine.compute_from_results(results)
+            risk_output = container.risk_engine.compute_from_results(results, is_token=is_token)
             score = risk_output.get('rug_probability')
             record["score"] = score
             record["risk_level"] = risk_output.get('risk_level')

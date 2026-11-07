@@ -1326,7 +1326,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56, is_tok
                 reads.append(container.robinhood_assets.check_onchain(address, RUN_ALL_DEADLINE_SECONDS))
             analyzer_results, token_info, *impostor_check = await asyncio.gather(*reads)
 
-            risk_output = risk_engine.compute_from_results(analyzer_results)
+            risk_output = risk_engine.compute_from_results(analyzer_results, is_token=is_token)
             if impostor_check:
                 risk_output = with_impostor_check(risk_output, impostor_check[0])
 
@@ -1462,7 +1462,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56, is_token
                 reads.append(container.robinhood_assets.check_onchain(address, RUN_ALL_DEADLINE_SECONDS))
             analyzer_results, token_info, *impostor_check = await asyncio.gather(*reads)
 
-            risk_output = risk_engine.compute_from_results(analyzer_results)
+            risk_output = risk_engine.compute_from_results(analyzer_results, is_token=is_token)
             if impostor_check:
                 risk_output = with_impostor_check(risk_output, impostor_check[0])
 
