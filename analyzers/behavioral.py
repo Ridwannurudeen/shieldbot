@@ -1,7 +1,9 @@
 """Behavioral analyzer — wraps EthosService."""
 
 import logging
-from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult
+from typing import Optional
+
+from core.analyzer import Analyzer, AnalysisContext, AnalyzerResult, has_transaction
 from services.ethos_service import neutral_reputation
 from utils.calldata_decoder import CalldataDecoder
 
@@ -18,6 +20,15 @@ _SPENDER_PARAM = {
     'd505accf': 'param_1',
     '8fcbaf0c': 'param_1',
 }
+
+
+def behavioral_skip_reason(data: dict) -> Optional[str]:
+    """Why an address scan's behavioral result is skipped, or None: an address Ethos has no profile
+    for has no reputation to measure (the neutral result a 404 returns). A failed lookup, which carries
+    status unknown, is not skipped: its coverage stays unknown."""
+    if data.get('status') != 'unknown' and data.get('ethos_raw_score') is None:
+        return 'no reputation profile'
+    return None
 
 
 async def counterparty_reputation(ethos_service, decoded: dict, recipient: str) -> dict:
@@ -59,6 +70,14 @@ class BehavioralAnalyzer(Analyzer):
     async def analyze(self, ctx: AnalysisContext) -> AnalyzerResult:
         decoded = _decoder.decode(ctx.extra.get('calldata', '0x'))
         data = await counterparty_reputation(self._service, decoded, ctx.address)
+        # A scan of an address alone scores that address's profile; without one nothing was measured,
+        # so nothing dilutes the mean. With a transaction the result is kept as before.
+        reason = None if has_transaction(ctx) else behavioral_skip_reason(data)
+        if reason:
+            return AnalyzerResult(
+                name=self.name, weight=self.weight, score=0,
+                flags=[], data={'skipped': True, 'reason': reason},
+            )
         score, flags = self._compute(data)
         return AnalyzerResult(
             name=self.name, weight=self.weight,

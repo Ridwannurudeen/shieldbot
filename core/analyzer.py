@@ -26,6 +26,12 @@ class AnalyzerResult:
     error: Optional[str] = None
 
 
+def has_transaction(ctx: AnalysisContext) -> bool:
+    """Whether the context carries a transaction or signature request. A firewall request passes its
+    calldata even when it is empty (a native send); a scan of an address alone passes none of these."""
+    return any(key in ctx.extra for key in ('calldata', 'typed_data', 'authorization_list'))
+
+
 class Analyzer(ABC):
     """Base class for pluggable analyzers."""
 

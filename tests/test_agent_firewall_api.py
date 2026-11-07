@@ -63,6 +63,8 @@ def mock_container():
     c.web3_client.is_valid_address = MagicMock(return_value=True)
     c.web3_client.is_contract = AsyncMock(return_value=True)
     c.web3_client.is_token_contract = AsyncMock(return_value=True)
+    c.web3_client.get_bytecode = AsyncMock(return_value="0x6080")
+    c.web3_client.is_verified_contract = AsyncMock(return_value=(True, None))
 
     c.tenderly_simulator = MagicMock()
     c.tenderly_simulator.is_enabled = MagicMock(return_value=False)
@@ -344,6 +346,75 @@ def test_agent_firewall_cached_verdict(client, mock_container):
     assert body["flags"] == ["suspicious"]
     # Verify analyzer pipeline was NOT called
     mock_container.registry.run_all.assert_not_called()
+
+
+APPROVE = "0x095ea7b3" + "0" * 24 + "ab" * 20 + "f" * 64
+
+
+def _approval(mock_container):
+    mock_container.calldata_decoder.decode.return_value = {
+        "selector": "095ea7b3", "function_name": "approve", "category": "approval",
+        "params": {}, "is_approval": True, "is_unlimited_approval": True,
+    }
+
+
+def test_an_approval_is_never_answered_by_the_targets_cached_verdict(client, mock_container):
+    """The cache holds one verdict per target; an approval's depends on its spender, as on /api/firewall."""
+    _approval(mock_container)
+    mock_container.cache.get_verdict = AsyncMock(return_value={
+        "score": 5, "flags": [], "status": "ok", "coverage": {"honeypot": 1}, "risk_level": "LOW",
+    })
+    resp = client.post("/api/agent/firewall", json={
+        "agent_id": "agent:1",
+        "transaction": {"from": "0xAgent", "to": "0xTarget", "data": APPROVE, "value": "0", "chain_id": 56},
+    }, headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    assert resp.json()["cached"] is False
+    mock_container.cache.get_verdict.assert_not_awaited()
+    mock_container.db.get_contract_score.assert_not_awaited()
+    mock_container.registry.run_all.assert_awaited_once()
+    # Nor is the approval's verdict stored as the target's.
+    mock_container.cache.set_verdict.assert_not_awaited()
+    mock_container.db.upsert_contract_score.assert_not_awaited()
+
+
+def test_a_plain_call_still_reads_and_writes_the_targets_cache(client, mock_container):
+    resp = client.post("/api/agent/firewall", json={
+        "agent_id": "agent:1",
+        "transaction": {"from": "0xAgent", "to": "0xTarget", "data": "0x38ed1739", "value": "0", "chain_id": 56},
+    }, headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    mock_container.cache.get_verdict.assert_awaited_once()
+    mock_container.db.get_contract_score.assert_awaited_once()
+    mock_container.cache.set_verdict.assert_awaited_once()
+    mock_container.db.upsert_contract_score.assert_awaited_once()
+
+
+def test_a_call_intent_does_not_judge_by_verification_looks_none_up(client, mock_container):
+    """Intent reads the verification only for an unknown selector or a call paying native value, so
+    no explorer lookup is started for any other call, and none outlives the response."""
+    resp = client.post("/api/agent/firewall", json={
+        "agent_id": "agent:1",
+        "transaction": {"from": "0xAgent", "to": "0xTarget", "data": APPROVE, "value": "0", "chain_id": 56},
+    }, headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    ctx = mock_container.registry.run_all.await_args.args[0]
+    assert ctx.extra["verification"] is None
+    assert ctx.extra["is_contract"] is True
+    mock_container.web3_client.is_verified_contract.assert_not_awaited()
+
+
+def test_an_address_with_no_code_is_a_wallet_and_no_token(client, mock_container):
+    mock_container.web3_client.get_bytecode = AsyncMock(return_value="0x")
+    resp = client.post("/api/agent/firewall", json={
+        "agent_id": "agent:1",
+        "transaction": {"from": "0xAgent", "to": "0xTarget", "data": "0x", "value": "0", "chain_id": 56},
+    }, headers={"X-API-Key": "sb_testkey"})
+    assert resp.status_code == 200
+    ctx = mock_container.registry.run_all.await_args.args[0]
+    assert (ctx.is_token, ctx.extra["is_contract"], ctx.extra["verification"]) == (False, False, None)
+    mock_container.web3_client.is_token_contract.assert_not_awaited()
+    mock_container.web3_client.is_verified_contract.assert_not_awaited()
 
 
 def test_agent_history(client, mock_container):
