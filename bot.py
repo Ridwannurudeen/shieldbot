@@ -56,6 +56,7 @@ logging.basicConfig(
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+_IS_TOKEN_UNSET = object()
 
 # Initialize container
 settings = Settings()
@@ -1251,10 +1252,10 @@ async def _scan_pasted_address(update: Update, address: str, chain_id: int):
 
     if is_token is not False:
         await status_msg.edit_text(f"🔍 Running token safety checks on {chain_name}...")
-        await check_token(update, address, chain_id=chain_id)
+        await check_token(update, address, chain_id=chain_id, is_token=is_token)
     else:
         await status_msg.edit_text(f"🔍 Running security scan on {chain_name}...")
-        await scan_contract(update, address, chain_id=chain_id)
+        await scan_contract(update, address, chain_id=chain_id, is_token=is_token)
 
 
 async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1284,7 +1285,7 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _handle_advisor_chat(update, message_text, chain_id=_get_user_chain_id(context))
 
 
-async def scan_contract(update: Update, address: str, chain_id: int = 56):
+async def scan_contract(update: Update, address: str, chain_id: int = 56, is_token=_IS_TOKEN_UNSET):
     """Scan a contract for security risks with composite intelligence pipeline"""
     web3_client.validate_chain_id(chain_id)
     try:
@@ -1311,9 +1312,18 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
         try:
             from core.analyzer import AnalysisContext
 
+            deadline = time.monotonic() + RUN_ALL_DEADLINE_SECONDS
+            if is_token is _IS_TOKEN_UNSET:
+                try:
+                    is_token = await asyncio.wait_for(
+                        web3_client.is_token_contract(address, chain_id=chain_id),
+                        timeout=min(4.0, max(0.0, deadline - time.monotonic())),
+                    )
+                except asyncio.TimeoutError:
+                    is_token = None
             ctx = AnalysisContext(
-                address=address, chain_id=chain_id,
-                extra={'deadline': time.monotonic() + RUN_ALL_DEADLINE_SECONDS},
+                address=address, chain_id=chain_id, is_token=is_token,
+                extra={'deadline': deadline},
             )
             reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
@@ -1323,7 +1333,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
                 reads.append(container.robinhood_assets.check_onchain(address, RUN_ALL_DEADLINE_SECONDS))
             analyzer_results, token_info, *impostor_check = await asyncio.gather(*reads)
 
-            risk_output = risk_engine.compute_from_results(analyzer_results)
+            risk_output = risk_engine.compute_from_results(analyzer_results, is_token=is_token)
             if impostor_check:
                 risk_output = with_impostor_check(risk_output, impostor_check[0])
 
@@ -1418,7 +1428,7 @@ async def scan_contract(update: Update, address: str, chain_id: int = 56):
         )
 
 
-async def check_token(update: Update, address: str, chain_id: int = 56):
+async def check_token(update: Update, address: str, chain_id: int = 56, is_token=_IS_TOKEN_UNSET):
     """Check token safety with composite intelligence pipeline"""
     web3_client.validate_chain_id(chain_id)
     try:
@@ -1445,9 +1455,18 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
         try:
             from core.analyzer import AnalysisContext
 
+            deadline = time.monotonic() + RUN_ALL_DEADLINE_SECONDS
+            if is_token is _IS_TOKEN_UNSET:
+                try:
+                    is_token = await asyncio.wait_for(
+                        web3_client.is_token_contract(address, chain_id=chain_id),
+                        timeout=min(4.0, max(0.0, deadline - time.monotonic())),
+                    )
+                except asyncio.TimeoutError:
+                    is_token = None
             ctx = AnalysisContext(
-                address=address, chain_id=chain_id,
-                extra={'deadline': time.monotonic() + RUN_ALL_DEADLINE_SECONDS},
+                address=address, chain_id=chain_id, is_token=is_token,
+                extra={'deadline': deadline},
             )
             reads = [container.registry.run_all(ctx), _get_token_info_with_timeout(address, chain_id)]
             if chain_id == 4663:
@@ -1457,7 +1476,7 @@ async def check_token(update: Update, address: str, chain_id: int = 56):
                 reads.append(container.robinhood_assets.check_onchain(address, RUN_ALL_DEADLINE_SECONDS))
             analyzer_results, token_info, *impostor_check = await asyncio.gather(*reads)
 
-            risk_output = risk_engine.compute_from_results(analyzer_results)
+            risk_output = risk_engine.compute_from_results(analyzer_results, is_token=is_token)
             if impostor_check:
                 risk_output = with_impostor_check(risk_output, impostor_check[0])
 

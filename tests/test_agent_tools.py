@@ -66,6 +66,7 @@ def mock_container():
     return SimpleNamespace(
         registry=registry,
         risk_engine=risk_engine,
+        web3_client=SimpleNamespace(is_token_contract=AsyncMock(return_value=False)),
         db=db,
         honeypot_service=honeypot_service,
         dex_service=dex_service,
@@ -90,6 +91,10 @@ async def test_scan_contract(tools, mock_container):
     assert isinstance(ctx_arg, AnalysisContext)
     assert ctx_arg.address == "0x1111111111111111111111111111111111111111"
     assert ctx_arg.chain_id == 56
+    assert ctx_arg.is_token is False
+    mock_container.web3_client.is_token_contract.assert_awaited_once_with(
+        "0x1111111111111111111111111111111111111111", chain_id=56
+    )
 
     # Risk engine should be called with the registry results
     mock_container.risk_engine.compute_from_results.assert_called_once()
@@ -102,6 +107,7 @@ async def test_scan_contract_custom_chain(tools, mock_container):
     await tools.scan_contract("0x1111111111111111111111111111111111111111", chain_id=1)
     ctx_arg = mock_container.registry.run_all.call_args[0][0]
     assert ctx_arg.chain_id == 1
+    assert ctx_arg.is_token is False
 
 
 # --- check_deployer ---
@@ -174,3 +180,64 @@ async def test_get_cached_score(tools, mock_container):
     result = await tools.get_cached_score("0x1111111111111111111111111111111111111111")
     mock_container.db.get_contract_score.assert_awaited_once_with("0x1111111111111111111111111111111111111111", 56)
     assert result["risk_level"] == "LOW"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('is_token, archetype', [(False, 'legitimate'), (True, 'rug_pull')])
+async def test_scan_contract_passes_classification_to_token_only_archetypes(
+    tools, mock_container, is_token, archetype,
+):
+    from core.risk_engine import RiskEngine
+
+    mock_container.web3_client.is_token_contract.return_value = is_token
+    mock_container.registry.run_all.return_value = [
+        AnalyzerResult('structural', 0.4, 40, data={
+            'has_mint': True, 'has_proxy': True, 'ownership_renounced': False,
+            'is_contract': True, 'is_verified': True, 'contract_age_days': 100, 'status': 'ok',
+        }),
+        AnalyzerResult('market', 0.25, 0, data={'status': 'ok'}),
+        AnalyzerResult('behavioral', 0.2, 0, data={'status': 'ok'}),
+        AnalyzerResult('honeypot', 0.15, 0, data={
+            'is_honeypot': False, 'can_sell': True, 'buy_tax': 0, 'sell_tax': 0,
+        }),
+    ]
+    mock_container.risk_engine = RiskEngine()
+
+    result = await tools.scan_contract('0x1111111111111111111111111111111111111111')
+
+    assert result['risk_archetype'] == archetype
+
+
+@pytest.mark.asyncio
+async def test_scan_contract_finishes_when_token_identification_hangs(tools, mock_container):
+    import asyncio
+    import time
+
+    async def hang(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    mock_container.web3_client.is_token_contract.side_effect = hang
+    started = time.monotonic()
+
+    await tools.scan_contract('0x1111111111111111111111111111111111111111')
+
+    assert time.monotonic() - started < 4.5
+    ctx = mock_container.registry.run_all.call_args.args[0]
+    assert ctx.is_token is None
+    mock_container.risk_engine.compute_from_results.assert_called_once_with(
+        mock_container.registry.run_all.return_value, is_token=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_scan_contract_propagates_unsupported_chain_from_token_identification(tools, mock_container):
+    from utils.web3_client import UnsupportedChainError
+
+    error = UnsupportedChainError('unsupported chain')
+    mock_container.web3_client.is_token_contract.side_effect = error
+
+    with pytest.raises(UnsupportedChainError) as caught:
+        await tools.scan_contract('0x1111111111111111111111111111111111111111')
+
+    assert caught.value is error
+    mock_container.registry.run_all.assert_not_awaited()

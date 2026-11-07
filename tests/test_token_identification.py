@@ -13,6 +13,7 @@ from analyzers.market import MarketAnalyzer
 from core.analyzer import AnalysisContext, AnalyzerResult
 from core.extension_formatter import format_extension_alert
 from core.risk_engine import RiskEngine
+from core.telegram_formatter import format_full_report
 from utils.web3_client import Web3Client
 
 
@@ -107,6 +108,31 @@ async def test_confirmed_non_token_skips_with_full_coverage(
         assert risk['coverage'][result.name] == 1
     assert risk['status'] == 'ok'
     assert risk['risk_level'] == 'LOW'
+    honeypot_service.fetch_honeypot_data.assert_not_awaited()
+    dex_service.fetch_token_market_data.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_router_scan_skips_real_market_and_honeypot_analyzers_and_report(covered_results):
+    honeypot_service = MagicMock(fetch_honeypot_data=AsyncMock(return_value={
+        'is_honeypot': True, 'can_sell': False, 'sell_tax': 100,
+    }))
+    dex_service = MagicMock(fetch_token_market_data=AsyncMock(return_value={
+        'liquidity_usd': 0, 'status': 'ok',
+    }))
+    ctx = AnalysisContext(ADDRESS, chain_id=1, is_token=False)
+    honeypot = await HoneypotAnalyzer(honeypot_service).analyze(ctx)
+    market = await MarketAnalyzer(dex_service).analyze(ctx)
+    risk = RiskEngine().compute_from_results(covered_results + [honeypot, market], is_token=False)
+
+    assert honeypot.data == market.data == {'skipped': True, 'reason': 'non-token contract'}
+    assert risk['rug_probability'] < 80
+    assert risk['risk_level'] != 'HIGH'
+    report = format_full_report(risk, {}, market.data, {}, honeypot_data=honeypot.data, chain_id=1)
+    assert 'Honeypot: Not applicable (non-token contract)' in report
+    assert 'Market: Not applicable (non-token contract)' in report
+    assert '*\U0001F9EA Trade Simulation:*\n  Not applicable (non-token contract)' in report
+    assert 'Honeypot detected' not in report
     honeypot_service.fetch_honeypot_data.assert_not_awaited()
     dex_service.fetch_token_market_data.assert_not_awaited()
 

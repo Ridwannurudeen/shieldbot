@@ -338,6 +338,7 @@ async def test_a_background_scan_outlasts_a_full_simulator_request_that_an_inter
         return clean("honeypot", 1.0, is_honeypot=False, can_sell=True, buy_tax=0, sell_tax=0)
 
     container = MagicMock(risk_engine=RiskEngine())
+    container.web3_client.is_token_contract = AsyncMock(return_value=True)
     container.registry = registry_of(analyzer("honeypot", 1.0, slow_simulation))
     container.robinhood_assets.check_onchain = AsyncMock(
         return_value={"status": "none", "symbol": None, "official_address": None, "reason": None}

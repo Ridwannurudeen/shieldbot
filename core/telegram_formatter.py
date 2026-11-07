@@ -272,15 +272,18 @@ def format_full_report(
     # Market intelligence
     lines.append('*\U0001F4CA Market Intelligence:*')
     market_reason = escape_untrusted(dex_data.get('reason') or 'Provider data unavailable')
-    for key, label in (('liquidity_usd', 'Liquidity'), ('volume_24h', '24h Volume'), ('fdv', 'FDV')):
-        value = dex_data.get(key)
-        rendered = f'${value:,.0f}' if value is not None else f'Unknown ({market_reason})'
-        lines.append(f'  {label}: {rendered}')
-    change = dex_data.get('price_change_24h')
-    rendered_change = f'{change:+.1f}%' if change is not None else f'Unknown ({market_reason})'
-    lines.append(f'  24h Price Change: {rendered_change}')
-    pair_age = dex_data.get('pair_age_hours')
-    lines.append(f'  Pair Age: {pair_age:.1f}h' if pair_age is not None else f'  Pair Age: Unknown ({market_reason})')
+    if dex_data.get('skipped'):
+        lines.append('  Not applicable' + (f" ({market_reason})" if dex_data.get('reason') else ''))
+    else:
+        for key, label in (('liquidity_usd', 'Liquidity'), ('volume_24h', '24h Volume'), ('fdv', 'FDV')):
+            value = dex_data.get(key)
+            rendered = f'${value:,.0f}' if value is not None else f'Unknown ({market_reason})'
+            lines.append(f'  {label}: {rendered}')
+        change = dex_data.get('price_change_24h')
+        rendered_change = f'{change:+.1f}%' if change is not None else f'Unknown ({market_reason})'
+        lines.append(f'  24h Price Change: {rendered_change}')
+        pair_age = dex_data.get('pair_age_hours')
+        lines.append(f'  Pair Age: {pair_age:.1f}h' if pair_age is not None else f'  Pair Age: Unknown ({market_reason})')
 
     dex_flags = []
     if dex_data.get('low_liquidity_flag'):
@@ -323,32 +326,36 @@ def format_full_report(
             honeypot_data.get('reason') or honeypot_data.get('honeypot_reason') or 'Provider data unavailable'
         )
         is_honeypot = honeypot_data.get('is_honeypot')
-        # A sell simulation that failed, could not run, or left sellability undecided leaves a provider's
-        # "not a honeypot" (GoPlus's, after it) unresolved.
-        unresolved = (
-            honeypot_data.get('simulation_failed')
-            or honeypot_data.get('rpc_failed')
-            or honeypot_data.get('undecided')
-        )
-        if is_honeypot is None or (unresolved and is_honeypot is False):
-            hp = f'Unknown ({reason})'
+        if honeypot_data.get('skipped'):
+            lines.append('  Not applicable' + (f" ({reason})" if honeypot_data.get('reason') else ''))
+            lines.append('')
         else:
-            hp = '\u274C Honeypot' if is_honeypot else '\u2705 Not Honeypot'
-        lines.append(f'  {hp}')
-        for key, label in (('buy_tax', 'Buy Tax'), ('sell_tax', 'Sell Tax')):
-            value = honeypot_data.get(key)
-            rendered = f'{value}%' if value is not None else f'Unknown ({reason})'
-            lines.append(f'  {label}: {rendered}')
-        for key, label in (('can_buy', 'Buyability'), ('can_sell', 'Sellability')):
-            value = honeypot_data.get(key)
-            # An unsettled simulation never says the token sells; a failed sell it proved still shows.
-            if key == 'can_sell' and unresolved and value is True:
-                value = None
-            rendered = f'Unknown ({reason})' if value is None else ('Yes' if value else 'No')
-            lines.append(f'  {label}: {rendered}')
-        if reason and reason not in ('Unknown', 'None', ''):
-            lines.append(f'  Reason: {reason}')
-        lines.append('')
+            # A sell simulation that failed, could not run, or left sellability undecided leaves a provider's
+            # "not a honeypot" (GoPlus's, after it) unresolved.
+            unresolved = (
+                honeypot_data.get('simulation_failed')
+                or honeypot_data.get('rpc_failed')
+                or honeypot_data.get('undecided')
+            )
+            if is_honeypot is None or (unresolved and is_honeypot is False):
+                hp = f'Unknown ({reason})'
+            else:
+                hp = '\u274C Honeypot' if is_honeypot else '\u2705 Not Honeypot'
+            lines.append(f'  {hp}')
+            for key, label in (('buy_tax', 'Buy Tax'), ('sell_tax', 'Sell Tax')):
+                value = honeypot_data.get(key)
+                rendered = f'{value}%' if value is not None else f'Unknown ({reason})'
+                lines.append(f'  {label}: {rendered}')
+            for key, label in (('can_buy', 'Buyability'), ('can_sell', 'Sellability')):
+                value = honeypot_data.get(key)
+                # An unsettled simulation never says the token sells; a failed sell it proved still shows.
+                if key == 'can_sell' and unresolved and value is True:
+                    value = None
+                rendered = f'Unknown ({reason})' if value is None else ('Yes' if value else 'No')
+                lines.append(f'  {label}: {rendered}')
+            if reason and reason not in ('Unknown', 'None', ''):
+                lines.append(f'  Reason: {reason}')
+            lines.append('')
     detail_end = len(lines)
     ai_start = len(lines)
 

@@ -43,6 +43,7 @@ async def hunter_scan(fixture):
     service = HoneypotService(client_with(adapter_with(rpc_for(fixture, head=PINNED_SOURCE_BLOCK))))
     container = MagicMock()
     container.risk_engine = RiskEngine()
+    container.web3_client.is_token_contract = AsyncMock(return_value=True)
 
     async def run_all(ctx, deadline=None):
         # The merged registry passes the background deadline through; this fake ignores it.
@@ -162,6 +163,7 @@ async def test_scan_contract_adds_only_the_honeypot_data_and_impostor_check_keys
         ]
     )
     container.risk_engine.compute_from_results = MagicMock(return_value=dict(risk))
+    container.web3_client.is_token_contract = AsyncMock(return_value=True)
     container.robinhood_assets.check_onchain = AsyncMock(return_value=NO_MATCH)
     result = await AgentTools(container).scan_contract("0x" + "ab" * 20, chain_id=4663)
     assert result == {**risk, "honeypot_data": honeypot, "impostor_check": NO_MATCH}
@@ -172,6 +174,7 @@ async def test_scan_contract_without_a_honeypot_analyzer_sets_the_key_to_none():
     container = MagicMock()
     container.registry.run_all = AsyncMock(return_value=[])
     container.risk_engine.compute_from_results = MagicMock(return_value={"risk_level": "LOW"})
+    container.web3_client.is_token_contract = AsyncMock(return_value=True)
     result = await AgentTools(container).scan_contract("0x" + "ab" * 20)
     assert result == {"risk_level": "LOW", "honeypot_data": None}
 

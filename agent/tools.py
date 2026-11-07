@@ -8,6 +8,9 @@ delegated to the underlying services in core/ and services/.
 import asyncio
 import logging
 import re
+import time
+
+import core.registry as analyzer_registry
 from typing import Dict, List, Optional
 
 from core.analyzer import AnalysisContext
@@ -16,6 +19,7 @@ from services.launch_discovery import CHAIN_ID as LAUNCH_CHAIN_ID
 from services.robinhood_assets import with_impostor_check
 
 logger = logging.getLogger(__name__)
+_IS_TOKEN_UNSET = object()
 
 _ADDRESS_RE = re.compile(r'^0x[a-fA-F0-9]{40}$')
 
@@ -34,7 +38,7 @@ class AgentTools:
         self._container = container
 
     async def scan_contract(
-        self, address: str, chain_id: int = 56, deadline: Optional[float] = None
+        self, address: str, chain_id: int = 56, deadline: Optional[float] = None, is_token=_IS_TOKEN_UNSET
     ) -> Dict:
         """Run all analyzers on a contract and return composite risk score.
 
@@ -44,8 +48,18 @@ class AgentTools:
         alongside the analyzers and within the same deadline.
         """
         address = _validate_address(address)
-        ctx = AnalysisContext(address=address, chain_id=chain_id)
-        analysis = self._container.registry.run_all(ctx, deadline=deadline)
+        scan_deadline = time.monotonic() + (analyzer_registry.RUN_ALL_DEADLINE_SECONDS if deadline is None else deadline)
+        if is_token is _IS_TOKEN_UNSET:
+            try:
+                is_token = await asyncio.wait_for(
+                    self._container.web3_client.is_token_contract(address, chain_id=chain_id),
+                    timeout=min(4.0, max(0.0, scan_deadline - time.monotonic())),
+                )
+            except asyncio.TimeoutError:
+                is_token = None
+        ctx = AnalysisContext(address=address, chain_id=chain_id, is_token=is_token)
+        remaining = max(0.0, scan_deadline - time.monotonic())
+        analysis = self._container.registry.run_all(ctx, deadline=remaining)
         impostor_check = None
         if chain_id == LAUNCH_CHAIN_ID:
             check = self._container.robinhood_assets.check_onchain(
@@ -54,7 +68,7 @@ class AgentTools:
             results, impostor_check = await asyncio.gather(analysis, check)
         else:
             results = await analysis
-        risk = self._container.risk_engine.compute_from_results(results)
+        risk = self._container.risk_engine.compute_from_results(results, is_token=is_token)
         # The honeypot analyzer's data rides along so a published verdict can cite the simulation behind it.
         honeypot = next((result.data for result in results if result.name == "honeypot"), None)
         scan = {**risk, "honeypot_data": honeypot}

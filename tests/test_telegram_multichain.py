@@ -154,6 +154,7 @@ def bot_chain_functions():
         'with_impostor_check': with_impostor_check,
         'UNKNOWN': UNKNOWN,
         'RUN_ALL_DEADLINE_SECONDS': RUN_ALL_DEADLINE_SECONDS,
+        '_IS_TOKEN_UNSET': object(),
         'TOKEN_INFO_TIMEOUT_SECONDS': RUN_ALL_DEADLINE_SECONDS,
         'FORENSIC_REPORT_TIMEOUT_SECONDS': 30.0,
         '_RESCUE_CHAIN_HINT': 'Chain hint',
@@ -481,6 +482,21 @@ def test_telegram_either_flag_leaves_a_claimed_sell_unknown_and_keeps_a_proven_t
     report = format_full_report(result, {}, {}, {}, {flag: True, 'is_honeypot': True, 'can_sell': False}, chain_id=56)
     assert '\n  ❌ Honeypot\n' in report
     assert 'Sellability: No' in report and 'Sellability: Unknown' not in report
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('handler', ['scan_contract', 'check_token'])
+async def test_bot_scans_pass_non_token_classification_to_registry(bot_chain_functions, handler):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    ns = bot_chain_functions
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    await ns[handler](update, '0x' + 'a' * 40, chain_id=56)
+
+    ctx = ns['container'].registry.run_all.call_args.args[0]
+    assert ctx.is_token is False
+    ns['web3_client'].is_token_contract.assert_awaited_once_with('0x' + 'a' * 40, chain_id=56)
 
 
 @pytest.mark.asyncio

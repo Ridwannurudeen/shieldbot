@@ -174,7 +174,7 @@ async def test_a_prefixed_paste_scans_on_the_prefix_chain_without_asking(
         if is_token is not False
         else (bot.scan_contract, bot.check_token)
     )
-    ran.assert_awaited_once_with(update, ADDRESS, chain_id=chain_id)
+    ran.assert_awaited_once_with(update, ADDRESS, chain_id=chain_id, is_token=is_token)
     skipped.assert_not_awaited()
     assert context.user_data["chain_id"] == chain_id
     assert all(
@@ -266,7 +266,10 @@ async def test_a_tap_runs_its_scan_on_the_chosen_chain_and_remembers_the_chain(
         assert_literal(edit.args[0])
         == f"\N{LEFT-POINTING MAGNIFYING GLASS} Scanning {ADDRESS} on {name} ({chain_id})..."
     )
-    getattr(bot, scan).assert_awaited_once_with(query, ADDRESS, chain_id=chain_id)
+    if kind == "a":
+        getattr(bot, scan).assert_awaited_once_with(query, ADDRESS, chain_id=chain_id, is_token=is_token)
+    else:
+        getattr(bot, scan).assert_awaited_once_with(query, ADDRESS, chain_id=chain_id)
     (bot.scan_contract if scan == "check_token" else bot.check_token).assert_not_awaited()
     if kind == "a":
         bot.web3_client.is_token_contract.assert_awaited_once_with(ADDRESS, chain_id=chain_id)
@@ -322,7 +325,10 @@ async def test_a_tap_runs_its_scan_even_when_telegram_refuses_to_edit_the_picker
     await bot.button_callback(SimpleNamespace(callback_query=query), context)
 
     query.edit_message_text.assert_awaited_once()
-    getattr(bot, scan).assert_awaited_once_with(query, ADDRESS, chain_id=4663)
+    if kind == "a":
+        getattr(bot, scan).assert_awaited_once_with(query, ADDRESS, chain_id=4663, is_token=True)
+    else:
+        getattr(bot, scan).assert_awaited_once_with(query, ADDRESS, chain_id=4663)
     assert context.user_data["chain_id"] == 4663
     # The log names the error's class, never Telegram's text.
     (record,) = [record for record in caplog.records if record.name == "bot"]
@@ -418,7 +424,7 @@ async def test_every_picker_button_fits_telegrams_64_byte_callback_data_limit(bo
     query = _tap(f"pick_{kind}_10000000_{ADDRESS}")
     await bot.button_callback(SimpleNamespace(callback_query=query), context)
     scan, expected = {
-        "a": (bot.check_token, call(query, ADDRESS, chain_id=10_000_000)),
+        "a": (bot.check_token, call(query, ADDRESS, chain_id=10_000_000, is_token=True)),
         "s": (bot.scan_contract, call(query, ADDRESS, chain_id=10_000_000)),
         "t": (bot.check_token, call(query, ADDRESS, chain_id=10_000_000)),
         "r": (bot._scan_approvals, call(query, ADDRESS, 10_000_000)),
@@ -897,7 +903,7 @@ async def test_slow_token_metadata_keeps_the_deterministic_report_and_verdict(
     await getattr(bot_module, handler)(update, ADDRESS, chain_id=8453)
 
     rendered = assert_literal(update.message.reply_text.await_args.args[0])
-    compute.assert_called_once_with([])
+    compute.assert_called_once_with([], is_token=None)
     assert f"Target: {ADDRESS}" in rendered
     assert "Token:" not in rendered
     assert "Risk Level: LOW" in rendered
@@ -926,7 +932,7 @@ async def test_slow_forensic_report_keeps_the_deterministic_verdict(bot_module, 
     await getattr(bot_module, handler)(update, ADDRESS, chain_id=8453)
 
     rendered = assert_literal(update.message.reply_text.await_args.args[0])
-    compute.assert_called_once_with([])
+    compute.assert_called_once_with([], is_token=None)
     ai.generate_forensic_report.assert_awaited_once()
     assert "Risk Level: LOW" in rendered
     assert "AI Analysis:" not in rendered

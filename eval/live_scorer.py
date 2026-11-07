@@ -84,6 +84,7 @@ async def score_entries(entries, container, input_recorder=None):
             "risk_level": None,
             "reason": None,
         }
+        is_token = None
 
         try:
             raw_weights = (
@@ -91,12 +92,14 @@ async def score_entries(entries, container, input_recorder=None):
                 if input_recorder is not None
                 else {}
             )
-            ctx = AnalysisContext(address=addr, chain_id=chain_id)
+            is_token = await container.web3_client.is_token_contract(addr, chain_id=chain_id)
+            ctx = AnalysisContext(address=addr, chain_id=chain_id, is_token=is_token)
             results = await container.registry.run_all(ctx)
             if input_recorder is not None:
                 input_record = {
                     "chain_id": chain_id,
                     "address": addr.lower(),
+                    "is_token": is_token,
                     "status": "ok",
                     "reason": None,
                     "results": [
@@ -111,7 +114,7 @@ async def score_entries(entries, container, input_recorder=None):
                         for result in results
                     ],
                 }
-            risk_output = container.risk_engine.compute_from_results(results)
+            risk_output = container.risk_engine.compute_from_results(results, is_token=is_token)
             score = risk_output.get("rug_probability")
             record["score"] = score
             record["risk_level"] = risk_output.get("risk_level")
@@ -139,6 +142,7 @@ async def score_entries(entries, container, input_recorder=None):
             input_record = {
                 "chain_id": chain_id,
                 "address": addr.lower(),
+                "is_token": is_token,
                 "status": "error",
                 "reason": type(e).__name__,
                 "results": [],

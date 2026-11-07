@@ -1,5 +1,7 @@
 """Tests for the evaluation pipeline."""
 
+import pytest
+
 from eval.dataset import load_dataset, BenchmarkEntry
 from eval.benchmark import benchmark_results
 
@@ -72,3 +74,27 @@ def test_missing_scores_are_unknown():
     assert (honeypot["unknown"], honeypot["decided"], honeypot["flagged"]) == (1, 0, 0)
     assert honeypot["recall"] is None
     assert result["details"][0]["status"] == "missing"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token_status", [True, False, None])
+async def test_live_scorer_passes_one_token_identification_result_to_the_pipeline(token_status):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+    from eval.live_scorer import score_entries
+
+    address = "0x" + "a" * 40
+    entry = BenchmarkEntry(address=address, chain_id=8453, label="safe")
+    container = SimpleNamespace(
+        web3_client=SimpleNamespace(is_token_contract=AsyncMock(return_value=token_status)),
+        registry=MagicMock(run_all=AsyncMock(return_value=[])),
+        risk_engine=MagicMock(compute_from_results=MagicMock(return_value={
+            "rug_probability": 0, "risk_level": "LOW", "status": "ok",
+        })),
+    )
+
+    await score_entries([entry], container)
+
+    container.web3_client.is_token_contract.assert_awaited_once_with(address, chain_id=8453)
+    ctx = container.registry.run_all.call_args.args[0]
+    assert ctx.is_token is token_status

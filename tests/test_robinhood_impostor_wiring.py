@@ -36,6 +36,7 @@ IMPOSTOR_HEADER = f"\N{POLICE CARS REVOLVING LIGHT} IMPOSTOR: {IMPOSTOR_FLAG}"
 def _tools(check, run_all=None):
     container = MagicMock()
     container.registry.run_all = run_all or AsyncMock(return_value=[])
+    container.web3_client.is_token_contract = AsyncMock(return_value=True)
     container.risk_engine.compute_from_results = MagicMock(
         return_value={"rug_probability": 20, "critical_flags": ["New pair (<24h)"]}
     )

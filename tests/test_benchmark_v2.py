@@ -5,6 +5,7 @@ The recorded scores here are written by the tests for the tests; they are not me
 
 import asyncio
 import json
+from unittest.mock import AsyncMock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -506,6 +507,7 @@ def test_the_cli_writes_the_results_file(tmp_path, capsys):
 def test_the_live_scorer_records_raw_analyzer_inputs(tmp_path, monkeypatch):
     real_sleep = asyncio.sleep
     monkeypatch.setattr(live_scorer.asyncio, "sleep", lambda seconds: real_sleep(0))
+    token_types = []
     normalized = [
         AnalyzerResult(
             "structural",
@@ -517,10 +519,14 @@ def test_the_live_scorer_records_raw_analyzer_inputs(tmp_path, monkeypatch):
         AnalyzerResult("market", 0.6, 20, error="market analysis unavailable"),
     ]
 
+    contexts = []
+
     async def run_all(ctx):
+        contexts.append(ctx)
         return normalized
 
     container = SimpleNamespace(
+        web3_client=SimpleNamespace(is_token_contract=AsyncMock(return_value=False)),
         registry=SimpleNamespace(
             get_all=lambda: [
                 SimpleNamespace(name="structural", weight=4),
@@ -529,11 +535,14 @@ def test_the_live_scorer_records_raw_analyzer_inputs(tmp_path, monkeypatch):
             run_all=run_all,
         ),
         risk_engine=SimpleNamespace(
-            compute_from_results=lambda results: {
-                "status": "ok",
-                "rug_probability": 50,
-                "risk_level": "MEDIUM",
-            }
+            compute_from_results=lambda results, is_token: (
+                token_types.append(is_token)
+                or {
+                    "status": "ok",
+                    "rug_probability": 50,
+                    "risk_level": "MEDIUM",
+                }
+            )
         ),
     )
     inputs_path = tmp_path / "inputs.json"
@@ -569,10 +578,13 @@ def test_the_live_scorer_records_raw_analyzer_inputs(tmp_path, monkeypatch):
     inputs = replay.load_inputs(inputs_path)["records"]
 
     assert records[0]["score"] == 50
+    assert contexts[0].is_token is False
+    assert token_types == [False]
     assert inputs == [
         {
             "chain_id": 1,
             "address": DRAINER,
+            "is_token": False,
             "status": "ok",
             "reason": None,
             "results": [
@@ -595,6 +607,50 @@ def test_the_live_scorer_records_raw_analyzer_inputs(tmp_path, monkeypatch):
             ],
         }
     ]
+
+
+def test_replay_preserves_token_status_and_uses_none_for_older_inputs(tmp_path, monkeypatch):
+    dataset = write_dataset(tmp_path, [entry(), entry(address=SAFE)])
+    records = [
+        {
+            "chain_id": 1,
+            "address": DRAINER,
+            "is_token": False,
+            "status": "ok",
+            "reason": None,
+            "results": complete_analyzer_inputs(),
+        },
+        {
+            "chain_id": 1,
+            "address": SAFE,
+            "status": "ok",
+            "reason": None,
+            "results": complete_analyzer_inputs(),
+        },
+    ]
+    weights = {
+        result["name"]: result["weight"] for result in complete_analyzer_inputs()
+    }
+    inputs = write_inputs(
+        tmp_path,
+        dataset,
+        records,
+        analyzers=[{"name": name, "weight": weight} for name, weight in weights.items()],
+    )
+    seen = []
+
+    class CapturingEngine(RiskEngine):
+        def compute_from_results(self, results, is_token=True):
+            seen.append(is_token)
+            return super().compute_from_results(results, is_token=is_token)
+
+    monkeypatch.setattr(
+        replay, "current_engine_and_weights", lambda: (CapturingEngine(), weights)
+    )
+
+    replay.replay(inputs, tmp_path / "scores.json", REVISION, False)
+
+    assert seen == [False, None]
 
 
 def test_replay_scores_with_current_weights_not_recorded_weights(tmp_path, monkeypatch):
@@ -756,8 +812,9 @@ def test_an_errored_live_entry_replays_to_the_same_error_record(tmp_path, monkey
         raise TimeoutError()
 
     container = SimpleNamespace(
+        web3_client=SimpleNamespace(is_token_contract=AsyncMock(return_value=True)),
         registry=SimpleNamespace(get_all=lambda: [], run_all=run_all),
-        risk_engine=SimpleNamespace(compute_from_results=lambda results: None),
+        risk_engine=SimpleNamespace(compute_from_results=lambda results, is_token: None),
     )
     inputs_path = tmp_path / "inputs.json"
     with live_scorer.InputRecorder(
@@ -795,6 +852,7 @@ def test_an_errored_live_entry_replays_to_the_same_error_record(tmp_path, monkey
         {
             "chain_id": 1,
             "address": DRAINER,
+            "is_token": True,
             "status": "error",
             "reason": "TimeoutError",
             "results": [],
@@ -1098,9 +1156,9 @@ def replay_behavioral(tmp_path, monkeypatch, record):
     scored = []
 
     class Capturing(RiskEngine):
-        def compute_from_results(self, results):
+        def compute_from_results(self, results, is_token=True):
             scored.extend(results)
-            return super().compute_from_results(results)
+            return super().compute_from_results(results, is_token=is_token)
 
     monkeypatch.setattr(
         replay, "current_engine_and_weights", lambda: (Capturing(), weights)
@@ -1240,12 +1298,13 @@ def test_input_recording_keeps_earlier_records_when_a_later_one_cannot_serialize
         return [AnalyzerResult("structural", 1, 0, data=data)]
 
     container = SimpleNamespace(
+        web3_client=SimpleNamespace(is_token_contract=AsyncMock(return_value=True)),
         registry=SimpleNamespace(
             get_all=lambda: [SimpleNamespace(name="structural", weight=1)],
             run_all=run_all,
         ),
         risk_engine=SimpleNamespace(
-            compute_from_results=lambda results: {
+            compute_from_results=lambda results, is_token: {
                 "status": "ok",
                 "rug_probability": 0,
                 "risk_level": "LOW",
@@ -1294,6 +1353,7 @@ def test_input_recording_keeps_earlier_records_when_a_later_one_cannot_serialize
         {
             "chain_id": 1,
             "address": DRAINER,
+            "is_token": True,
             "status": "ok",
             "reason": None,
             "results": [
@@ -1355,9 +1415,10 @@ def test_the_live_scorer_records_unknown_and_failed_scans_without_inventing_scor
         return ctx.address
 
     container = SimpleNamespace(
+        web3_client=SimpleNamespace(is_token_contract=AsyncMock(return_value=True)),
         registry=SimpleNamespace(run_all=run_all),
         risk_engine=SimpleNamespace(
-            compute_from_results=lambda address: outputs[address]
+            compute_from_results=lambda address, is_token=True: outputs[address]
         ),
     )
     entries = [

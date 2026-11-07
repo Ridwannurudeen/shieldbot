@@ -28,6 +28,7 @@ def mock_container():
     from utils.web3_client import Web3Client
     c.web3_client = Web3Client.__new__(Web3Client)
     c.web3_client._adapters = {56: MagicMock(), 4663: MagicMock()}
+    c.web3_client.is_token_contract = AsyncMock(return_value=False)
 
     # --- Auth ---
     c.auth_manager = MagicMock()
@@ -254,6 +255,9 @@ class TestToolExecution:
         assert "score" in content
         assert content["score"] == 15
         mock_container.registry.run_all.assert_awaited_once()
+        ctx = mock_container.registry.run_all.call_args.args[0]
+        assert ctx.is_token is False
+        mock_container.web3_client.is_token_contract.assert_awaited_once_with("0x" + "a" * 40, chain_id=56)
         mock_container.risk_engine.compute_from_results.assert_called_once()
 
     def test_get_threat_feed(self, client, mock_container):
