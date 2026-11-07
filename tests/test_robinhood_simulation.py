@@ -1490,6 +1490,29 @@ async def test_an_empty_v3_pool_is_noted_and_not_simulated():
 
 
 @pytest.mark.asyncio
+async def test_only_zero_liquidity_v3_pool_keeps_sellability_unknown_through_the_verdict():
+    fixture = load("v3_weth_native")
+    rpc = rpc_for(fixture, v3_liquidity={fixture["pair"]: 0}, simulations=[])
+    adapter = adapter_with(rpc)
+    service = HoneypotService(client_with(adapter))
+    unavailable = AsyncMock(return_value={"status": "unknown", "reason": "GoPlus has no data", "data": {}})
+
+    with patch.object(ScamDatabase, "fetch_token_security", new=unavailable):
+        data = await service.fetch_honeypot_data(fixture["token"], chain_id=4663)
+        analyzed = await HoneypotAnalyzer(service).analyze(
+            AnalysisContext(fixture["token"], chain_id=4663)
+        )
+
+    risk = RiskEngine().compute_from_results([analyzed])
+    extension = format_extension_alert(risk)
+    assert data["can_sell"] is None
+    assert analyzed.data["can_sell"] is None
+    assert "has no liquidity in range" in data["reason"]
+    assert risk["status"] == "unknown"
+    assert extension["risk_classification"] != "SAFE"
+
+
+@pytest.mark.asyncio
 async def test_a_v3_pool_ranks_beside_v4_and_v2_pools():
     native = load("v4_native_liquidity_launcher")
     rpc = rpc_for(

@@ -1618,6 +1618,8 @@ def test_agent_firewall_pipeline_failure_logs_exception_class_only(caplog):
     container.db.get_contract_score = AsyncMock(return_value=None)
     container.cache.get_verdict = AsyncMock(return_value=None)
     container.web3_client.is_token_contract = AsyncMock(return_value=True)
+    container.web3_client.get_bytecode = AsyncMock(return_value='0x6080')
+    container.web3_client.is_verified_contract = AsyncMock(return_value=(True, None))
     container.tenderly_simulator.is_enabled = MagicMock(return_value=False)
     container.registry.run_all = AsyncMock(side_effect=RuntimeError('https://rpc.example/v2/SYNTHETIC_KEY_123'))
     app = FastAPI()

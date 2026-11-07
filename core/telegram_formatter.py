@@ -297,8 +297,12 @@ def format_full_report(
 
     # Wallet reputation
     lines.append('*\U0001F464 Wallet Reputation (Ethos):*')
-    # A failed lookup, or an address Ethos has no score for, has no reputation to show, not a neutral one.
-    if ethos_data.get('status') == 'unknown' or ethos_data.get('ethos_raw_score') is None:
+    # A scan with no counterparty to score looked nothing up. A failed lookup, or an address Ethos has
+    # no score for, has no reputation to show, not a neutral one.
+    if ethos_data.get('skipped'):
+        reason = ethos_data.get('reason')
+        lines.append('  Not applicable' + (f' ({escape_untrusted(reason)})' if reason else ''))
+    elif ethos_data.get('status') == 'unknown' or ethos_data.get('ethos_raw_score') is None:
         reason = ethos_data.get('reason')
         lines.append('  Score: Unknown  |  Trust: Unknown' + (f' ({escape_untrusted(reason)})' if reason else ''))
     else:
