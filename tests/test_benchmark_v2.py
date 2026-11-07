@@ -609,6 +609,50 @@ def test_the_live_scorer_records_raw_analyzer_inputs(tmp_path, monkeypatch):
     ]
 
 
+def test_replay_preserves_token_status_and_uses_none_for_older_inputs(tmp_path, monkeypatch):
+    dataset = write_dataset(tmp_path, [entry(), entry(address=SAFE)])
+    records = [
+        {
+            "chain_id": 1,
+            "address": DRAINER,
+            "is_token": False,
+            "status": "ok",
+            "reason": None,
+            "results": complete_analyzer_inputs(),
+        },
+        {
+            "chain_id": 1,
+            "address": SAFE,
+            "status": "ok",
+            "reason": None,
+            "results": complete_analyzer_inputs(),
+        },
+    ]
+    weights = {
+        result["name"]: result["weight"] for result in complete_analyzer_inputs()
+    }
+    inputs = write_inputs(
+        tmp_path,
+        dataset,
+        records,
+        analyzers=[{"name": name, "weight": weight} for name, weight in weights.items()],
+    )
+    seen = []
+
+    class CapturingEngine(RiskEngine):
+        def compute_from_results(self, results, is_token=True):
+            seen.append(is_token)
+            return super().compute_from_results(results, is_token=is_token)
+
+    monkeypatch.setattr(
+        replay, "current_engine_and_weights", lambda: (CapturingEngine(), weights)
+    )
+
+    replay.replay(inputs, tmp_path / "scores.json", REVISION, False)
+
+    assert seen == [False, None]
+
+
 def test_replay_scores_with_current_weights_not_recorded_weights(tmp_path, monkeypatch):
     dataset = write_dataset(tmp_path, [entry()])
     inputs = write_inputs(
@@ -1112,9 +1156,9 @@ def replay_behavioral(tmp_path, monkeypatch, record):
     scored = []
 
     class Capturing(RiskEngine):
-        def compute_from_results(self, results):
+        def compute_from_results(self, results, is_token=True):
             scored.extend(results)
-            return super().compute_from_results(results)
+            return super().compute_from_results(results, is_token=is_token)
 
     monkeypatch.setattr(
         replay, "current_engine_and_weights", lambda: (Capturing(), weights)

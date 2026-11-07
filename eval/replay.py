@@ -69,6 +69,7 @@ def load_inputs(path):
             and isinstance(record.get("address"), str)
             and _ADDRESS.fullmatch(record["address"])
             and record.get("status") in ("ok", "error")
+            and ("is_token" not in record or type(record["is_token"]) in (bool, type(None)))
             and (record.get("reason") is None or isinstance(record.get("reason"), str))
             and isinstance(record.get("results"), list)
         ):
@@ -283,7 +284,9 @@ def replay_records(records, engine, current_weights, analyzers, unavailable):
                 unavailable,
             )
         )
-        risk_output = engine.compute_from_results(results)
+        risk_output = engine.compute_from_results(
+            results, is_token=input_record.get("is_token")
+        )
         score = risk_output.get("rug_probability")
         record = {
             "chain_id": input_record["chain_id"],
